@@ -42,6 +42,7 @@ from voxprint_common.ui.theme import (
     NOTE_BORDER,
     PRIMARY,
     RED,
+    ROOT_PLAIN,
     TEXT_MUTED,
     build_style,
 )
@@ -262,7 +263,7 @@ def _load_qt() -> object:
 
 
 def _builder(shot: bool) -> object:
-    from PySide6.QtCore import QRectF, Qt, QTimer, QUrl
+    from PySide6.QtCore import QRectF, QSize, Qt, QTimer, QUrl
     from PySide6.QtGui import (
         QColor,
         QDesktopServices,
@@ -441,6 +442,79 @@ def _builder(shot: bool) -> object:
                     painter.drawRect(fill)
             painter.end()
 
+    class WrapLabel(QLabel):
+        """Word-wrapped text whose height is the lines that fit its width."""
+
+        def __init__(self, text: str = "") -> None:
+            super().__init__(text)
+            self.setWordWrap(True)
+            self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        def hasHeightForWidth(self) -> bool:
+            return True
+
+        def heightForWidth(self, width: int) -> int:
+            return self._height(width)
+
+        def sizeHint(self) -> QSize:
+            return QSize(self._width(), self._height(self._width()))
+
+        def minimumSizeHint(self) -> QSize:
+            return QSize(0, self._line())
+
+        def resizeEvent(self, event: object) -> None:
+            super().resizeEvent(event)
+            self._fit_lines()
+
+        def _fit_lines(self) -> None:
+            """Lock the height to the wrapped lines once the width is real."""
+            if self.width() <= 40:
+                return
+            needed = self._height(self.width())
+            if self.maximumHeight() != needed:
+                self.setFixedHeight(needed)
+
+        def _width(self) -> int:
+            if self.width() > 40:
+                return self.width()
+            limit = self.maximumWidth()
+            if 0 < limit < 10_000:
+                return limit
+            return max(self.fontMetrics().horizontalAdvance(self.text()) + 2, self._line())
+
+        def _height(self, width: int) -> int:
+            if width <= 0:
+                return self._line()
+            return max(self._line(), QLabel.heightForWidth(self, width))
+
+        def _line(self) -> int:
+            return self.fontMetrics().height() + 2
+
+    class EdgeFade(QWidget):
+        """A short wash so a clipped row reads as more to scroll."""
+
+        def __init__(self, parent: QWidget) -> None:
+            super().__init__(parent)
+            self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+
+        def paintEvent(self, event: object) -> None:
+            del event
+            painter = QPainter(self)
+            gradient = QLinearGradient(0, 0, 0, self.height())
+            colour = QColor(ROOT_PLAIN)
+            clear = QColor(colour)
+            clear.setAlpha(0)
+            soft = QColor(colour)
+            soft.setAlpha(90)
+            solid = QColor(colour)
+            solid.setAlpha(255)
+            gradient.setColorAt(0.0, clear)
+            gradient.setColorAt(0.4, soft)
+            gradient.setColorAt(1.0, solid)
+            painter.fillRect(self.rect(), gradient)
+            painter.end()
+
     def chip_style(state: str) -> str:
         if state == "ready":
             colour, background = "#0b1f12", GREEN
@@ -512,6 +586,10 @@ def _builder(shot: bool) -> object:
             self._rows.setContentsMargins(0, 0, 8, 0)
             self._rows.setSpacing(8)
             self._scroll.setWidget(self._body)
+            self._fade = EdgeFade(self._scroll.viewport())
+            bar = self._scroll.verticalScrollBar()
+            bar.valueChanged.connect(self._place_fade)
+            bar.rangeChanged.connect(self._place_fade)
             root.addWidget(self._scroll, 0)
             self._overall_caption = QLabel("")
             self._overall_caption.setObjectName("sectiontitle")
@@ -700,11 +778,26 @@ def _builder(shot: bool) -> object:
             limit = max(160, viewport - 32)
             for label in self._body.findChildren(QLabel):
                 label.setMaximumWidth(limit)
+                fit = getattr(label, "_fit_lines", None)
+                if callable(fit):
+                    fit()
+                label.updateGeometry()
 
         def _fit_scroll(self) -> None:
             needed = max(1, self._body.sizeHint().height())
             room = max(96, self.height() - 300)
             self._scroll.setFixedHeight(min(needed, room))
+            self._place_fade()
+
+        def _place_fade(self, *_args: object) -> None:
+            viewport = self._scroll.viewport()
+            bar = self._scroll.verticalScrollBar()
+            more = bar.maximum() > 0 and bar.value() < bar.maximum()
+            band = 72
+            self._fade.setGeometry(0, max(0, viewport.height() - band), viewport.width(), band)
+            self._fade.setVisible(more)
+            if more:
+                self._fade.raise_()
 
         def _fit_to_content(self, limit: tuple[int, int]) -> None:
             """Shrink a short queue so the list is not a tall empty pane."""
@@ -908,7 +1001,7 @@ def _builder(shot: bool) -> object:
                 empty.setWordWrap(True)
                 window._rows.addWidget(empty)
             for group in view.groups:
-                window._rows.addWidget(_group_card(window, group))
+                window._rows.addWidget(_group_card(window, group), 0, Qt.AlignmentFlag.AlignTop)
 
     def _section(
         window: DownloadWindow, title: str, rows: tuple[ManageRow, ...], empty: str
@@ -945,9 +1038,8 @@ def _builder(shot: bool) -> object:
         head = QHBoxLayout()
         head.setSpacing(8)
         head.addWidget(Badge(group.colour, group.motif, 32, group.title))
-        headline = QLabel(group.headline)
+        headline = WrapLabel(group.headline)
         headline.setObjectName("sectiontitle")
-        headline.setWordWrap(True)
         head.addWidget(headline, 1)
         if group.open_label:
             button = QPushButton(group.open_label)
@@ -971,17 +1063,14 @@ def _builder(shot: bool) -> object:
         mark.setFixedSize(12, 12)
         mark.setStyleSheet(f"background: {_dot(row.state)}; border-radius: 6px;")
         text = QVBoxLayout()
-        title = QLabel(row.title)
-        title.setWordWrap(True)
-        meta = QLabel(row.meta)
+        title = WrapLabel(row.title)
+        meta = WrapLabel(row.meta)
         meta.setObjectName("hint")
-        meta.setWordWrap(True)
         text.addWidget(title)
         text.addWidget(meta)
         if row.note:
-            note = QLabel(row.note)
+            note = WrapLabel(row.note)
             note.setObjectName("hint")
-            note.setWordWrap(True)
             text.addWidget(note)
         chip = QLabel(row.state_label)
         chip.setStyleSheet(chip_style(row.state))

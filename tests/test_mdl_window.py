@@ -293,6 +293,51 @@ def test_view_uses_manifest_language() -> None:
     assert "Paus" in view.pause_label or view.pause_label == "Pause"
 
 
+def test_status_names_the_download_ahead_of_a_check() -> None:
+    def row(key: str, title: str, state: ItemState) -> QueueItem:
+        return QueueItem(
+            key=key,
+            names={"en": title, "de": title, "ru": title},
+            fallback=title,
+            size=100,
+            received=10,
+            state=state,
+            source="huggingface",
+            speed_bps=0,
+            eta_s=None,
+            apps=["clarity"],
+        )
+
+    downloading = row("a" * 64, "Video enhancement model", ItemState.DOWNLOADING)
+    verifying = row("b" * 64, "Runtime", ItemState.VERIFYING)
+    waiting = row("c" * 64, "Colour model", ItemState.PENDING)
+    snap = Snapshot(
+        items=[downloading, verifying, waiting],
+        apps=[AppSlot("clarity", "")],
+    )
+    snap.recompute()
+    assert view_for(snap, lang="en").status == "Downloading 1 of 3 — Video enhancement model"
+    assert view_for(snap, lang="de").status == "Download 1 von 3 — Video enhancement model"
+    assert view_for(snap, lang="ru").status == "Загрузка 1 из 3 — Video enhancement model"
+    later = Snapshot(items=[verifying, downloading], apps=[AppSlot("clarity", "")])
+    later.recompute()
+    assert view_for(later, lang="en").status == "Downloading 2 of 2 — Video enhancement model"
+    check = Snapshot(items=[verifying, waiting], apps=[AppSlot("clarity", "")])
+    check.recompute()
+    checked = view_for(check, lang="en").status
+    assert checked == "Checking 1 of 2 — Runtime"
+    assert not checked.endswith(".")
+    paused = Snapshot(items=[downloading], apps=[AppSlot("clarity", "")], paused=True)
+    paused.recompute()
+    assert view_for(paused, lang="en").status == "Paused"
+    quiet = Snapshot(items=[waiting], apps=[AppSlot("clarity", "")])
+    quiet.recompute()
+    assert view_for(quiet, lang="en").status == "Waiting to start"
+    mirror = Snapshot(items=[waiting], apps=[AppSlot("clarity", "")], note_code="mirror")
+    mirror.recompute()
+    assert view_for(mirror, lang="en").status == "A faster source is being used"
+
+
 def test_sizes_and_disk_copy_follow_the_locale() -> None:
     assert format_size(480_000_000, lang="en") == "457.8 MB"
     assert format_size(480_000_000, lang="ru") == "457,8\u202fМБ"
