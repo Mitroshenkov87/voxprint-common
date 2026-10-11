@@ -6,7 +6,7 @@ voxprint-common is the shared library for the Voxprint AI Media Suite. Changes l
 
 Code that every app would otherwise copy: suite paths, the GPU lock, the runtime manifest, the palette, the splash, and the other modules listed in the README. An app-specific pipeline, model catalogue, or installer does not belong here.
 
-The library must stay usable when no other Voxprint app is installed. It has no console script and it does not download or launch another app.
+The library must stay usable when no other Voxprint app is installed. The console script is `voxprint-mdl`. It downloads models declared by installed apps. It does not install or launch another app.
 
 ## Development
 
@@ -26,15 +26,15 @@ Tests that need Windows are marked `windows` and skip elsewhere. POSIX-only test
 
 Public functions, classes, and modules use Google-style docstrings. The interrogate gate is 65 percent of that public API. New public names should be documented anyway.
 
-Imports stay at the top of the module. The exception is PySide6, which is imported inside the splash functions that open a window.
+Imports stay at the top of the module. The exception is PySide6, which is imported inside the functions that open a window: the splash, and `voxprint_common.mdl.progress_ui.run_window`. `hf_xet` is imported inside the Hugging Face transfer path so a missing package falls back to HTTP Range.
 
 ## Platform
 
-Windows 11 and Linux are both supported. Prefer the standard library. Optional PySide6 is the only GUI dependency, and only the splash imports it.
+Windows 11 and Linux are both supported. Prefer the standard library. Optional PySide6 is the only GUI dependency. The splash and the model-downloader progress window import it, and only when a window is opened.
 
 ## Docs
 
-User-facing text is English. The MkDocs site is built from `docs/` with mkdocstrings. Update `MIGRATION.md` when a replacement for per-app code changes.
+User-facing text is English. The model-downloader progress window is Russian. The MkDocs site is built from `docs/` with mkdocstrings. Update `MIGRATION.md` when a replacement for per-app code changes.
 
 ## Licence
 

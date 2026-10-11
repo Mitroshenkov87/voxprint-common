@@ -1,8 +1,19 @@
-# Migrating an app to voxprint-common 0.1.2
+# Migrating an app to voxprint-common 0.2.0
 
-voxprint-common is a library. Each app bundles the wheel in its installer, or installs that wheel into its own environment or the shared runtime. It is not an application, and adopting it is never a reason to install another app.
+voxprint-common is a library. Each app bundles the wheel in its installer, or installs that wheel into its own environment or the shared runtime. It is not a suite application, and adopting it is never a reason to install another app.
 
-Pin `voxprint-common==0.1.2`. The import package is `voxprint_common`. `voxprint_common.API` is `1`.
+Pin `voxprint-common==0.2.0`. The import package is `voxprint_common`. `voxprint_common.API` is `1`.
+
+## Changes in 0.2.0
+
+Suite apps stop downloading models. Each app ships `mdl.json` beside its other files. The installer runs `voxprint-mdl download` after the copy step. The app calls `voxprint_common.mdl.ready()` and opens its window only when that returns true.
+
+* The product name is `voxprint_common.mdl.DISPLAY_NAME` (`VOXPrint MDL`). The console script and `python -m voxprint_common.mdl` are `voxprint-mdl`.
+* `plan`, `download`, and `verify` share `<models_dir>/blobs/<sha256>`. Each file is one `runtime_manifest` component of kind `model`, version equal to the sha256, with one ref per app. A component is removed only when its refs are empty, by the existing manifest rules.
+* The plan keeps the highest VRAM variant of a model id that fits the card. A 24 GB card is about 23.5 GiB (`gpu_probe.TIER_24_MIN_GIB`). An unknown GPU is planned as 8 GB. Tier `any` is the fallback when no larger variant fits.
+* Free space must cover the bytes still to fetch plus 15 percent. The error names both byte counts, and no request is sent.
+* `voxprint_common.power.keep_awake` holds the machine awake. The downloader does not add a second helper.
+* The status file is `<home>/state/mdl-status.json`, UTF-8, schema 1. `ready` is true only when `state` is `ready`.
 
 ## Changes in 0.1.2
 

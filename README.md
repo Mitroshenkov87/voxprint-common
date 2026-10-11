@@ -10,7 +10,7 @@
 
 Part of the Voxprint AI Media Suite, together with [Enlarge](https://github.com/Mitroshenkov87/voxprint-enlarge), [Clarity](https://github.com/Mitroshenkov87/voxprint-clarity), [Canvas](https://github.com/Mitroshenkov87/voxprint-canvas), [Plotweaver](https://github.com/Mitroshenkov87/voxprint-plotweaver), [Audiobook Builder](https://github.com/Mitroshenkov87/voxprint-audiobook-builder), [Movie Dubber](https://github.com/Mitroshenkov87/voxprint-movie-dubber), and [Model Forge](https://github.com/Mitroshenkov87/voxprint-model-forge).
 
-Each app stays self-sufficient. It bundles this library, or installs it into the shared runtime. voxprint-common is not an application. It has no installer entry point and it never installs another app.
+Each app stays self-sufficient. It bundles this library, or installs it into the shared runtime. voxprint-common is not a suite application and it never installs another app. The installer entry point is `voxprint-mdl`: it downloads models after the installer has copied files.
 
 The docs site is [mitroshenkov87.github.io/voxprint-common](https://mitroshenkov87.github.io/voxprint-common/).
 
@@ -34,11 +34,12 @@ The docs site is [mitroshenkov87.github.io/voxprint-common](https://mitroshenkov
 | `voxprint_common.selftest` | `checks.json` helpers |
 | `voxprint_common.ui.theme` | Suite palette. Qt is not imported |
 | `voxprint_common.ui.splash` | 960×540 splash. PySide6 loads only when a splash is shown |
+| `voxprint_common.mdl` | VOXPrint MDL. Shared model download, `voxprint-mdl` |
 | `voxprint_common.provenance` | Documented stub. Embedding arrives in a later version |
 
 ## Install
 
-Python 3.14. jeepney is the only required package. It is pure Python and speaks D-Bus so Linux can hold a sleep inhibit. PySide6 is an extra for the splash.
+Python 3.14. jeepney is the only required package. It is pure Python and speaks D-Bus so Linux can hold a sleep inhibit. PySide6 is an extra for the splash and for `voxprint-mdl download --gui`. `hf-xet` is optional; Hugging Face downloads fall back to HTTP Range when it is absent.
 
 ```bash
 python -m pip install voxprint-common
@@ -58,10 +59,10 @@ An app that ships an installer copies the wheel into its payload and installs th
 Offline installers vendor the wheel from the GitHub release. They do not pin a git commit.
 
 ```text
-voxprint-common @ https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.1.2/voxprint_common-0.1.2-py3-none-any.whl
+voxprint-common @ https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.2.0/voxprint_common-0.2.0-py3-none-any.whl
 ```
 
-The same directory has the sdist and a `.sha256` file beside each archive. Check the wheel against `voxprint_common-0.1.2-py3-none-any.whl.sha256` before installing it. A normal environment pin is `voxprint-common==0.1.2`.
+The same directory has the sdist and a `.sha256` file beside each archive. Check the wheel against `voxprint_common-0.2.0-py3-none-any.whl.sha256` before installing it. A normal environment pin is `voxprint-common==0.2.0`.
 
 ## Usage
 
@@ -89,12 +90,25 @@ add_ref(
 
 `--json` writes progress lines, then one result line. Exit codes are 0 success, 1 usage error, 2 operation failed, 3 cancelled or timed out. See the docs for the line shapes.
 
+## Installer integration
+
+Apps do not download models. The installer copies the app, then runs VOXPrint MDL. Pass the app manifest, or omit `--manifest` and let it discover installed apps.
+
+```bash
+voxprint-mdl download --manifest "/opt/voxprint-ai-suite/enlarge/mdl.json" --gui
+voxprint-mdl status --json
+```
+
+`--gui` needs the `ui` extra and shows the Russian progress window. Without it, the same job is headless. Exit 0 means the status file is ready when the plan had nothing left to fetch, or the download finished. Exit 2 means the job failed, including a disk check that refused to start. The app opens its own window only after `voxprint_common.mdl.ready()` is true. A missing status file is not ready.
+
+The full contract, including `mdl.json` and the status file, is in the docs under Model downloader.
+
 Maintainers moving an app off its private copy of this code should read [MIGRATION.md](MIGRATION.md).
 
 ## Requirements
 
 * Windows 11 or Linux.
 * Python 3.14.
-* A display and the `ui` extra, only for the splash. Everything else is headless.
+* A display and the `ui` extra, only for the splash and `voxprint-mdl download --gui`. The download itself is headless.
 
 **License:** Apache-2.0. See `LICENSE` and `NOTICE`.

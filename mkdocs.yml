@@ -39,6 +39,7 @@ nav:
   - Overview: index.md
   - Migration: migration.md
   - CLI protocol: cli.md
+  - Model downloader: mdl.md
   - API:
       - paths: api/paths.md
       - atomic: api/atomic.md
@@ -52,6 +53,7 @@ nav:
       - licence: api/licence.md
       - runtime_manifest: api/runtime_manifest.md
       - download: api/download.md
+      - mdl: api/mdl.md
       - cli_protocol: api/cli_protocol.md
       - selftest: api/selftest.md
       - ui.theme: api/theme.md
