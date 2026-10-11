@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+Checkout steps no longer keep git credentials. The release workflow grants contents write only to the job that publishes the wheel. GitHub Pages still has to be turned on in the repository settings before the docs site can deploy.
+
 ## 0.2.1
 
 The model downloader keeps a single queue, checks the shared models directory before enqueue, refuses a gated upstream that has no suite mirror, and resumes large files in several HTTP ranges. App manifests can mark a model unavailable and can run a post-install command after the digest check.

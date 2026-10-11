@@ -28,8 +28,23 @@ Later engine work in the same branch:
 | `unavailable` models shown, excluded from totals, never enqueued | FIXED |
 | Post-install hooks after placement, install-dir executable, idempotent marker, friendly error | FIXED |
 
+## Aikido, main `9322ddb`
+
+| Finding | Location | Result |
+|---|---|---|
+| `AIK_yaml_actions_checkout_persist_credentials` | every `actions/checkout@v4` in CI, Release, and Pages | FIXED: `persist-credentials: false`. None of these workflows push. |
+| `AIK_yaml_gh-actions-overly-broad-permissions` | Release workflow `contents: write` | FIXED: workflow permissions are empty. `contents: write` is on the publish job only. |
+| `AIK_py_LFI` | `gpu_lock.py` `_write_existing` | Reviewed, false positive. The path is `VOXPRINT_GPU_LOCK` or `%TEMP%/voxprint-gpu.lock`. The write is a sibling temporary file, then `os.replace` onto that same lock. No code change. |
+
+Nothing was flagged in the MDL, download, hashing, paths, `gpu_probe`, `runtime_manifest`, atomic, or CLI code.
+
+## Pages
+
+Run [38160162878](https://github.com/Mitroshenkov87/voxprint-common/actions/runs/38160162878) built the site and uploaded the artifact. `actions/deploy-pages` then returned HTTP 404: GitHub Pages is not enabled on this repository (`has_pages` is false). Enabling Pages and choosing GitHub Actions as the source is a repository setting. The workflow token cannot create that site.
+
 ## OPEN
 
-* 0.2.1 is the pinnable wheel for the apps adopting MDL. Later engine notes belong in 0.2.2.
+* 0.2.1 (Tiferet) is the pinnable wheel. Queue, inventory, gated mirrors, segmented downloads, unavailable status, and post-install hooks shipped in that release.
+* GitHub Pages still needs to be enabled before the docs site can deploy.
 * The progress window is the existing one. `item_id`, `display_name`, and the queue rows are copied through; a new window is out of scope.
 * The index `sha256` is the bundled example descriptor. The weight repos do not publish `voxprint-model.json` yet.
