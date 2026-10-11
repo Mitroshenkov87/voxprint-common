@@ -299,8 +299,11 @@ def _copy(status: Status) -> Status:
                 received=step.received,
                 sha256=step.sha256,
                 apps=list(step.apps),
+                item_id=step.item_id,
+                display_name=step.display_name,
             )
             for step in status.steps
         ],
+        jobs=[dict(row) for row in status.jobs],
         extra=dict(status.extra),
     )

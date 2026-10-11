@@ -40,6 +40,7 @@ nav:
   - Migration: migration.md
   - CLI protocol: cli.md
   - Model downloader: mdl.md
+  - MDL review 0.2.0: mdl-review-0.2.0.md
   - API:
       - paths: api/paths.md
       - atomic: api/atomic.md

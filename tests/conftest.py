@@ -16,3 +16,5 @@ def _isolate_suite(
     monkeypatch.delenv("VOXPRINT_BUILD", raising=False)
     monkeypatch.delenv("VOXPRINT_GPU_PARENT_PID", raising=False)
     monkeypatch.delenv("GITHUB_RUN_NUMBER", raising=False)
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("HUGGING_FACE_HUB_TOKEN", raising=False)

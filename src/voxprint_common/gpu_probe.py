@@ -33,6 +33,7 @@ __all__ = [
     "driver_major",
     "gib_from_mib",
     "no_gpu_message",
+    "nvidia_smi_executable",
     "old_driver_message",
     "parse_compute_capability",
     "parse_gpu_table",
@@ -45,8 +46,7 @@ MIN_DRIVER_MAJOR = 600
 TIER_16_MIN_GIB = 15.5
 TIER_24_MIN_GIB = 23.5
 
-_QUERY = [
-    "nvidia-smi",
+_QUERY_ARGS = [
     "--query-gpu=name,driver_version,compute_cap,memory.total",
     "--format=csv,noheader,nounits",
 ]
@@ -248,6 +248,19 @@ def parse_gpu_table(text: str) -> list[GpuDevice]:
     return devices
 
 
+def nvidia_smi_executable() -> str:
+    """Return the ``nvidia-smi`` path.
+
+    On Windows this is ``%SystemRoot%\\System32\\nvidia-smi.exe`` so a scheduled
+    task, whose ``PATH`` often omits System32, can still see the GPU. Other
+    platforms use the bare name and the normal search path.
+    """
+    if os.name == "nt":
+        root = os.environ.get("SYSTEMROOT", r"C:\Windows")
+        return os.path.join(root, "System32", "nvidia-smi.exe")
+    return "nvidia-smi"
+
+
 def query_gpus(runner: Runner | None = None) -> list[GpuDevice]:
     """Ask nvidia-smi for every GPU.
 
@@ -258,10 +271,11 @@ def query_gpus(runner: Runner | None = None) -> list[GpuDevice]:
         An empty list when the tool is missing, times out, or fails.
     """
     run = runner or subprocess.run
+    command = [nvidia_smi_executable(), *_QUERY_ARGS]
     try:
         if os.name == "nt":
             completed = run(
-                _QUERY,
+                command,
                 capture_output=True,
                 text=True,
                 timeout=15,
@@ -269,7 +283,7 @@ def query_gpus(runner: Runner | None = None) -> list[GpuDevice]:
                 creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
             )
         else:
-            completed = run(_QUERY, capture_output=True, text=True, timeout=15, check=False)
+            completed = run(command, capture_output=True, text=True, timeout=15, check=False)
     except OSError, subprocess.SubprocessError:
         return []
     if completed.returncode != 0:

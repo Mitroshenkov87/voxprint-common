@@ -25,6 +25,16 @@ from pathlib import Path
 from voxprint_common import __version__
 from voxprint_common.atomic import replace
 from voxprint_common.hashing import HASH_RE, HashMismatch, verify
+from voxprint_common.mdl.events import TransferCancelled, TransferSession
+from voxprint_common.mdl.safety import UnsafeUrl, UrlGuard
+from voxprint_common.mdl.segments import (
+    SEGMENT_MIN_BYTES,
+    SPEED_FLOOR_BPS,
+    ConnectionBudget,
+    RangeIgnored,
+    SegmentFailed,
+    download_segments,
+)
 
 __all__ = [
     "PROBE_HEADER",
@@ -118,6 +128,12 @@ def fetch_file(
     cancel: threading.Event | None = None,
     use_xet: bool = True,
     xet_module: object | None = None,
+    guard: UrlGuard | None = None,
+    control: TransferSession | None = None,
+    segments: int = 1,
+    segment_min: int = SEGMENT_MIN_BYTES,
+    budget: ConnectionBudget | None = None,
+    speed_floor: float = SPEED_FLOOR_BPS,
 ) -> Path:
     """Download ``destination`` from the fastest mirror whose bytes match ``sha256``.
 
@@ -146,6 +162,17 @@ def fetch_file(
         cancel: Set to stop the transfer.
         use_xet: Try ``hf_xet`` for Hugging Face URLs that offer it.
         xet_module: Replacement for the ``hf_xet`` import, used by tests.
+        guard: Host, scheme, and address rules. Defaults to HTTPS on the
+            allowlist. Tests pass :meth:`UrlGuard.loopback`.
+        control: Pause, resume, and cancel hooks. When omitted, the transfer
+            runs until it finishes or ``cancel`` is set.
+        segments: Range connections for a file larger than ``segment_min``.
+            ``1`` keeps a single connection.
+        segment_min: Size in bytes above which segments are used. The default
+            is 256 MiB.
+        budget: Shared connection cap. Segment transfers take one slot each.
+        speed_floor: A mirror at or under this many bytes per second is
+            dropped when another mirror is faster. The default is 84 KiB/s.
 
     Returns:
         ``destination`` after the digest has been checked.
@@ -165,7 +192,11 @@ def fetch_file(
         raise FetchError("chunk_size and batch_bytes must be positive")
     if switch_ratio < 1:
         raise FetchError("switch_ratio must be at least 1")
-    checked = [_check_url(url) for url in urls]
+    policy = guard if guard is not None else UrlGuard()
+    try:
+        checked = [policy.check(url) for url in urls]
+    except UnsafeUrl as exc:
+        raise FetchError(str(exc)) from exc
     if not checked:
         raise FetchError("at least one mirror URL is required")
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -177,7 +208,7 @@ def fetch_file(
         else:
             _notify(progress, _host(checked[0]), size, size, 0.0)
             return destination
-    open_url = opener or _urlopen
+    open_url = opener or _guarded_opener(policy)
     now = clock or time.monotonic
     pause = sleep or time.sleep
     partial = destination.with_name(destination.name + ".partial")
@@ -190,6 +221,7 @@ def fetch_file(
     xet_tried: set[str] = set()
     while True:
         while have < size:
+            _checkpoint(control)
             _raise_if_cancelled(cancel)
             if all(mirror.poisoned for mirror in state.mirrors):
                 _give_up(destination.name, state.failures)
@@ -214,7 +246,7 @@ def fetch_file(
                 max_failures,
                 cancel,
             )
-            chosen = _pick(state.mirrors, current, now(), switch_ratio)
+            chosen = _pick(state.mirrors, current, now(), switch_ratio, speed_floor)
             if chosen is None:
                 continue
             if (
@@ -238,6 +270,32 @@ def fetch_file(
                     if have >= size:
                         break
             try:
+                if segments > 1 and size > segment_min:
+                    try:
+                        download_segments(
+                            chosen.url,
+                            partial,
+                            size,
+                            segments,
+                            opener=open_url,
+                            timeout=timeout,
+                            chunk_size=chunk_size,
+                            clock=now,
+                            on_bytes=lambda received, bps, source=chosen.url: _notify(
+                                progress, _host(source), received, size, bps
+                            ),
+                            host=_host(chosen.url),
+                            budget=budget,
+                            user_agent=_USER_AGENT,
+                            speed_floor=speed_floor,
+                            other_mirrors=len(state.mirrors) > 1,
+                            cancelled=lambda: _stop_requested(cancel, control),
+                        )
+                        have = _partial_size(partial)
+                        current = chosen
+                        continue
+                    except RangeIgnored:
+                        pass
                 _pull(
                     chosen,
                     partial,
@@ -250,7 +308,14 @@ def fetch_file(
                     now,
                     progress,
                     cancel,
+                    control,
                 )
+            except SegmentFailed as exc:
+                have = _partial_size(partial)
+                state.failures.append(f"{chosen.url}: {exc}")
+                _mark_down(chosen, now(), backoff_base, backoff_max, max_failures)
+                current = None
+                continue
             except _SourceFailed as exc:
                 have = _partial_size(partial)
                 state.failures.append(f"{chosen.url}: {exc}")
@@ -379,6 +444,7 @@ def _pull(
     clock: Clock,
     progress: ProgressFn | None,
     cancel: threading.Event | None,
+    control: TransferSession | None = None,
 ) -> None:
     url = _prepare(mirror.url, opener, timeout)
     headers = {"User-Agent": _USER_AGENT}
@@ -406,6 +472,7 @@ def _pull(
         target = min(size, cursor + batch_bytes)
         with partial.open(mode) as handle:
             while cursor + written < target:
+                _checkpoint(control)
                 _raise_if_cancelled(cancel)
                 block = _read(response, min(chunk_size, target - cursor - written))
                 if not block:
@@ -526,7 +593,11 @@ def _import_xet() -> object | None:
 
 
 def _pick(
-    mirrors: list[_Mirror], current: _Mirror | None, moment: float, ratio: float
+    mirrors: list[_Mirror],
+    current: _Mirror | None,
+    moment: float,
+    ratio: float,
+    speed_floor: float = 0,
 ) -> _Mirror | None:
     live = [
         mirror
@@ -546,7 +617,11 @@ def _pick(
         return best
     if best is current:
         return current
-    if (best.bps or 0.0) >= (current.bps or 0.0) * ratio:
+    current_bps = current.bps or 0.0
+    best_bps = best.bps or 0.0
+    if speed_floor > 0 and current_bps <= speed_floor < best_bps:
+        return best
+    if best_bps >= current_bps * ratio:
         return best
     return current
 
@@ -624,6 +699,28 @@ def _rate(written: int, elapsed: float) -> float:
     return written / elapsed
 
 
+def _checkpoint(control: TransferSession | None) -> None:
+    if control is None:
+        return
+    try:
+        control.checkpoint()
+    except TransferCancelled as exc:
+        raise Cancelled("cancelled") from exc
+
+
+def _guarded_opener(guard: UrlGuard) -> Opener:
+    def open_url(request: urllib.request.Request, timeout: float) -> object:
+        return _urlopen(request, timeout, guard)
+
+    return open_url
+
+
+def _stop_requested(cancel: threading.Event | None, control: TransferSession | None) -> bool:
+    if cancel is not None and cancel.is_set():
+        return True
+    return control is not None and control.cancelled
+
+
 def _raise_if_cancelled(cancel: threading.Event | None) -> None:
     if cancel is not None and cancel.is_set():
         raise Cancelled("cancelled")
@@ -643,13 +740,6 @@ def _http_endpoint(value: str) -> str:
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         return ""
     return value.strip()
-
-
-def _check_url(url: str) -> str:
-    parsed = urllib.parse.urlparse(url.strip())
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise FetchError(f"mirror must be an http(s) URL, got {url!r}")
-    return url.strip()
 
 
 def _host(url: str) -> str:
@@ -673,13 +763,26 @@ def _header(headers: object, name: str) -> str | None:
     return str(value).strip()
 
 
-def _urlopen(request: urllib.request.Request, timeout: float) -> object:
-    opener = urllib.request.build_opener(_SafeRedirect)
+def _urlopen(request: urllib.request.Request, timeout: float, guard: UrlGuard) -> object:
+    try:
+        guard.check(request.full_url)
+    except UnsafeUrl as exc:
+        raise FetchError(str(exc)) from exc
+    opener = urllib.request.build_opener(_GuardedRedirect(guard))
     return opener.open(request, timeout=timeout)
 
 
-class _SafeRedirect(urllib.request.HTTPRedirectHandler):
-    """Follow redirects that stay on http or https."""
+class _GuardedRedirect(urllib.request.HTTPRedirectHandler):
+    """Follow a redirect only when the target stays on the allowlist."""
+
+    def __init__(self, guard: UrlGuard) -> None:
+        """Remember the rules applied to ``newurl``.
+
+        Args:
+            guard: The same guard that accepted the original URL.
+        """
+        super().__init__()
+        self._guard = guard
 
     def redirect_request(
         self,
@@ -690,10 +793,11 @@ class _SafeRedirect(urllib.request.HTTPRedirectHandler):
         headers: object,
         newurl: str,
     ) -> urllib.request.Request | None:
-        """Reject a redirect whose scheme is not http or https."""
-        scheme = urllib.parse.urlparse(newurl).scheme.lower()
-        if scheme not in {"http", "https"}:
-            raise FetchError(f"refusing redirect to {scheme or 'an unknown scheme'}")
+        """Reject a redirect that leaves the allowlist or uses a private address."""
+        try:
+            self._guard.check(newurl)
+        except UnsafeUrl as exc:
+            raise FetchError(str(exc)) from exc
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
