@@ -1,6 +1,6 @@
 # MDL review, 0.2.0
 
-Post-merge review of `voxprint-mdl` 0.2.0 (merge `9322ddb`) against the model-downloader spec. Fixes landed in the follow-up on this branch. The package version stays 0.2.0. There is no 0.2.1 tag.
+Post-merge review of `voxprint-mdl` 0.2.0 (merge `9322ddb`) against the model-downloader spec. The fixes shipped in 0.2.1, codename Tiferet.
 
 | # | Check | Result |
 |---|---|---|
@@ -30,6 +30,6 @@ Later engine work in the same branch:
 
 ## OPEN
 
-* The version is still 0.2.0. The GUI change will rebase, bump, and tag. This branch does not tag.
+* 0.2.1 is the pinnable wheel for the apps adopting MDL. Later engine notes belong in 0.2.2.
 * The progress window is the existing one. `item_id`, `display_name`, and the queue rows are copied through; a new window is out of scope.
 * The index `sha256` is the bundled example descriptor. The weight repos do not publish `voxprint-model.json` yet.

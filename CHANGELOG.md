@@ -1,8 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.2.1
 
-The model downloader keeps a single queue, checks the shared models directory before enqueue, refuses a gated upstream that has no suite mirror, and resumes large files in several HTTP ranges. App manifests can mark a model unavailable and can run a post-install command after the digest check. The package version is still 0.2.0.
+The model downloader keeps a single queue, checks the shared models directory before enqueue, refuses a gated upstream that has no suite mirror, and resumes large files in several HTTP ranges. App manifests can mark a model unavailable and can run a post-install command after the digest check.
+
+Codename: Tiferet.
 
 ## 0.2.0
 

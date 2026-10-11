@@ -59,10 +59,10 @@ An app that ships an installer copies the wheel into its payload and installs th
 Offline installers vendor the wheel from the GitHub release. They do not pin a git commit.
 
 ```text
-voxprint-common @ https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.2.0/voxprint_common-0.2.0-py3-none-any.whl
+voxprint-common @ https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.2.1/voxprint_common-0.2.1-py3-none-any.whl
 ```
 
-The same directory has the sdist and a `.sha256` file beside each archive. Check the wheel against `voxprint_common-0.2.0-py3-none-any.whl.sha256` before installing it. A normal environment pin is `voxprint-common==0.2.0`.
+The same directory has the sdist and a `.sha256` file beside each archive. Check the wheel against `voxprint_common-0.2.1-py3-none-any.whl.sha256` before installing it. A normal environment pin is `voxprint-common==0.2.1`.
 
 ## Usage
 
