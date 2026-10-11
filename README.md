@@ -52,6 +52,16 @@ python -m pip install -e ".[dev]"
 
 An app that ships an installer copies the wheel into its payload and installs that wheel into its own environment or the shared runtime. It does not ask the user to install a separate Voxprint Common application.
 
+## Pin a release
+
+Offline installers vendor the wheel from the GitHub release. They do not pin a git commit.
+
+```text
+voxprint-common @ https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.1.1/voxprint_common-0.1.1-py3-none-any.whl
+```
+
+The same directory has the sdist and a `.sha256` file beside each archive. Check the wheel against `voxprint_common-0.1.1-py3-none-any.whl.sha256` before installing it. A normal environment pin is `voxprint-common==0.1.1`.
+
 ## Usage
 
 ```python

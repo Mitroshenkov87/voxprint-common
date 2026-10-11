@@ -99,6 +99,12 @@ QPushButton#primary:hover {{ background: {primary_hover}; }}
 QPushButton#primary:disabled {{
     background: {primary_dis_bg}; color: {primary_dis_text}; border-color: #4a4430;
 }}
+QPushButton#disclosure {{
+    background: transparent; border: none; padding: 4px 2px;
+    font-weight: 600; font-size: 15px;
+}}
+QPushButton#disclosure:hover {{ color: {soft}; background: transparent; }}
+QPushButton#gear {{ padding: 6px 12px; font-size: 18px; }}
 QPushButton#step:checked {{
     background: {primary}; border-color: {primary_border}; color: {on_primary};
 }}

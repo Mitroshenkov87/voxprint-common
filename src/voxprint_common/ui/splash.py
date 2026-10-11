@@ -15,6 +15,7 @@ so a headless tool can import the layout helpers without Qt.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,6 +33,7 @@ __all__ = [
     "VERSION_PX",
     "WIDTH",
     "Splash",
+    "SplashEvent",
     "SplashLayout",
     "display_name",
     "layout",
@@ -151,10 +153,30 @@ def parse_colour(value: str) -> tuple[int, int, int]:
     return int(text[0:2], 16), int(text[2:4], 16), int(text[4:6], 16)
 
 
+@dataclass(frozen=True)
+class SplashEvent:
+    """A click on the splash, in coordinates inside the card.
+
+    ``button`` is ``left``, ``right``, ``middle``, or ``other``. ``x`` and
+    ``y`` are logical pixels from the card's top left, not from the shadow.
+    """
+
+    x: int
+    y: int
+    button: str
+
+
 class Splash:
     """Borderless startup window for one Voxprint app."""
 
-    def __init__(self, app_art: str | Path, identity_colour: str, build_info: BuildInfo) -> None:
+    def __init__(
+        self,
+        app_art: str | Path,
+        identity_colour: str,
+        build_info: BuildInfo,
+        *,
+        on_click: Callable[[SplashEvent], None] | None = None,
+    ) -> None:
         """Show the splash.
 
         Args:
@@ -162,6 +184,9 @@ class Splash:
             identity_colour: ``#RRGGBB`` fill for the progress bar.
             build_info: Name, version, candidate, build, and codename. The
                 second line is :func:`voxprint_common.buildinfo.label`.
+            on_click: Called for each click. Apps use this, or override
+                :meth:`mouse_press`, to wire an easter egg. The private
+                window is not part of the API.
 
         Raises:
             ValueError: ``identity_colour`` is not ``#RRGGBB``.
@@ -169,6 +194,7 @@ class Splash:
         self.app_art = Path(app_art)
         self.identity_colour = parse_colour(identity_colour)
         self.build_info = build_info
+        self.on_click = on_click
         self._stage = ""
         self._fraction: float | None = None
         self._shown = time.monotonic()
@@ -204,6 +230,20 @@ class Splash:
             _pump(remaining)
         self._window.fade()
 
+    def mouse_press(self, event: SplashEvent) -> None:
+        """Public event hook for a click on the splash.
+
+        The window calls this on every press. The default calls
+        :attr:`on_click` when it is set. Override this method to handle the
+        click without using the private window.
+
+        Args:
+            event: Click position and button.
+        """
+        callback = self.on_click
+        if callback is not None:
+            callback(event)
+
 
 def _open_window(splash: Splash) -> object:
     # PySide6 stays out of module import so headless tools can use layout().
@@ -215,6 +255,16 @@ def _open_window(splash: Splash) -> object:
     if app is None:
         app = QApplication([])
     boxes = layout()
+
+    def _button_name(event: object) -> str:
+        raw = event.button()  # type: ignore[attr-defined]
+        if raw == Qt.MouseButton.LeftButton:
+            return "left"
+        if raw == Qt.MouseButton.RightButton:
+            return "right"
+        if raw == Qt.MouseButton.MiddleButton:
+            return "middle"
+        return "other"
 
     class _Window(QWidget):
         def __init__(self) -> None:
@@ -241,6 +291,14 @@ def _open_window(splash: Splash) -> object:
                 self._timer.stop()
             self.update()
             app.processEvents()
+
+        def mousePressEvent(self, event: object) -> None:
+            button = _button_name(event)
+            point = event.position()  # type: ignore[attr-defined]
+            self._splash.mouse_press(
+                SplashEvent(int(point.x()) - _SHADOW, int(point.y()) - _SHADOW, button)
+            )
+            event.accept()  # type: ignore[attr-defined]
 
         def fade(self) -> None:
             self._timer.stop()

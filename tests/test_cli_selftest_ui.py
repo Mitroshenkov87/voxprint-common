@@ -70,6 +70,9 @@ def test_palette_contrast_and_stylesheet() -> None:
     assert theme.ROOT_PLAIN in plain
     assert theme.ROOT_GLASS_MORE in glass
     assert theme.PRIMARY in plain
+    assert "QPushButton#gear" in plain
+    assert "QPushButton#disclosure" in plain
+    assert "QPushButton#disclosure:hover" in plain
     assert "PySide6" not in sys.modules
 
 
@@ -87,6 +90,12 @@ def test_splash_layout_without_qt() -> None:
     assert splash.display_name("enlarge") == "Voxprint AI Enlarge"
     assert splash.display_name("Voxprint AI Canvas") == "Voxprint AI Canvas"
     assert splash.parse_colour("#ff6b8a") == (255, 107, 138)
+    seen: list[splash.SplashEvent] = []
+    window = splash.Splash.__new__(splash.Splash)
+    window.on_click = seen.append
+    click = splash.SplashEvent(12, 34, "left")
+    window.mouse_press(click)
+    assert seen == [click]
     info = parse({"app": "enlarge", "version": "0.2.0", "rc": 4, "build": 12, "codename": "North"})
     assert info.label() == '0.2.0 RC 4 build 12 "North"'
     assert "PySide6" not in sys.modules
