@@ -100,8 +100,12 @@ def replace(source: Path, destination: Path) -> None:
         destination: The published name. An existing file is replaced.
     """
     destination.parent.mkdir(parents=True, exist_ok=True)
-    with source.open("rb") as handle:
-        os.fsync(handle.fileno())
+    # A read-only handle cannot be flushed on Windows (EBADF). Read-write can.
+    descriptor = os.open(source, os.O_RDWR)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
     os.replace(source, destination)
     _fsync_dir(destination.parent)
 
