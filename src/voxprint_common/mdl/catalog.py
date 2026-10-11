@@ -183,6 +183,7 @@ class Model:
     optional: bool = False
     min_vram_gib: float | None = None
     display_name: str = ""
+    names: dict[str, str] = field(default_factory=dict)
     gpu_min_cc: float | None = None
     unavailable: bool = False
     reason: str = ""
@@ -921,6 +922,39 @@ def _gpu_rank(tier: VramTier) -> int:
             assert_never(unreachable)
 
 
+def _display_names(model_id: str, value: object, display: str) -> tuple[dict[str, str], str]:
+    """Return per-language names and the English label.
+
+    ``name`` may be a string or a map of language codes. English is the
+    fallback. ``display_name`` fills in when the map has no English entry.
+    """
+    if value in (None, ""):
+        names = {"en": display} if display else {}
+        return names, display
+    if isinstance(value, str):
+        text = value.strip()
+        return ({"en": text} if text else {}), text or display
+    if not isinstance(value, dict):
+        raise CatalogError(f"model {model_id} name must be a string or a language map")
+    names = {
+        str(key): str(item)
+        for key, item in value.items()
+        if isinstance(key, str) and isinstance(item, str) and item.strip()
+    }
+    shown = names.get("en") or display or next(iter(names.values()), "")
+    if shown and "en" not in names:
+        names["en"] = shown
+    return names, shown
+
+
+def _vram_gib(model_id: str, value: object) -> float | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise CatalogError(f"model {model_id} min_vram_gb must be a number")
+    return float(value)
+
+
 def _model(value: object) -> Model:
     if not isinstance(value, dict):
         raise CatalogError("model must be an object")
@@ -935,6 +969,11 @@ def _model(value: object) -> Model:
     display = value.get("display_name", "")
     if not isinstance(display, str):
         raise CatalogError(f"model {model_id} display_name must be a string")
+    optional = value.get("optional", False)
+    if not isinstance(optional, bool):
+        raise CatalogError(f"model {model_id} optional must be a boolean")
+    names, display = _display_names(model_id, value.get("name", display), display)
+    min_vram = _vram_gib(model_id, value.get("min_vram_gb", value.get("min_vram_gib")))
     status = value.get("status", "available")
     if status not in {"available", "unavailable"}:
         raise CatalogError(f"model {model_id} status must be available or unavailable")
@@ -959,7 +998,10 @@ def _model(value: object) -> Model:
         tier,
         files,
         on_demand=on_demand,
+        optional=optional,
+        min_vram_gib=min_vram,
         display_name=display,
+        names=names,
         unavailable=status == "unavailable",
         reason=reason.strip(),
         post_install=hook,

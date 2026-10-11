@@ -87,7 +87,7 @@ def test_splash_layout_without_qt() -> None:
     assert boxes.bar_y == 540 - 48 - 4
     assert splash.MIN_VISIBLE_S == 0.6
     assert splash.FADE_MS == 200
-    assert splash.display_name("enlarge") == "Voxprint AI Enlarge"
+    assert splash.display_name("enlarge") == "VOXPrint AI Enlarge"
     assert splash.display_name("Voxprint AI Canvas") == "Voxprint AI Canvas"
     assert splash.parse_colour("#ff6b8a") == (255, 107, 138)
     seen: list[splash.SplashEvent] = []
