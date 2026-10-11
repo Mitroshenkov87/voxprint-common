@@ -70,8 +70,12 @@ def test_system_locale_when_nothing_is_set(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setenv("LANG", "lv_LV.UTF-8")
     monkeypatch.delenv("LC_ALL", raising=False)
     monkeypatch.delenv("LC_MESSAGES", raising=False)
+    monkeypatch.setattr("voxprint_common.i18n._windows_ui_language", lambda: None)
     reset()
     assert detect_language() == "lv"
+    monkeypatch.setattr("voxprint_common.i18n._windows_ui_language", lambda: "de")
+    reset()
+    assert detect_language() == "de"
     assert set_language("uk") == "uk"
     assert get_language() == "uk"
     reset()

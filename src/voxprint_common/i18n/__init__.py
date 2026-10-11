@@ -171,18 +171,25 @@ def normalize_code(value: object) -> str | None:
     return None
 
 
+def _windows_ui_language() -> str | None:
+    """Return the Windows UI language, or None on another operating system."""
+    if sys.platform != "win32":
+        return None
+    try:
+        buffer = ctypes.create_unicode_buffer(85)
+        kernel = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        if kernel.GetUserDefaultLocaleName(buffer, len(buffer)):
+            return normalize_code(buffer.value)
+    except AttributeError, OSError:
+        return None
+    return None
+
+
 def system_language() -> str | None:
     """Return the operating-system UI language when a catalog exists for it."""
-    if sys.platform == "win32":
-        try:
-            buffer = ctypes.create_unicode_buffer(85)
-            kernel = ctypes.windll.kernel32  # type: ignore[attr-defined]
-            if kernel.GetUserDefaultLocaleName(buffer, len(buffer)):
-                code = normalize_code(buffer.value)
-                if code:
-                    return code
-        except AttributeError, OSError:
-            pass
+    windows = _windows_ui_language()
+    if windows:
+        return windows
     for var in ("LC_ALL", "LC_MESSAGES", "LANG"):
         code = normalize_code(os.environ.get(var))
         if code:
