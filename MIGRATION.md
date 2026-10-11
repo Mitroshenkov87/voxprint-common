@@ -1,8 +1,17 @@
-# Migrating an app to voxprint-common 0.1.1
+# Migrating an app to voxprint-common 0.1.2
 
 voxprint-common is a library. Each app bundles the wheel in its installer, or installs that wheel into its own environment or the shared runtime. It is not an application, and adopting it is never a reason to install another app.
 
-Pin `voxprint-common==0.1.1`. The import package is `voxprint_common`. `voxprint_common.API` is `1`.
+Pin `voxprint-common==0.1.2`. The import package is `voxprint_common`. `voxprint_common.API` is `1`.
+
+## Changes in 0.1.2
+
+These calls stay compatible.
+
+* `voxprint_common.power.keep_awake(reason, display=False)` blocks system sleep for a long job. The context manager releases the hold on return, on an exception, and on cancellation. `acquire` and `release` are the same hold without `with`. Nested holds share one inhibit.
+* On Windows the helper calls `SetThreadExecutionState` on a keeper thread, because that state is per-thread, and resets it to `ES_CONTINUOUS` on release. `display=True` adds `ES_DISPLAY_REQUIRED`.
+* On Linux the helper calls logind `Inhibit("sleep:idle", "Voxprint", reason, "block")` through jeepney and holds the file descriptor. If that fails it tries `systemd-inhibit`, then the session screensaver `Inhibit`, then a logged no-op.
+* `suite_settings.keep_awake_during_jobs` defaults to true. When it is false, `keep_awake` does not take an inhibit.
 
 ## Changes in 0.1.1
 

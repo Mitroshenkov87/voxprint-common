@@ -45,6 +45,7 @@ nav:
       - hashing: api/hashing.md
       - buildinfo: api/buildinfo.md
       - suite_settings: api/suite_settings.md
+      - power: api/power.md
       - gpu_lock: api/gpu_lock.md
       - thermal: api/thermal.md
       - gpu_probe: api/gpu_probe.md

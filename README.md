@@ -23,6 +23,7 @@ The docs site is [mitroshenkov87.github.io/voxprint-common](https://mitroshenkov
 | `voxprint_common.hashing` | Streaming SHA-256 |
 | `voxprint_common.buildinfo` | One `BUILD.json`: app, version, rc, build, codename |
 | `voxprint_common.suite_settings` | Shared `state/suite.json` |
+| `voxprint_common.power` | Block system sleep for the length of a long job |
 | `voxprint_common.gpu_lock` | Cross-process GPU lock with holder app and stage |
 | `voxprint_common.thermal` | Shared pause rule: 2.5 h, 83 C, 75 C |
 | `voxprint_common.gpu_probe` | nvidia-smi probe and VRAM tiers at 15.5 / 23.5 GiB |
@@ -37,7 +38,7 @@ The docs site is [mitroshenkov87.github.io/voxprint-common](https://mitroshenkov
 
 ## Install
 
-Python 3.14. No required third-party packages. PySide6 is an extra for the splash.
+Python 3.14. jeepney is the only required package. It is pure Python and speaks D-Bus so Linux can hold a sleep inhibit. PySide6 is an extra for the splash.
 
 ```bash
 python -m pip install voxprint-common
@@ -57,20 +58,24 @@ An app that ships an installer copies the wheel into its payload and installs th
 Offline installers vendor the wheel from the GitHub release. They do not pin a git commit.
 
 ```text
-voxprint-common @ https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.1.1/voxprint_common-0.1.1-py3-none-any.whl
+voxprint-common @ https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.1.2/voxprint_common-0.1.2-py3-none-any.whl
 ```
 
-The same directory has the sdist and a `.sha256` file beside each archive. Check the wheel against `voxprint_common-0.1.1-py3-none-any.whl.sha256` before installing it. A normal environment pin is `voxprint-common==0.1.1`.
+The same directory has the sdist and a `.sha256` file beside each archive. Check the wheel against `voxprint_common-0.1.2-py3-none-any.whl.sha256` before installing it. A normal environment pin is `voxprint-common==0.1.2`.
 
 ## Usage
 
 ```python
 from voxprint_common.buildinfo import load
 from voxprint_common.paths import home, shared_dir
+from voxprint_common.power import keep_awake
 from voxprint_common.runtime_manifest import add_ref
 
 print(home())
 print(load("BUILD.json").label())
+
+with keep_awake("render"):
+    ...
 
 add_ref(
     "python-3.14",

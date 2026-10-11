@@ -2,7 +2,7 @@
 
 Shared Python library for the Voxprint AI Media Suite. One copy of the code every app was carrying itself.
 
-Version 0.1.1. The import package is `voxprint_common`, and `API` is 1.
+Version 0.1.2. The import package is `voxprint_common`, and `API` is 1.
 
 Each app bundles this library or installs it into the shared runtime. It is not an application.
 
