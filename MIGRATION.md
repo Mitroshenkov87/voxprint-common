@@ -1,8 +1,37 @@
-# Migrating an app to voxprint-common 0.1.0
+# Migrating an app to voxprint-common 0.2.0
 
-voxprint-common is a library. Each app bundles the wheel in its installer, or installs that wheel into its own environment or the shared runtime. It is not an application, and adopting it is never a reason to install another app.
+voxprint-common is a library. Each app bundles the wheel in its installer, or installs that wheel into its own environment or the shared runtime. It is not a suite application, and adopting it is never a reason to install another app.
 
-Pin `voxprint-common==0.1.0`. The import package is `voxprint_common`. `voxprint_common.API` is `1`.
+Pin `voxprint-common==0.2.0`. The import package is `voxprint_common`. `voxprint_common.API` is `1`.
+
+## Changes in 0.2.0
+
+Suite apps stop downloading models. Each app ships `mdl.json` beside its other files. The installer runs `voxprint-mdl download` after the copy step. The app calls `voxprint_common.mdl.ready()` and opens its window only when that returns true.
+
+* The product name is `voxprint_common.mdl.DISPLAY_NAME` (`VOXPrint MDL`). The console script and `python -m voxprint_common.mdl` are `voxprint-mdl`.
+* `plan`, `download`, and `verify` share `<models_dir>/blobs/<sha256>`. Each file is one `runtime_manifest` component of kind `model`, version equal to the sha256, with one ref per app. A component is removed only when its refs are empty, by the existing manifest rules.
+* The plan keeps the highest VRAM variant of a model id that fits the card. A 24 GB card is about 23.5 GiB (`gpu_probe.TIER_24_MIN_GIB`). An unknown GPU is planned as 8 GB. Tier `any` is the fallback when no larger variant fits.
+* Free space must cover the bytes still to fetch plus 15 percent. The error names both byte counts, and no request is sent.
+* `voxprint_common.power.keep_awake` holds the machine awake. The downloader does not add a second helper.
+* The status file is `<home>/state/mdl-status.json`, UTF-8, schema 1. `ready` is true only when `state` is `ready`.
+
+## Changes in 0.1.2
+
+These calls stay compatible.
+
+* `voxprint_common.power.keep_awake(reason, display=False)` blocks system sleep for a long job. The context manager releases the hold on return, on an exception, and on cancellation. `acquire` and `release` are the same hold without `with`. Nested holds share one inhibit.
+* On Windows the helper calls `SetThreadExecutionState` on a keeper thread, because that state is per-thread, and resets it to `ES_CONTINUOUS` on release. `display=True` adds `ES_DISPLAY_REQUIRED`.
+* On Linux the helper calls logind `Inhibit("sleep:idle", "Voxprint", reason, "block")` through jeepney and holds the file descriptor. If that fails it tries `systemd-inhibit`, then the session screensaver `Inhibit`, then a logged no-op.
+* `suite_settings.keep_awake_during_jobs` defaults to true. When it is false, `keep_awake` does not take an inhibit.
+
+## Changes in 0.1.1
+
+These calls stay compatible. A few results change.
+
+* `buildinfo.load` searches the app package directory, the frozen executable directory, and the repository root. Pass a file or directory as `path` to skip the search. `build_info.json` beside `BUILD.json` is the frozen record. The build number is `GITHUB_RUN_NUMBER` plus `offset`. Without that variable, the recorded `build` is used. A missing recorded build is null, not 0.
+* `Splash(..., on_click=...)` and `Splash.mouse_press` are the click hook. Apps do not use the private window.
+* A `model` component path may be an absolute path under `paths.models_dir()`, `VOXPRINT_MODEL_CACHE`, or `model_roots`. Other absolute paths are still rejected.
+* The stylesheet includes `QPushButton#gear` and `QPushButton#disclosure`.
 
 Call the functions below instead of the private copies. Leave app-specific behaviour where this document says it stays. Paths are relative to each app repository, at the commits reviewed on 11 October 2026.
 
@@ -73,7 +102,7 @@ Backup, voice catalogues, and project files stay in the app. Only the hash funct
 
 `label()` returns `X.Y.Z RC N build B "Codename"`. A null build renders as `dev`. Canvas's channel `RC` with no number sets `show_rc` so the label still contains the word `RC`. `dump()` writes only the five canonical keys, so an app that rewrites `BUILD.json` should set `rc` to the candidate number.
 
-Build number: `VOXPRINT_BUILD` wins. Otherwise an integer `build` (or Lucent `number`) is used. A JSON null or absent `build`, together with `GITHUB_RUN_NUMBER`, becomes that run plus `offset`. A JSON null `build` with no run number stays null.
+Build number: `VOXPRINT_BUILD` wins. Otherwise `GITHUB_RUN_NUMBER` plus `offset` is the number. Without that variable, the recorded `build` (or Lucent `number`, or the frozen `build_info.json`) is used. A missing recorded build stays null.
 
 ## suite_settings
 

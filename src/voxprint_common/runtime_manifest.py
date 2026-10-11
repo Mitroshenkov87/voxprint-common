@@ -5,6 +5,8 @@ and ``components``. Any other top-level key is preserved.
 
 A component id matches ``[a-z0-9][a-z0-9._-]*``. ``refs`` lists the apps that
 installed it. The component is deleted only when that list becomes empty.
+A ``model`` path may be absolute when it stays under the shared models
+directory or a configured cache root. Every other absolute path is rejected.
 Writes take ``manifest.lock`` (exclusive, 30 seconds) and publish through a
 temporary file, fsync, and rename.
 
@@ -24,15 +26,16 @@ from __future__ import annotations
 
 import importlib.metadata as importlib_metadata
 import json
+import os
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from voxprint_common.atomic import exclusive_lock, write_json
-from voxprint_common.paths import manifest_file
+from voxprint_common.paths import manifest_file, models_dir, shared_dir
 
 __all__ = [
     "KINDS",
@@ -155,6 +158,7 @@ def add_ref(
     installed_at: str | None = None,
     manifest: Path | None = None,
     timeout: float = _TIMEOUT,
+    model_roots: Sequence[Path] | None = None,
 ) -> Component:
     """Add ``app`` to a component, installing the record when it is new.
 
@@ -169,11 +173,16 @@ def add_ref(
         app: Suite id to add.
         kind: ``runtime``, ``wheels``, ``model``, or ``tool``.
         version: Component version.
-        path: Path relative to the shared directory.
+        path: Path relative to the shared directory, or, for a ``model``, an
+            absolute path under the shared models directory or a configured
+            cache root.
         sha256: Lowercase digest of the archive or lock file.
         installed_at: ISO-8601 timestamp. Defaults to the current local time.
         manifest: Manifest path.
         timeout: Lock timeout in seconds.
+        model_roots: Extra absolute directories a ``model`` path may live in,
+            besides :func:`voxprint_common.paths.models_dir` and
+            ``VOXPRINT_MODEL_CACHE``.
 
     Returns:
         The component after the update.
@@ -187,7 +196,7 @@ def add_ref(
     app = _check_app(app)
     kind = _check_kind(kind)
     version = _required_text(version, "version")
-    rel = _check_rel(path, required=True)
+    rel = _check_component_path(path, kind=kind, model_roots=_model_roots(model_roots))
     digest = _check_sha(sha256, required=True)
     stamp = installed_at if installed_at is not None else _now()
     target = manifest or manifest_file()
@@ -443,16 +452,47 @@ def _required_text(value: str, label: str) -> str:
     return text
 
 
-def _check_rel(value: str, *, required: bool) -> str:
+def _model_roots(extra: Sequence[Path] | None) -> tuple[Path, ...]:
+    roots: list[Path] = [models_dir(), shared_dir()]
+    cache = os.environ.get("VOXPRINT_MODEL_CACHE", "").strip()
+    if cache:
+        folder = Path(os.path.expandvars(os.path.expanduser(cache)))
+        if not folder.is_absolute():
+            raise ManifestError("VOXPRINT_MODEL_CACHE must be an absolute path")
+        roots.append(folder)
+    for item in extra or ():
+        folder = Path(item)
+        if not folder.is_absolute():
+            raise ManifestError("a model cache root must be an absolute path")
+        roots.append(folder)
+    return tuple(roots)
+
+
+def _check_component_path(value: str, *, kind: str, model_roots: Sequence[Path]) -> str:
     text = value.strip().replace("\\", "/")
     if not text:
-        if required:
-            raise ManifestError("component path is required")
-        return ""
+        raise ManifestError("component path is required")
     parts = Path(text).parts
-    if text.startswith("/") or ".." in parts or Path(text).is_absolute():
-        raise ManifestError("component path must stay inside the shared directory")
-    return Path(text).as_posix()
+    if ".." in parts:
+        raise ManifestError("component path must stay inside an allowed directory")
+    candidate = Path(text)
+    if candidate.is_absolute() or text.startswith("/"):
+        if kind != "model" or not _inside_any(candidate, model_roots):
+            raise ManifestError(
+                "component path must stay inside the shared directory, "
+                "or under the shared models directory for a model"
+            )
+        return candidate.absolute().as_posix()
+    return candidate.as_posix()
+
+
+def _inside_any(candidate: Path, roots: Sequence[Path]) -> bool:
+    cand = os.path.normcase(str(candidate.absolute()))
+    for root in roots:
+        base = os.path.normcase(str(Path(root).absolute()))
+        if cand == base or cand.startswith(base + os.sep) or cand.startswith(base + "/"):
+            return True
+    return False
 
 
 def _check_sha(value: str, *, required: bool) -> str:

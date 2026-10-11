@@ -217,3 +217,58 @@ def test_cpu_onnxruntime_conflict(monkeypatch: pytest.MonkeyPatch) -> None:
     assert not cpu_onnxruntime_conflicts()
     install(["onnxruntime"])
     assert cpu_onnxruntime_conflicts()
+
+
+def test_model_path_under_models_root_or_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv("VOXPRINT_HOME", str(home))
+    monkeypatch.delenv("VOXPRINT_MODELS_DIR", raising=False)
+    monkeypatch.delenv("VOXPRINT_MODEL_CACHE", raising=False)
+    manifest = tmp_path / "manifest.json"
+    weights = home / "models" / "demo.bin"
+    add_ref(
+        "demo",
+        "enlarge",
+        kind="model",
+        version="1",
+        path=str(weights),
+        sha256=SHA_A,
+        manifest=manifest,
+    )
+    assert load(manifest).components["demo"].path == weights.absolute().as_posix()
+
+    cache = tmp_path / "cache"
+    add_ref(
+        "cached",
+        "enlarge",
+        kind="model",
+        version="1",
+        path=str(cache / "other.bin"),
+        sha256=SHA_B,
+        manifest=manifest,
+        model_roots=(cache,),
+    )
+    assert "cached" in load(manifest).components
+
+    with pytest.raises(ManifestError, match="shared models"):
+        add_ref(
+            "outside",
+            "enlarge",
+            kind="model",
+            version="1",
+            path=str(tmp_path / "elsewhere" / "nope.bin"),
+            sha256=SHA_A,
+            manifest=manifest,
+        )
+    with pytest.raises(ManifestError, match="shared directory"):
+        add_ref(
+            "python-3.14",
+            "enlarge",
+            kind="runtime",
+            version="3.14",
+            path=str(weights),
+            sha256=SHA_A,
+            manifest=manifest,
+        )

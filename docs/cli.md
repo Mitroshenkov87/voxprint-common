@@ -30,3 +30,5 @@ Extra fields are allowed. `type`, `ok`, `code`, and `message` are reserved.
 `Session` emits progress lines and then one result. A second result, or progress after the result, raises `ProtocolError`.
 
 Enlarge's own job messages, and its older exit codes, stay in Enlarge. This protocol is the shared envelope.
+
+`voxprint-mdl` uses the same codes and the same result line. `--json` and `--dry-run` may appear before or after the subcommand. The installer contract is on the [model downloader](mdl.md) page.

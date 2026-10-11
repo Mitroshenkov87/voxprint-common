@@ -1,12 +1,13 @@
 """Shared ``suite.json`` (schema 1).
 
-The file is ``<home>/state/suite.json``. Four values are shared. Every other
+The file is ``<home>/state/suite.json``. Five values are shared. Every other
 key is preserved, so one app does not wipe another's settings.
 
 * ``ui_language``: a language tag such as ``en`` or ``pt-BR``
 * ``theme``: ``glass-dark``
 * ``models_dir``: an absolute path, or JSON null for the default folder
 * ``gpu``: ``auto`` or ``cuda:N``
+* ``keep_awake_during_jobs``: true or false. True asks long jobs to block sleep.
 
 ``VOXPRINT_MODELS_DIR`` is applied by :func:`voxprint_common.paths.models_dir`,
 not by the getters here.
@@ -30,10 +31,12 @@ __all__ = [
     "SCHEMA",
     "file",
     "gpu",
+    "keep_awake_during_jobs",
     "models_dir",
     "normalize_gpu",
     "read",
     "set_gpu",
+    "set_keep_awake_during_jobs",
     "set_models_dir",
     "set_theme",
     "set_ui_language",
@@ -44,7 +47,7 @@ __all__ = [
 ]
 
 SCHEMA = 1
-KEYS = ("ui_language", "theme", "models_dir", "gpu")
+KEYS = ("ui_language", "theme", "models_dir", "gpu", "keep_awake_during_jobs")
 DEFAULT_THEME = "glass-dark"
 THEMES = frozenset({DEFAULT_THEME})
 DEFAULT_GPU = "auto"
@@ -109,8 +112,20 @@ def gpu() -> str:
     return normalize_gpu(read().get("gpu")) or DEFAULT_GPU
 
 
+def keep_awake_during_jobs() -> bool:
+    """Return whether long jobs should block system sleep.
+
+    A missing or invalid stored value is true. The file is not created.
+    :func:`voxprint_common.power.keep_awake` honours this value.
+    """
+    stored = read().get("keep_awake_during_jobs")
+    if isinstance(stored, bool):
+        return stored
+    return True
+
+
 def values() -> dict[str, Any]:
-    """Return the four shared values with defaults applied.
+    """Return the shared values with defaults applied.
 
     ``models_dir`` is a string, or None for the default folder.
     """
@@ -120,6 +135,7 @@ def values() -> dict[str, Any]:
         "theme": theme(),
         "models_dir": str(folder) if folder else None,
         "gpu": gpu(),
+        "keep_awake_during_jobs": keep_awake_during_jobs(),
     }
 
 
@@ -160,6 +176,22 @@ def set_models_dir(folder: Path | str | None) -> None:
         ValueError: The path is relative or empty.
     """
     set_value("models_dir", None if folder is None else str(folder))
+
+
+def set_keep_awake_during_jobs(enabled: bool) -> bool:
+    """Store whether long jobs should block system sleep.
+
+    Args:
+        enabled: True blocks sleep while :func:`voxprint_common.power.keep_awake`
+            is held. False makes that helper leave sleep alone.
+
+    Returns:
+        The stored value.
+
+    Raises:
+        ValueError: ``enabled`` is not a bool.
+    """
+    return bool(set_value("keep_awake_during_jobs", enabled))
 
 
 def set_gpu(value: str) -> str:
@@ -294,6 +326,10 @@ def _validate(key: str, value: object) -> object:
         if stored is None:
             raise ValueError(f"gpu must be auto or cuda:N, got {value!r}")
         return stored
+    if key == "keep_awake_during_jobs":
+        if not isinstance(value, bool):
+            raise ValueError(f"keep_awake_during_jobs must be true or false, got {value!r}")
+        return value
     raise ValueError(f"not a shared setting: {key!r}")
 
 
