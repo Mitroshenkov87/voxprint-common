@@ -2,7 +2,11 @@
 
 voxprint-common is a library. Each app bundles the wheel in its installer, or installs that wheel into its own environment or the shared runtime. It is not a suite application, and adopting it is never a reason to install another app.
 
-Pin `voxprint-common==0.2.2`. The import package is `voxprint_common`. `voxprint_common.API` is `1`.
+Pin `voxprint-common==0.2.3`. The import package is `voxprint_common`. `voxprint_common.API` is `1`.
+
+## Changes in 0.2.3
+
+The shared download window is the same entry point. Layout, copy, and number formatting are tighter. No installer change.
 
 ## Changes in 0.2.2
 

@@ -20,6 +20,7 @@ from voxprint_common.mdl.present import (
     ManageView,
     QueueItem,
     Snapshot,
+    format_size,
     view_for,
 )
 from voxprint_common.ui.mdl_window import grab_view
@@ -56,20 +57,81 @@ def _item(
     )
 
 
+def _named(table: dict[str, str]) -> dict[str, str]:
+    return {code: table[code] for code in ("en", "ru", "de", "uk", "lv")}
+
+
+_CLARITY = [
+    {
+        "en": "Video enhancement model",
+        "ru": "Модель улучшения видео",
+        "de": "Videoverbesserungsmodell",
+        "uk": "Модель покращення відео",
+        "lv": "Video uzlabošanas modelis",
+    },
+    {
+        "en": "Runtime ONNX + TensorRT",
+        "ru": "Runtime ONNX + TensorRT",
+        "de": "Runtime ONNX + TensorRT",
+        "uk": "Runtime ONNX + TensorRT",
+        "lv": "Runtime ONNX + TensorRT",
+    },
+    {
+        "en": "Face restoration",
+        "ru": "Восстановление лиц",
+        "de": "Gesichtsrekonstruktion",
+        "uk": "Відновлення облич",
+        "lv": "Seju atjaunošana",
+    },
+    {
+        "en": "Frame stabilizer",
+        "ru": "Стабилизация кадров",
+        "de": "Bildstabilisierung",
+        "uk": "Стабілізація кадрів",
+        "lv": "Kadru stabilizācija",
+    },
+    {
+        "en": "Colour model",
+        "ru": "Цветовая модель",
+        "de": "Farbmodell",
+        "uk": "Колірна модель",
+        "lv": "Krāsu modelis",
+    },
+]
+
+_ENLARGE = {
+    "en": "Upscale model",
+    "ru": "Модель увеличения",
+    "de": "Vergrößerungsmodell",
+    "uk": "Модель збільшення",
+    "lv": "Palielināšanas modelis",
+}
+
+_LEVI = {
+    "en": "Levi narrator voice",
+    "ru": "Голос диктора Levi",
+    "de": "Erzählerstimme Levi",
+    "uk": "Голос диктора Levi",
+    "lv": "Diktora balss Levi",
+}
+
+_QWEN = {
+    "en": "Qwen3-TTS speech model",
+    "ru": "Модель речи Qwen3-TTS",
+    "de": "Sprachmodell Qwen3-TTS",
+    "uk": "Модель мовлення Qwen3-TTS",
+    "lv": "Runas modelis Qwen3-TTS",
+}
+
+
 def _queue(lang: str) -> Snapshot:
-    names = {
-        "en": ["Clarity speech", "Clarity denoise", "Clarity separator", "Clarity vocoder", "Clarity align"],
-        "ru": ["Речь Clarity", "Шумоподавление", "Разделение", "Вокодер", "Выравнивание"],
-        "de": ["Sprache", "Rauschunterdrückung", "Trennung", "Vocoder", "Ausrichtung"],
-        "uk": ["Мовлення", "Шумозниження", "Розділення", "Вокодер", "Вирівнювання"],
-        "lv": ["Runa", "Trokšņu slāpēšana", "Atdalīšana", "Vokoders", "Izlīdzināšana"],
-    }[lang]
+    names = [row[lang] for row in _CLARITY]
     specs = [
         (ItemState.DOWNLOADING, "huggingface", 480_000_000, 190_000_000, 2_400_000, 120),
         (ItemState.VERIFYING, "kaggle", 90_000_000, 90_000_000, 0, None),
         (ItemState.PENDING, "modelscope", 220_000_000, 0, 0, None),
-        (ItemState.READY, "gdrive", 40_000_000, 40_000_000, 0, None),
-        (ItemState.PENDING, "url", 15_000_000, 4_000_000, 0, None),
+        (ItemState.READY, "huggingface", 40_000_000, 40_000_000, 0, None),
+        (ItemState.PENDING, "huggingface", 15_000_000, 0, 0, None),
     ]
     items = []
     for index, (state, source, size, received, speed, eta) in enumerate(specs):
@@ -93,13 +155,7 @@ def _queue(lang: str) -> Snapshot:
 
 
 def _paused(lang: str) -> Snapshot:
-    title = {
-        "en": "Upscaler",
-        "ru": "Увеличение",
-        "de": "Vergrößerung",
-        "uk": "Збільшення",
-        "lv": "Palielinājums",
-    }[lang]
+    title = _ENLARGE[lang]
     item = _item(
         "a" * 64,
         title,
@@ -116,13 +172,7 @@ def _paused(lang: str) -> Snapshot:
 
 
 def _ready(lang: str) -> Snapshot:
-    title = {
-        "en": "Upscaler",
-        "ru": "Увеличение",
-        "de": "Vergrößerung",
-        "uk": "Збільшення",
-        "lv": "Palielinājums",
-    }[lang]
+    title = _ENLARGE[lang]
     item = _item(
         "b" * 64,
         title,
@@ -139,9 +189,7 @@ def _ready(lang: str) -> Snapshot:
 
 
 def _error(lang: str) -> Snapshot:
-    title = {"en": "Upscaler", "ru": "Увеличение", "de": "Vergrößerung", "uk": "Збільшення", "lv": "Palielinājums"}[
-        lang
-    ]
+    title = _ENLARGE[lang]
     item = _item(
         "c" * 64,
         title,
@@ -171,23 +219,27 @@ def _error(lang: str) -> Snapshot:
 def _multi() -> Snapshot:
     clarity = _item(
         "d" * 64,
-        "Speech model",
+        _CLARITY[0]["en"],
         state=ItemState.READY,
         source="huggingface",
         size=120_000_000,
         received=120_000_000,
         apps=["clarity"],
-        names={
-            "en": "Speech model",
-            "ru": "Речевая модель",
-            "de": "Sprachmodell",
-            "uk": "Мовна модель",
-            "lv": "Runas modelis",
-        },
+        names=_named(_CLARITY[0]),
+    )
+    runtime = _item(
+        "e" * 64,
+        _CLARITY[1]["en"],
+        state=ItemState.READY,
+        source="huggingface",
+        size=86_000_000,
+        received=86_000_000,
+        apps=["clarity"],
+        names=_named(_CLARITY[1]),
     )
     enlarge = _item(
-        "e" * 64,
-        "Upscaler",
+        "f" * 64,
+        _ENLARGE["en"],
         state=ItemState.DOWNLOADING,
         source="kaggle",
         size=900_000_000,
@@ -195,32 +247,30 @@ def _multi() -> Snapshot:
         apps=["enlarge"],
         speed=3_100_000,
         eta=210,
-        names={
-            "en": "Upscaler",
-            "ru": "Увеличение",
-            "de": "Vergrößerung",
-            "uk": "Збільшення",
-            "lv": "Palielinājums",
-        },
+        names=_named(_ENLARGE),
     )
-    book = _item(
-        "f" * 64,
-        "Narrator voice",
+    levi = _item(
+        "1" * 64,
+        _LEVI["en"],
         state=ItemState.PENDING,
-        source="modelscope",
-        size=300_000_000,
+        source="huggingface",
+        size=180_000_000,
         received=0,
         apps=["audiobook-builder"],
-        names={
-            "en": "Narrator voice",
-            "ru": "Голос чтеца",
-            "de": "Erzählerstimme",
-            "uk": "Голос читця",
-            "lv": "Stāstītāja balss",
-        },
+        names=_named(_LEVI),
+    )
+    qwen = _item(
+        "2" * 64,
+        _QWEN["en"],
+        state=ItemState.PENDING,
+        source="huggingface",
+        size=1_600_000_000,
+        received=0,
+        apps=["audiobook-builder"],
+        names=_named(_QWEN),
     )
     snap = Snapshot(
-        items=[clarity, enlarge, book],
+        items=[clarity, runtime, enlarge, levi, qwen],
         apps=[
             AppSlot("clarity", ""),
             AppSlot("enlarge", ""),
@@ -232,26 +282,23 @@ def _multi() -> Snapshot:
 
 
 def _manage(lang: str) -> ManageView:
+    source = tr_lang("mdl.row.from", lang, source=tr_lang("mdl.source.huggingface", lang))
     installed = ManageRow(
-        key="speech",
-        title={"en": "Speech model", "ru": "Речевая модель", "de": "Sprachmodell", "uk": "Мовна модель", "lv": "Runas modelis"}[
-            lang
-        ],
-        meta=tr_lang("mdl.row.meta", lang, size="120.0 MB", source="Hugging Face", speed="—", eta="—"),
+        key="enhance",
+        title=_CLARITY[0][lang],
+        meta=" · ".join((format_size(120_000_000, lang=lang), source)),
         state="ready",
         state_label=tr_lang("mdl.manage.status.ok", lang),
         action="remove",
         action_label=tr_lang("mdl.manage.remove", lang),
-        note=tr_lang("mdl.manage.shared", lang, apps="VOXPrint AI Audiobook Builder"),
+        note=tr_lang("mdl.manage.shared", lang, apps="VOXPrint AI Enlarge"),
     )
     available = ManageRow(
-        key="studio",
-        title={"en": "Studio voice", "ru": "Студийный голос", "de": "Studiostimme", "uk": "Студійний голос", "lv": "Studijas balss"}[
-            lang
-        ],
+        key="colour",
+        title=_CLARITY[4][lang],
         meta=" · ".join(
             (
-                "640.0 MB",
+                format_size(640_000_000, lang=lang),
                 tr_lang("mdl.manage.min_vram", lang, gb=8),
             )
         ),
@@ -266,8 +313,8 @@ def _manage(lang: str) -> ManageView:
         disk=tr_lang(
             "mdl.manage.disk",
             lang,
-            used="120.0 MB",
-            free="48.2 GB",
+            used=format_size(120_000_000, lang=lang),
+            free=format_size(51_750_000_000, lang=lang),
             app="VOXPrint AI Clarity",
             path="/home/alex/.local/share/voxprint/models",
         ),

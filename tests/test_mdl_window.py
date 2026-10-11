@@ -28,6 +28,7 @@ from voxprint_common.mdl.present import (
     SmoothedProgress,
     Snapshot,
     explain,
+    format_size,
     view_for,
 )
 from voxprint_common.paths import models_dir
@@ -203,8 +204,10 @@ def test_one_app_can_be_ready_while_another_downloads() -> None:
     view = view_for(snap, focus_app="clarity", lang="en")
     ready = next(group for group in view.groups if group.app_id == "clarity")
     assert "ready" in ready.headline.lower()
+    assert "open" not in ready.headline.lower()
     assert ready.open_label
     assert view.all_set is False
+    assert view.show_open is False
     assert app_ready("clarity", snap)
 
 
@@ -284,5 +287,65 @@ def test_view_uses_manifest_language() -> None:
     snap.recompute()
     view = view_for(snap, lang="de")
     assert view.groups[0].rows[0].title == "Stimme"
-    assert "Hugging Face" in view.groups[0].rows[0].meta
+    assert "von Hugging Face" in view.groups[0].rows[0].meta
+    assert "—" not in view.groups[0].rows[0].meta
+    assert view.show_open is False
     assert "Paus" in view.pause_label or view.pause_label == "Pause"
+
+
+def test_sizes_and_disk_copy_follow_the_locale() -> None:
+    assert format_size(480_000_000, lang="en") == "457.8 MB"
+    assert format_size(480_000_000, lang="ru") == "457,8\u202fМБ"
+    assert format_size(2_400_000, lang="de") == "2,3\u202fMB"
+    assert format_size(5_200_000_000, lang="uk") == "4,8\u202fГБ"
+    assert format_size(5_200_000_000, lang="lv") == "4,8\u202fGB"
+    item = QueueItem(
+        key="c" * 64,
+        names={"en": "Upscale model", "ru": "Модель увеличения"},
+        fallback="model",
+        size=800_000_000,
+        received=20_000_000,
+        state=ItemState.FAILED,
+        source="huggingface",
+        speed_bps=0,
+        eta_s=None,
+        apps=["enlarge"],
+    )
+    snap = Snapshot(
+        items=[item],
+        apps=[AppSlot("enlarge", "")],
+        boot_code="disk",
+        boot_technical="OSError: no space",
+        boot_params={
+            "path": "/home/alex/.local/share/voxprint/models",
+            "need_bytes": "5200000000",
+            "free_bytes": "180000000",
+        },
+    )
+    snap.recompute()
+    view = view_for(snap, focus_app="enlarge", lang="ru")
+    assert "папке моделей VOXPrint" in view.error_what
+    assert "/home" not in view.error_what
+    assert "/home/alex/.local/share/voxprint/models" in view.technical
+    assert "около 4,8\u202fГБ" in view.error_do
+    assert "приостановлена" in view.status
+    assert view.open_folder_label == "Открыть папку"
+    assert view.show_open is False
+    waiting = QueueItem(
+        key="d" * 64,
+        names={"ru": "Цветовая модель"},
+        fallback="colour",
+        size=15_000_000,
+        received=0,
+        state=ItemState.PENDING,
+        source="url",
+        speed_bps=0,
+        eta_s=None,
+        apps=["clarity"],
+    )
+    quiet = Snapshot(items=[waiting], apps=[AppSlot("clarity", "")])
+    quiet.recompute()
+    row = view_for(quiet, lang="ru").groups[0].rows[0]
+    assert row.meta == format_size(15_000_000, lang="ru")
+    assert "—" not in row.meta
+    assert "Загрузка" not in row.meta
