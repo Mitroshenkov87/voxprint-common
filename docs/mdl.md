@@ -6,26 +6,40 @@ Audiobook Builder, Plotweaver, Movie Dubber, Clarity, Enlarge, and Canvas do not
 
 ## What the installer runs
 
-After the files are in place:
+MDL never starts an app window. The installer copies the app, enqueues the models, then waits until the status file is ready. It must not open the app before that.
 
 ```bash
-voxprint-mdl download --manifest "/opt/voxprint-ai-suite/enlarge/mdl.json" --gui
+voxprint-mdl enqueue --app enlarge --manifest "/opt/voxprint-ai-suite/enlarge/mdl.json"
+voxprint-mdl download --app enlarge --manifest "/opt/voxprint-ai-suite/enlarge/mdl.json" --gui
 ```
 
-On Windows the same flag points at `C:\Program Files\VOXPrint AI Suite\Enlarge\mdl.json`.
+`download` enqueues and then runs the worker, or attaches if another process already holds it. `enqueue` only appends the job. `status --wait` attaches until the queue is idle. On Windows the manifest path is `C:\Program Files\VOXPrint AI Suite\Enlarge\mdl.json` (or `voxprint-app-models.json`).
 
-`--gui` opens the progress window. It needs `voxprint-common[ui]`. The labels are Russian: the step list columns are model, size, source, speed, and time remaining, with overall progress, Отмена, and Повторить after a failure. Without `--gui` the job is headless and suitable for a silent install.
+`--gui` opens the progress window. It needs `voxprint-common[ui]`. The labels are Russian: the step list columns are model, size, source, speed, and time remaining, with overall progress, Отмена, and Повторить after a failure. Without `--gui` the job is headless and suitable for a silent install. A hook failure uses exit code 2, so Повторить runs the job again.
 
-Omit `--manifest` to discover every installed app. Discovery reads `<home>/state/installed-apps.json` when that file exists (`{"schema": 1, "apps": [{"id": "enlarge", "path": "..."}]}`). An empty registry means nothing is installed. When the registry is absent, the command looks for `mdl.json` under the suite root: `VOXPRINT_SUITE_ROOT`, otherwise `%PROGRAMFILES%\VOXPrint AI Suite\<App Name>` on Windows and `/opt/voxprint-ai-suite/<app>` on Linux.
+Omit `--manifest` to discover every installed app. Discovery reads `<home>/state/installed-apps.json` when that file exists (`{"schema": 1, "apps": [{"id": "enlarge", "path": "..."}]}`), then `mdl.json`, then `voxprint-app-models.json`. An empty registry means nothing is installed. When the registry is absent, the command looks under the suite root: `VOXPRINT_SUITE_ROOT`, otherwise `%PROGRAMFILES%\VOXPrint AI Suite\<App Name>` on Windows and `/opt/voxprint-ai-suite/<app>` on Linux.
 
-`--json` prints progress lines and one result line on stdout. `--dry-run` plans and checks free disk space, and does not fetch. Both flags may sit before or after the subcommand.
+`--json` prints progress lines and one result line on stdout. `--dry-run` plans and checks free disk space. It does not enqueue and does not fetch. Both flags may sit before or after the subcommand.
 
 ```bash
 voxprint-mdl --json download --dry-run --manifest ./mdl.json
+voxprint-mdl enqueue --app enlarge --json
 voxprint-mdl plan
 voxprint-mdl verify
-voxprint-mdl status --json
+voxprint-mdl status --json --wait
 ```
+
+From Python, `enqueue(app)` returns a job id and `ensure_ready(app)` enqueues, runs or attaches, and returns `Ready` or `Failed`.
+
+## Queue
+
+There is one queue, `<home>/state/mdl-queue.json`, schema 1, UTF-8, written atomically under `mdl-queue.lock`. Installers and apps only enqueue. One worker holds `mdl-worker.lock`. Everyone else leaves the job in the queue or attaches through status and the progress events. A crash leaves jobs in `running` and `.partial` files in place; the next worker resumes them with HTTP Range. Files already in the shared models directory are not downloaded again: a matching size plus a `.verified` marker is enough, and the digest is read only when that marker is missing. The app is still added as a ref.
+
+Two apps that need the same sha256 share one download. The default is two files at a time (`mdl_parallel_files` in the suite settings, 1 through 8). A request that arrives while the worker is running is appended.
+
+## Progress events
+
+`TransferSession` is the in-process API: `subscribe`, `publish`, `pause`, `resume`, and `cancel`. A `ProgressEvent` carries `ItemProgress` (id, display name, bytes done and total, speed, eta, source, state, apps, reason) and `JobProgress`, grouped by app with `jobs_by_app()`. Item states include `pending`, `downloading`, `paused`, `verified`, `failed`, `cancelled`, `error`, and `unavailable`. A cross-process window polls the status file. `reason` is the unavailable explanation; the existing table shows it in the source column.
 
 ## Exit codes
 
@@ -84,13 +98,29 @@ Schema 1. One file per app, named `mdl.json`.
 
 A mirror may also be an `http` or `https` URL string, or `{"source": "url", "url": "https://..."}`. `..` in a file path is rejected.
 
-Files that share a sha256 across apps are stored once, at `<models_dir>/blobs/<sha256>`. Each app is a ref on that runtime-manifest component. The component id is `model-` plus the digest prefix, and the component version is the full sha256, so a second app reuses the bytes instead of writing over them.
+Files that share a sha256 across apps are stored once, at `<models_dir>/blobs/<sha256>`. Each app is a ref on that runtime-manifest component. The component id is `model-` plus the first 12 hex characters of the file sha256. An older `model-` id that already records that digest is reused. The component version is the full sha256, so a second app reuses the bytes instead of writing over them.
+
+A side virtualenv uses `runtime-py<major><minor>-<stack>-cu<version>`, from `runtime_component_id`. Examples: `runtime-py311-nunchaku-cu130` and `runtime-py314-torch2.11-cu130`.
+
+A model may set `status` to `unavailable` with a `reason` such as `model_in_preparation`. It is shown in the progress list, left out of the byte total, and never downloaded. Asking for that id by name is an error. `voxprint-app-models/1` can list the same fact under `unavailable`.
+
+Hugging Face mirrors need a revision. `main` is accepted when the manifest says it. An empty or missing revision is refused. Downloads are HTTPS and stay on the host allowlist (`huggingface.co`, `hf.co`, `kaggle.com`, `modelscope.cn`, `drive.google.com`, `docs.google.com`, `googleusercontent.com`, `github.com`, `githubusercontent.com`), including redirects. Private, loopback, and link-local addresses are refused. Tests opt in with `UrlGuard.loopback()` or `VOXPRINT_MDL_TEST_GUARD=loopback`.
+
+An entry whose only URL is a gated upstream (`pyannote/speaker-diarization-community-1`, `pyannote/embedding`) is rejected. The suite copies live at `Mitroshenkov87/voxprint-pyannote-speaker-diarization-community-1` (revision `9c851af7`) and `Mitroshenkov87/voxprint-pyannote-embedding` (revision `4655ca65`), with the same dataset names under the Kaggle owner `mitroshenkov87`. `public_mirror_urls` builds those URLs and does not read `HF_TOKEN`. The bundled index pins the example descriptors in this package until Forge publishes `voxprint-model.json` in the weight repos. A remote index is used only when its sha256 matches that pin.
+
+A model, or the app, may declare `post_install`:
+
+```json
+{"argv": ["voxprint-enlarge-cli", "--prepare-model", "{id}"], "timeout_s": 1800, "produces": ["model.onnx"]}
+```
+
+The worker runs it after the digest check and the atomic rename. `{id}`, `{model_dir}`, and `{models_root}` are filled in. The executable is resolved from the app install directory (and `bin/`), never from `PATH`. On Windows the process is created with `CREATE_NO_WINDOW`. The hook is skipped when every `produces` path exists and the marker under `<home>/state/mdl-hooks/` records the source sha256. `verify` runs it again when the marker or the digest differs. Failure sets the item to `error` with a short message and exit code 2. Stderr is appended to `mdl-hook.log` and is not shown in the window. The item is ready only after the hook succeeds. Enlarge uses this to turn a downloaded `.pth` into an fp16 ONNX file.
 
 ## Disk, resume, and mirrors
 
-Before the first request, free space must cover the bytes still missing plus 15 percent. The error includes the product name and both byte counts (needed, and free). Bytes already in a finished file of the expected size are not counted again.
+Before the first request, free space must cover the bytes still missing times 1.10, plus 2 GiB. Nothing is fetched when that check fails. The error names VOXPrint MDL and both byte counts. Bytes already in a finished file of the expected size are not counted again.
 
-Transfers use HTTP Range and keep the `.partial` file across a dropped connection. Mirrors are timed and the faster one is used; a mirror that recovers and measures faster is selected again. After the digest matches, the file is renamed into place. A mismatch deletes the partial and tries another mirror.
+Transfers use HTTP Range and keep the `.partial` file across a dropped connection. A file larger than 256 MiB is split into 4 to 8 ranges when the server answers 206, with a per-host cap and a shared connection budget. Each part resumes from `.partial.parts`. A server that ignores Range falls back to one stream. Mirrors are timed. A mirror at or under 84 KiB/s is dropped when another mirror is faster, and a mirror that recovers and measures faster is selected again. After the digest matches, the file is renamed into place. A mismatch deletes the partial and tries another mirror.
 
 Hugging Face URLs use `hf_xet` when that package is installed, `HF_HUB_DISABLE_XET` is unset, and the response offers an xet hash. Otherwise the transfer stays on HTTP Range. Install the package beside the library when you want it: `python -m pip install hf-xet`.
 

@@ -1,6 +1,6 @@
 """Shared ``suite.json`` (schema 1).
 
-The file is ``<home>/state/suite.json``. Five values are shared. Every other
+The file is ``<home>/state/suite.json``. The keys below are shared. Every other
 key is preserved, so one app does not wipe another's settings.
 
 * ``ui_language``: a language tag such as ``en`` or ``pt-BR``
@@ -8,6 +8,8 @@ key is preserved, so one app does not wipe another's settings.
 * ``models_dir``: an absolute path, or JSON null for the default folder
 * ``gpu``: ``auto`` or ``cuda:N``
 * ``keep_awake_during_jobs``: true or false. True asks long jobs to block sleep.
+* ``mdl_parallel_files``: how many model files the downloader fetches at once.
+  Missing or invalid values mean 2. The accepted range is 1 through 8.
 
 ``VOXPRINT_MODELS_DIR`` is applied by :func:`voxprint_common.paths.models_dir`,
 not by the getters here.
@@ -32,11 +34,13 @@ __all__ = [
     "file",
     "gpu",
     "keep_awake_during_jobs",
+    "mdl_parallel_files",
     "models_dir",
     "normalize_gpu",
     "read",
     "set_gpu",
     "set_keep_awake_during_jobs",
+    "set_mdl_parallel_files",
     "set_models_dir",
     "set_theme",
     "set_ui_language",
@@ -47,7 +51,8 @@ __all__ = [
 ]
 
 SCHEMA = 1
-KEYS = ("ui_language", "theme", "models_dir", "gpu", "keep_awake_during_jobs")
+KEYS = ("ui_language", "theme", "models_dir", "gpu", "keep_awake_during_jobs", "mdl_parallel_files")
+DEFAULT_PARALLEL_FILES = 2
 DEFAULT_THEME = "glass-dark"
 THEMES = frozenset({DEFAULT_THEME})
 DEFAULT_GPU = "auto"
@@ -124,6 +129,34 @@ def keep_awake_during_jobs() -> bool:
     return True
 
 
+def mdl_parallel_files() -> int:
+    """Return how many model files to fetch at once.
+
+    A missing or invalid stored value is 2. The file is not created.
+    """
+    stored = read().get("mdl_parallel_files")
+    if isinstance(stored, bool) or not isinstance(stored, int):
+        return DEFAULT_PARALLEL_FILES
+    if stored < 1 or stored > 8:
+        return DEFAULT_PARALLEL_FILES
+    return stored
+
+
+def set_mdl_parallel_files(count: int) -> int:
+    """Store the model-download concurrency.
+
+    Args:
+        count: From 1 to 8 files at once.
+
+    Returns:
+        The stored count.
+
+    Raises:
+        ValueError: ``count`` is outside 1..8.
+    """
+    return int(set_value("mdl_parallel_files", count))
+
+
 def values() -> dict[str, Any]:
     """Return the shared values with defaults applied.
 
@@ -136,6 +169,7 @@ def values() -> dict[str, Any]:
         "models_dir": str(folder) if folder else None,
         "gpu": gpu(),
         "keep_awake_during_jobs": keep_awake_during_jobs(),
+        "mdl_parallel_files": mdl_parallel_files(),
     }
 
 
@@ -329,6 +363,10 @@ def _validate(key: str, value: object) -> object:
     if key == "keep_awake_during_jobs":
         if not isinstance(value, bool):
             raise ValueError(f"keep_awake_during_jobs must be true or false, got {value!r}")
+        return value
+    if key == "mdl_parallel_files":
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1 or value > 8:
+            raise ValueError(f"mdl_parallel_files must be an integer from 1 to 8, got {value!r}")
         return value
     raise ValueError(f"not a shared setting: {key!r}")
 

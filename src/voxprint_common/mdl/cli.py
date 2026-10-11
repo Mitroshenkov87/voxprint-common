@@ -1,11 +1,15 @@
 """``voxprint-mdl`` command line.
 
-Subcommands: ``plan``, ``download``, ``status``, ``verify``.
+Subcommands: ``plan``, ``enqueue``, ``download``, ``status``, ``verify``.
+
+``enqueue`` appends a job and exits. ``download`` enqueues when ``--app`` or
+``--manifest`` is set, then runs the single worker or attaches to the one
+already running. ``status --wait`` attaches until the queue is idle.
 
 ``--json`` writes UTF-8 progress lines and one result line on stdout. Human
 text goes to stderr. ``--dry-run`` builds the plan and checks free disk space
-without downloading. Both flags are accepted before or after the subcommand.
-``--gui`` belongs on ``download``.
+without downloading or enqueueing. Both flags are accepted before or after
+the subcommand. ``--gui`` belongs on ``download``.
 
 Exit codes, shared with :mod:`voxprint_common.cli_protocol`:
 
@@ -21,7 +25,9 @@ from __future__ import annotations
 
 import argparse
 import sys
+import threading
 from collections.abc import Sequence
+from pathlib import Path
 
 from voxprint_common import __version__
 from voxprint_common.cli_protocol import (
@@ -33,8 +39,11 @@ from voxprint_common.cli_protocol import (
     emit,
     result,
 )
-from voxprint_common.mdl.job import download, plan, verify
+from voxprint_common.mdl.catalog import CatalogError, discover, load_manifest
+from voxprint_common.mdl.events import TransferSession
+from voxprint_common.mdl.job import Outcome, download, plan, verify
 from voxprint_common.mdl.names import CLI_NAME, DISPLAY_NAME
+from voxprint_common.mdl.queue import enqueue, load_queue, run_or_attach
 from voxprint_common.mdl.status import JobState, StatusError, load_status
 
 __all__ = ["main"]
@@ -78,7 +87,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     session = Session() if args.json else None
     try:
         code, message, payload = _run(args, session)
-    except StatusError as exc:
+    except (StatusError, CatalogError) as exc:
         code, message, payload = EXIT_FAILED, str(exc), {}
     if session is not None and not session.finished:
         session.finish(code == EXIT_OK, code=code, message=message, **payload)
@@ -108,7 +117,8 @@ def _parser() -> _Parser:
     commands = parser.add_subparsers(dest="command", required=True)
     for name, help_text in (
         ("plan", "show the models this machine needs and check free disk space"),
-        ("download", "download the planned models"),
+        ("enqueue", "add a download job and exit"),
+        ("download", "enqueue, then run the worker or attach to it"),
         ("status", "print the status file"),
         ("verify", "re-hash the planned models"),
     ):
@@ -117,34 +127,114 @@ def _parser() -> _Parser:
             "--manifest",
             action="append",
             default=[],
-            help="path to an app mdl.json; default is to discover installed apps",
+            help="path to an app manifest; default is to discover installed apps",
+        )
+        command.add_argument("--app", help="suite app id")
+        command.add_argument(
+            "--model",
+            action="append",
+            default=[],
+            help="model id to include; repeat for more than one. On-demand models need this",
         )
         command.add_argument("--gui", action="store_true", help="show the progress window")
+        if name == "status":
+            command.add_argument(
+                "--wait",
+                action="store_true",
+                help="run or attach until the queue is idle",
+            )
     return parser
 
 
 def _run(args: argparse.Namespace, session: Session | None) -> tuple[int, str, dict[str, object]]:
-    manifests = args.manifest or None
     if args.gui and args.command != "download":
         return EXIT_USAGE, "--gui is only valid with download", {}
     if args.gui:
         return _gui(args, session)
     if args.command == "status":
+        if args.wait:
+            return _wait(session)
         return _status()
+    if args.command == "enqueue":
+        return _enqueue(args)
+    models = tuple(args.model) if args.model else None
+    manifests = [Path(item) for item in args.manifest] if args.manifest else None
     on_progress = _progress(session) if session is not None else None
     if args.command == "plan":
-        outcome = plan(manifests)
+        outcome = plan(manifests, only=models)
     elif args.command == "verify":
-        outcome = verify(manifests)
+        outcome = verify(manifests, only=models)
     elif args.command == "download":
-        outcome = download(
-            manifests,
-            dry_run=args.dry_run,
-            display=False,
-            on_progress=on_progress,
-        )
+        if args.dry_run:
+            outcome = download(
+                manifests,
+                dry_run=True,
+                display=False,
+                on_progress=on_progress,
+                only=models,
+            )
+        else:
+            outcome = _queue_download(args, _watch(session))
     else:
         return EXIT_USAGE, f"unknown command {args.command}", {}
+    return outcome.code, outcome.message, _payload(outcome.status)
+
+
+def _enqueue(args: argparse.Namespace) -> tuple[int, str, dict[str, object]]:
+    app, models, manifests = _request(args)
+    if app is None:
+        return EXIT_USAGE, "enqueue needs --app or --manifest", {}
+    job_id = enqueue(app, models, manifests=manifests)
+    jobs = [job.to_dict() for job in load_queue()]
+    return EXIT_OK, job_id, {"job": job_id, "ready": False, "state": "queued", "jobs": jobs}
+
+
+def _queue_download(args: argparse.Namespace, session: TransferSession | None) -> Outcome:
+    app, models, manifests = _request(args)
+    if app is not None:
+        job_id = enqueue(app, models, manifests=manifests)
+        return run_or_attach(job_id, session=session, display=args.gui)
+    if not _busy():
+        found = discover()
+        if not found and not load_queue():
+            return download(None, display=args.gui, session=session, only=models)
+        for installed in found:
+            enqueue(installed.id, models)
+    return run_or_attach(None, session=session, display=args.gui)
+
+
+def _request(
+    args: argparse.Namespace,
+) -> tuple[str | None, tuple[str, ...] | None, list[Path] | None]:
+    manifests = [Path(item) for item in args.manifest] if args.manifest else None
+    models = tuple(args.model) if args.model else None
+    app = args.app or None
+    if app is None and manifests:
+        app = load_manifest(manifests[0]).app
+    return app, models, manifests
+
+
+def _busy() -> bool:
+    return any(job.state in {"queued", "running"} for job in load_queue())
+
+
+def _watch(session: Session | None) -> TransferSession | None:
+    if session is None:
+        return None
+    transfer = TransferSession()
+
+    def on_event(event: object) -> None:
+        fraction = getattr(event, "bytes_done", 0)
+        total = getattr(event, "bytes_total", 0)
+        ratio = None if not total else min(1.0, fraction / total)
+        session.progress("download", ratio, str(getattr(event, "state", "")))
+
+    transfer.subscribe(on_event)
+    return transfer
+
+
+def _wait(session: Session | None) -> tuple[int, str, dict[str, object]]:
+    outcome = run_or_attach(None, session=_watch(session))
     return outcome.code, outcome.message, _payload(outcome.status)
 
 
@@ -155,14 +245,25 @@ def _gui(args: argparse.Namespace, session: Session | None) -> tuple[int, str, d
     except ImportError as exc:
         return EXIT_FAILED, f"{DISPLAY_NAME} needs the ui extra for --gui ({exc})", {}
 
-    def start(cancel: object, on_status: object) -> object:
-        return download(
-            args.manifest or None,
-            dry_run=args.dry_run,
-            cancel=cancel,  # type: ignore[arg-type]
-            display=True,
-            on_status=on_status,  # type: ignore[arg-type]
-        )
+    def start(cancel: object, on_status: object) -> Outcome:
+        event = cancel if isinstance(cancel, threading.Event) else None
+        if args.dry_run:
+            return download(
+                [Path(item) for item in args.manifest] if args.manifest else None,
+                dry_run=True,
+                cancel=event,
+                display=True,
+                on_status=on_status if callable(on_status) else None,
+                only=tuple(args.model) if args.model else None,
+            )
+        transfer = TransferSession(event)
+
+        def on_event(_event: object) -> None:
+            if callable(on_status):
+                on_status(load_status())
+
+        transfer.subscribe(on_event)
+        return _queue_download(args, transfer)
 
     try:
         code = run_window(start)  # type: ignore[arg-type]
@@ -183,7 +284,8 @@ def _payload(status: object) -> dict[str, object]:
     ready = bool(getattr(status, "ready", False))
     state = getattr(status, "state", JobState.IDLE)
     value = state.value if isinstance(state, JobState) else str(state)
-    return {"ready": ready, "state": value}
+    jobs = getattr(status, "jobs", [])
+    return {"ready": ready, "state": value, "jobs": list(jobs or [])}
 
 
 def _progress(session: Session):

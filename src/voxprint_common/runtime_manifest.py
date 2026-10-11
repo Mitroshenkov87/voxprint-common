@@ -3,8 +3,12 @@
 The file is ``<home>/shared/manifest.json``. Top-level keys are ``schema``
 and ``components``. Any other top-level key is preserved.
 
-A component id matches ``[a-z0-9][a-z0-9._-]*``. ``refs`` lists the apps that
-installed it. The component is deleted only when that list becomes empty.
+A component id matches ``[a-z0-9][a-z0-9._-]*``. Model files use
+``model-`` plus the first 12 hex characters of the file sha256. A side
+virtualenv uses ``runtime-py<major><minor>-<stack>-cu<version>``, for
+example ``runtime-py311-nunchaku-cu130`` and ``runtime-py314-torch2.11-cu130``.
+``refs`` lists the apps that installed the component. The component is
+deleted only when that list becomes empty.
 A ``model`` path may be absolute when it stays under the shared models
 directory or a configured cache root. Every other absolute path is rejected.
 Writes take ``manifest.lock`` (exclusive, 30 seconds) and publish through a
@@ -49,6 +53,7 @@ __all__ = [
     "load",
     "lock_path",
     "remove_ref",
+    "runtime_component_id",
 ]
 
 SCHEMA = 1
@@ -145,6 +150,35 @@ def load(path: Path | None = None, *, timeout: float = _TIMEOUT) -> Manifest:
         return Manifest()
     with exclusive_lock(lock_path(target), timeout=timeout):
         return _load_migrate(target)
+
+
+def runtime_component_id(major: int, minor: int, stack: str, cuda: str) -> str:
+    """Return the component id for one side virtualenv.
+
+    The shape is ``runtime-py311-nunchaku-cu130``. ``stack`` is a short name
+    such as ``nunchaku`` or ``torch2.11``. ``cuda`` is the toolkit digits,
+    ``130`` or ``cu130``.
+
+    Args:
+        major: Python major version.
+        minor: Python minor version.
+        stack: Runtime stack name.
+        cuda: CUDA version digits.
+
+    Raises:
+        ManifestError: A part is not a valid component token.
+    """
+    if isinstance(major, bool) or isinstance(minor, bool):
+        raise ManifestError("python version must be integers")
+    if not isinstance(major, int) or not isinstance(minor, int) or major < 1 or minor < 0:
+        raise ManifestError("python version must be a positive major and a minor")
+    stack_id = stack.strip()
+    if re.fullmatch(r"[a-z0-9]+(?:\.[0-9]+)*", stack_id) is None:
+        raise ManifestError(f"runtime stack {stack!r} is not a component token")
+    digits = cuda.strip().removeprefix("cu")
+    if not digits.isdigit():
+        raise ManifestError(f"cuda version {cuda!r} must be digits")
+    return f"runtime-py{major}{minor}-{stack_id}-cu{digits}"
 
 
 def add_ref(

@@ -28,6 +28,7 @@ from voxprint_common.mdl.cli import main
 from voxprint_common.mdl.fetch import Cancelled, FetchError, confirm_token, fetch_file
 from voxprint_common.mdl.job import detect_tier, download
 from voxprint_common.mdl.progress_ui import CANCEL_TEXT, RETRY_TEXT, format_eta, window_title
+from voxprint_common.mdl.safety import UrlGuard
 from voxprint_common.mdl.status import JobState, Status, save_status, status_path
 from voxprint_common.paths import state_dir
 from voxprint_common.runtime_manifest import load
@@ -222,8 +223,10 @@ def test_disk_short_fails_before_any_request(tmp_path: Path) -> None:
         server.shutdown()
         server.server_close()
     assert outcome.code == 2
-    assert str(math.ceil(len(PAYLOAD) * 1.15)) in outcome.message
-    assert "15%" in outcome.message
+    need = math.ceil(len(PAYLOAD) * 1.10) + 2 * 1024**3
+    assert str(need) in outcome.message
+    assert DISPLAY_NAME in outcome.message
+    assert "2 GiB" in outcome.message
     assert "10 bytes free" in outcome.message
     assert server.state.log == []  # type: ignore[attr-defined]
     assert not ready()
@@ -242,6 +245,7 @@ def test_resume_after_mid_transfer_drop(tmp_path: Path) -> None:
             batch_bytes=len(PAYLOAD),
             backoff_base=0.01,
             backoff_max=0.05,
+            guard=UrlGuard.loopback(),
         )
     finally:
         server.shutdown()
@@ -266,6 +270,7 @@ def test_mirror_failover_and_switch_back(tmp_path: Path) -> None:
             backoff_base=0.05,
             backoff_max=0.05,
             switch_ratio=1.25,
+            guard=UrlGuard.loopback(),
         )
     finally:
         server.shutdown()
@@ -291,6 +296,7 @@ def test_sha256_mismatch_removes_the_partial(tmp_path: Path) -> None:
                 size=len(PAYLOAD),
                 probe_bytes=0,
                 max_failures=1,
+                guard=UrlGuard.loopback(),
             )
     finally:
         server.shutdown()
@@ -308,6 +314,7 @@ def test_shared_file_is_referenced_by_each_app(tmp_path: Path) -> None:
             [enlarge, clarity],
             devices=[_gpu(8192)],
             priority=False,
+            guard=UrlGuard.loopback(),
             fetch_options={"probe_bytes": 0, "batch_bytes": len(PAYLOAD)},
         )
     finally:
@@ -321,7 +328,8 @@ def test_shared_file_is_referenced_by_each_app(tmp_path: Path) -> None:
     stored = json.loads(status_path().read_text(encoding="utf-8"))
     assert stored["ready"] is True
     document = load()
-    component = next(iter(document.components.values()))
+    component_id, component = next(iter(document.components.items()))
+    assert component_id == f"model-{DIGEST[:12]}"
     assert component.kind == "model"
     assert sorted(component.refs) == ["clarity", "enlarge"]
     bodies = [item for item in server.state.log if not item[2] and item[0] == "/file"]  # type: ignore[attr-defined]
@@ -408,6 +416,7 @@ def test_xet_is_used_when_a_hugging_face_mirror_offers_it(tmp_path: Path) -> Non
         opener=opener,
         xet_module=_Module(),
         probe_bytes=0,
+        guard=UrlGuard(resolve=lambda _host: ["1.1.1.1"]),
     )
     assert destination.read_bytes() == PAYLOAD
     assert calls == ["xet"]

@@ -92,14 +92,15 @@ add_ref(
 
 ## Installer integration
 
-Apps do not download models. The installer copies the app, then runs VOXPrint MDL. Pass the app manifest, or omit `--manifest` and let it discover installed apps.
+Apps do not download models. The installer copies the app, enqueues the models, and waits until the status file is ready. MDL does not open the app. The installer must not open it either until `ready()` is true.
 
 ```bash
-voxprint-mdl download --manifest "/opt/voxprint-ai-suite/enlarge/mdl.json" --gui
-voxprint-mdl status --json
+voxprint-mdl enqueue --app enlarge --manifest "/opt/voxprint-ai-suite/enlarge/mdl.json"
+voxprint-mdl download --app enlarge --manifest "/opt/voxprint-ai-suite/enlarge/mdl.json" --gui
+voxprint-mdl status --json --wait
 ```
 
-`--gui` needs the `ui` extra and shows the Russian progress window. Without it, the same job is headless. Exit 0 means the status file is ready when the plan had nothing left to fetch, or the download finished. Exit 2 means the job failed, including a disk check that refused to start. The app opens its own window only after `voxprint_common.mdl.ready()` is true. A missing status file is not ready.
+`download` enqueues and runs the single worker, or attaches when another process already holds the queue. `--gui` needs the `ui` extra and shows the Russian progress window. Without it, the same job is headless. Exit 0 means the status file is ready when the plan had nothing left to fetch, or the download finished. Exit 2 means the job failed, including a disk check that refused to start and a post-install hook that failed. The app opens its own window only after `voxprint_common.mdl.ready()` is true. A missing status file is not ready.
 
 The full contract, including `mdl.json` and the status file, is in the docs under Model downloader.
 

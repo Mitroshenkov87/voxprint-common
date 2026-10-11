@@ -1,0 +1,14 @@
+[
+  {
+    "id": "pyannote-speaker-diarization-community-1",
+    "repo": "Mitroshenkov87/voxprint-pyannote-speaker-diarization-community-1",
+    "revision": "9c851af7",
+    "sha256": "dad4c872fd1724b4aaae277b4e7ee3cc3a4bdc91c1250d452068bd0d583efcd5"
+  },
+  {
+    "id": "pyannote-embedding",
+    "repo": "Mitroshenkov87/voxprint-pyannote-embedding",
+    "revision": "4655ca65",
+    "sha256": "8a49cdf59db274d2b332e59d24a1fe31ca48682827b09f769b3b24b2f3fd0f12"
+  }
+]

@@ -27,6 +27,7 @@ ui = ["PySide6>=6.8"]
 dev = [
     "build>=1.2",
     "interrogate>=1.7",
+    "jsonschema>=4.23",
     "mkdocs>=1.6",
     "mkdocs-material>=9.5",
     "mkdocstrings[python]>=0.27",
@@ -51,6 +52,10 @@ packages = ["src/voxprint_common"]
 [tool.hatch.build.targets.wheel.force-include]
 "src/voxprint_common/py.typed" = "voxprint_common/py.typed"
 "src/voxprint_common/ui/tokens.json" = "voxprint_common/ui/tokens.json"
+"src/voxprint_common/mdl/schemas/voxprint-model.schema.json" = "voxprint_common/mdl/schemas/voxprint-model.schema.json"
+"src/voxprint_common/mdl/data/model-index.json" = "voxprint_common/mdl/data/model-index.json"
+"src/voxprint_common/mdl/data/examples/pyannote-embedding.json" = "voxprint_common/mdl/data/examples/pyannote-embedding.json"
+"src/voxprint_common/mdl/data/examples/pyannote-speaker-diarization-community-1.json" = "voxprint_common/mdl/data/examples/pyannote-speaker-diarization-community-1.json"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

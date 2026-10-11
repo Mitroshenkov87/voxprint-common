@@ -43,6 +43,7 @@ _KNOWN = frozenset(
         "error",
         "updated_at",
         "steps",
+        "jobs",
     }
 )
 
@@ -76,6 +77,8 @@ class Step:
     received: int
     sha256: str
     apps: list[str]
+    item_id: str = ""
+    display_name: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         """Return the JSON object for this step."""
@@ -89,6 +92,8 @@ class Step:
             "received": self.received,
             "sha256": self.sha256,
             "apps": list(self.apps),
+            "id": self.item_id,
+            "display_name": self.display_name,
         }
 
 
@@ -103,6 +108,7 @@ class Status:
     error: str = ""
     updated_at: str = ""
     steps: list[Step] = field(default_factory=list)
+    jobs: list[dict[str, Any]] = field(default_factory=list)
     extra: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -123,6 +129,7 @@ class Status:
             "error": self.error,
             "updated_at": self.updated_at or _now(),
             "steps": [step.to_dict() for step in self.steps],
+            "jobs": list(self.jobs),
         }
         for key, value in self.extra.items():
             if key not in body:
@@ -180,6 +187,7 @@ def load_status(path: Path | None = None) -> Status:
         error=_text(payload.get("error")),
         updated_at=_text(payload.get("updated_at")),
         steps=steps,
+        jobs=_jobs(payload.get("jobs")),
         extra=extra,
     )
     status.recompute()
@@ -237,7 +245,22 @@ def _step(value: object) -> Step:
         received=_count(value.get("received")),
         sha256=_text(value.get("sha256")),
         apps=list(apps),
+        item_id=_text(value.get("id")),
+        display_name=_text(value.get("display_name")),
     )
+
+
+def _jobs(value: object) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise StatusError("jobs must be a list")
+    jobs: list[dict[str, Any]] = []
+    for row in value:
+        if not isinstance(row, dict):
+            raise StatusError("job must be an object")
+        jobs.append(dict(row))
+    return jobs
 
 
 def _text(value: object) -> str:
