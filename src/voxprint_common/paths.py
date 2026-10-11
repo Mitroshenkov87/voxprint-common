@@ -13,14 +13,18 @@ import sys
 from pathlib import Path
 
 __all__ = [
+    "cache_dir",
     "home",
     "logs_dir",
     "manifest_file",
     "models_dir",
+    "projects_dir",
+    "runtime_dir",
     "shared_dir",
     "state_dir",
     "suite_settings_file",
     "trt_cache_dir",
+    "voices_dir",
 ]
 
 
@@ -49,6 +53,33 @@ def home() -> Path:
 def shared_dir() -> Path:
     """Return ``<home>/shared``, where the runtime and ``manifest.json`` live."""
     return home() / "shared"
+
+
+def runtime_dir() -> Path:
+    """Return the shared runtime root.
+
+    The torch and Python runtimes live under :func:`shared_dir`. That directory
+    is a protected root: a component must not claim it.
+    """
+    return shared_dir()
+
+
+def voices_dir() -> Path:
+    """Return ``<home>/voices``. The directory is not created."""
+    return home() / "voices"
+
+
+def projects_dir() -> Path:
+    """Return ``<home>/projects``. The directory is not created."""
+    return home() / "projects"
+
+
+def cache_dir() -> Path:
+    """Return ``<home>/cache``, the suite cache root.
+
+    The TensorRT cache is :func:`trt_cache_dir` and does not follow this path.
+    """
+    return home() / "cache"
 
 
 def state_dir() -> Path:

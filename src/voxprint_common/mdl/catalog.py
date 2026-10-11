@@ -199,6 +199,7 @@ class AppManifest:
     path: Path
     app_models: AppModels | None = None
     app_hook: PostInstall | None = None
+    runtimes: tuple[str, ...] = ()
 
 
 @dataclass
@@ -336,7 +337,13 @@ def load_manifest(
     if not isinstance(rows, list):
         raise CatalogError("models must be a list")
     models = tuple(_model(row) for row in rows)
-    return AppManifest(app, models, target, app_hook=_optional_hook(payload.get("post_install")))
+    return AppManifest(
+        app,
+        models,
+        target,
+        app_hook=_optional_hook(payload.get("post_install")),
+        runtimes=_runtime_names(payload.get("runtimes")),
+    )
 
 
 def plan_files(
@@ -624,7 +631,14 @@ def _load_app_models(
         raise CatalogError(str(exc)) from exc
     models = () if descriptors is None else _models_from_descriptors(document, descriptors)
     models = _mark_unavailable(models, document.unavailable)
-    return AppManifest(document.app_id, models, target, document, document.post_install)
+    return AppManifest(
+        document.app_id,
+        models,
+        target,
+        document,
+        document.post_install,
+        runtimes=document.runtimes,
+    )
 
 
 def _models_from_descriptors(
@@ -720,6 +734,7 @@ def _with_descriptors(
         manifest.path,
         manifest.app_models,
         manifest.app_hook,
+        runtimes=manifest.runtimes or manifest.app_models.runtimes,
     )
 
 
@@ -953,6 +968,17 @@ def _vram_gib(model_id: str, value: object) -> float | None:
     if isinstance(value, bool) or not isinstance(value, int | float):
         raise CatalogError(f"model {model_id} min_vram_gb must be a number")
     return float(value)
+
+
+def _runtime_names(value: object) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    bad = not isinstance(value, list) or any(
+        not isinstance(item, str) or not item.strip() for item in value
+    )
+    if bad:
+        raise CatalogError("runtimes must be a list of component ids")
+    return tuple(item.strip() for item in value)
 
 
 def _model(value: object) -> Model:

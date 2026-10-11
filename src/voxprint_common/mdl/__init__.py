@@ -12,6 +12,9 @@ download. A window subscribes to :class:`TransferSession` and reads
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 from voxprint_common.mdl.catalog import (
     HEADROOM,
     CatalogError,
@@ -30,7 +33,11 @@ from voxprint_common.mdl.events import (
 from voxprint_common.mdl.job import Outcome, download, plan, progress_event, verify
 from voxprint_common.mdl.names import CLI_NAME, DISPLAY_NAME
 from voxprint_common.mdl.queue import Failed, Ready, enqueue, ensure_ready, run_or_attach
-from voxprint_common.mdl.status import Status, load_status, ready
+from voxprint_common.mdl.readiness import disk_ready
+from voxprint_common.mdl.status import Status, load_status
+from voxprint_common.mdl.status import ready as _status_ready
+
+_APP_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 
 __all__ = [
     "CLI_NAME",
@@ -60,3 +67,21 @@ __all__ = [
     "suite_root",
     "verify",
 ]
+
+
+def ready(target: str | Path | None = None) -> bool:
+    """Return whether the models for ``target`` are on disk.
+
+    An app id checks every file that app's manifest requires for this tier,
+    including runtime components. A path, or no argument, reads one status
+    file. An app id does not trust that file.
+
+    Args:
+        target: Suite app id, or a status-file path. ``None`` reads the
+            default status file.
+    """
+    if isinstance(target, str) and _APP_ID.fullmatch(target):
+        return disk_ready(target)
+    if isinstance(target, Path):
+        return _status_ready(target)
+    return _status_ready(None)

@@ -30,8 +30,10 @@ from __future__ import annotations
 
 import importlib.metadata as importlib_metadata
 import json
+import logging
 import os
 import re
+import shutil
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -39,7 +41,19 @@ from pathlib import Path
 from typing import Any
 
 from voxprint_common.atomic import exclusive_lock, write_json
-from voxprint_common.paths import manifest_file, models_dir, shared_dir
+from voxprint_common.model_users import entry_blocks, hold_users, load_users
+from voxprint_common.paths import (
+    cache_dir,
+    home,
+    manifest_file,
+    models_dir,
+    projects_dir,
+    runtime_dir,
+    shared_dir,
+    state_dir,
+    trt_cache_dir,
+    voices_dir,
+)
 
 __all__ = [
     "KINDS",
@@ -48,13 +62,18 @@ __all__ = [
     "Manifest",
     "ManifestConflict",
     "ManifestError",
+    "ReleaseResult",
     "add_ref",
     "cpu_onnxruntime_conflicts",
     "load",
     "lock_path",
+    "release_component",
     "remove_ref",
+    "repair_manifest",
     "runtime_component_id",
 ]
+
+logger = logging.getLogger(__name__)
 
 SCHEMA = 1
 KINDS = frozenset({"runtime", "wheels", "model", "tool"})
@@ -193,6 +212,7 @@ def add_ref(
     manifest: Path | None = None,
     timeout: float = _TIMEOUT,
     model_roots: Sequence[Path] | None = None,
+    files: Sequence[Mapping[str, object]] | None = None,
 ) -> Component:
     """Add ``app`` to a component, installing the record when it is new.
 
@@ -217,6 +237,9 @@ def add_ref(
         model_roots: Extra absolute directories a ``model`` path may live in,
             besides :func:`voxprint_common.paths.models_dir` and
             ``VOXPRINT_MODEL_CACHE``.
+        files: Optional size list for a runtime directory. Each item has
+            ``path`` (relative) and ``size`` (bytes). Stored on the component
+            so a later presence check can see a truncated runtime.
 
     Returns:
         The component after the update.
@@ -230,22 +253,39 @@ def add_ref(
     app = _check_app(app)
     kind = _check_kind(kind)
     version = _required_text(version, "version")
+    if path.strip():
+        _refuse_protected(_resolve_registered_path(path.strip().replace("\\", "/")), path.strip())
     rel = _check_component_path(path, kind=kind, model_roots=_model_roots(model_roots))
     digest = _check_sha(sha256, required=True)
+    listed = None if files is None else _stored_files(files)
     stamp = installed_at if installed_at is not None else _now()
     target = manifest or manifest_file()
     target.parent.mkdir(parents=True, exist_ok=True)
     with exclusive_lock(lock_path(target), timeout=timeout):
         document = _load_migrate(target) if target.is_file() else Manifest()
+        resolved = _resolve_registered_path(rel)
+        _refuse_protected(resolved, rel)
+        _refuse_overlap(resolved, document, component_id)
         current = document.components.get(component_id)
         if current is None:
             created = Component(kind, version, rel, digest, stamp, [app])
+            if listed is not None:
+                created.extra["files"] = listed
             document.components[component_id] = created
             _write(target, document)
             return created
         if current.version == version and current.sha256 == digest:
+            changed = False
             if app not in current.refs:
                 current.refs.append(app)
+                changed = True
+            if listed is not None and current.extra.get("files") != listed:
+                current.extra["files"] = listed
+                changed = True
+            if current.path != rel:
+                current.path = rel
+                changed = True
+            if changed:
                 _write(target, document)
             return current
         others = [ref for ref in current.refs if ref != app]
@@ -262,6 +302,8 @@ def add_ref(
         current.sha256 = digest
         current.installed_at = stamp
         current.refs = [app]
+        if listed is not None:
+            current.extra["files"] = listed
         _write(target, document)
         return current
 
@@ -308,6 +350,105 @@ def remove_ref(
         return True
 
 
+@dataclass(frozen=True)
+class ReleaseResult:
+    """What a release did to one component."""
+
+    deleted: bool
+    ref_dropped: bool
+    message: str
+
+
+def release_component(
+    component_id: str,
+    app: str,
+    *,
+    manifest: Path | None = None,
+    timeout: float = _TIMEOUT,
+    dry_run: bool = False,
+    users: Path | None = None,
+) -> ReleaseResult:
+    """Drop ``app`` and delete the folder only when every safety check passes.
+
+    A delete is allowed only for a directory that is a direct child of the
+    models root, matches this component, has no remaining refs in the shared
+    manifest or in ``models/.users.json``, is not a protected root, and does
+    not contain another component. Anything else drops the ref and leaves the
+    files in place.
+
+    Args:
+        component_id: Component id.
+        app: Suite id to remove.
+        manifest: Manifest path.
+        timeout: Lock timeout in seconds.
+        dry_run: Report the decision and do not write or delete.
+        users: ``.users.json`` path. Defaults to the file in the models root.
+
+    Returns:
+        Whether the folder was removed and whether the ref was dropped.
+    """
+    app = _check_app(app)
+    target = manifest or manifest_file()
+    if not target.is_file():
+        return ReleaseResult(False, False, f"no manifest entry for {component_id}")
+    if dry_run:
+        return _release_locked(target, component_id, app, users, timeout, dry_run=True)
+    with hold_users(users, timeout=timeout) as users_document:
+        return _release_locked(
+            target,
+            component_id,
+            app,
+            users,
+            timeout,
+            dry_run=False,
+            users_document=users_document,
+        )
+
+
+def repair_manifest(
+    *,
+    manifest: Path | None = None,
+    timeout: float = _TIMEOUT,
+    dry_run: bool = False,
+) -> list[str]:
+    """Clear component paths that could delete a protected or shared directory.
+
+    The files on disk are never removed. A neutralised component keeps its
+    refs and records the old path in ``neutralised_from``.
+
+    Args:
+        manifest: Manifest path.
+        timeout: Lock timeout in seconds.
+        dry_run: Report the paths and do not write.
+
+    Returns:
+        One line per component that is, or would be, neutralised.
+    """
+    target = manifest or manifest_file()
+    if not target.is_file():
+        return []
+    with exclusive_lock(lock_path(target), timeout=timeout):
+        document = _load_migrate(target)
+        notes: list[str] = []
+        changed = False
+        for component_id, component in document.components.items():
+            if not component.path:
+                continue
+            resolved = _resolve_registered_path(component.path)
+            why = _neutralise_reason(component_id, resolved, document)
+            if not why:
+                continue
+            notes.append(f"neutralised {component_id}: {why}")
+            if dry_run:
+                continue
+            component.extra["neutralised_from"] = component.path
+            component.path = ""
+            changed = True
+        if changed:
+            _write(target, document)
+        return notes
+
+
 def cpu_onnxruntime_conflicts() -> bool:
     """Return whether the CPU ``onnxruntime`` distribution is installed.
 
@@ -321,6 +462,193 @@ def cpu_onnxruntime_conflicts() -> bool:
         if isinstance(raw, str) and raw:
             names.add(raw.lower())
     return "onnxruntime" in names
+
+
+def _release_locked(
+    target: Path,
+    component_id: str,
+    app: str,
+    users: Path | None,
+    timeout: float,
+    *,
+    dry_run: bool,
+    users_document: dict[str, Any] | None = None,
+) -> ReleaseResult:
+    """Drop one ref under the manifest lock, then delete only a safe folder."""
+    snapshot = users_document if users_document is not None else load_users(users)
+    folder: Path | None = None
+    reason = ""
+    with exclusive_lock(lock_path(target), timeout=timeout):
+        document = _load_migrate(target)
+        current = document.components.get(component_id)
+        if current is None or app not in current.refs:
+            return ReleaseResult(False, False, f"{app} does not reference {component_id}")
+        remaining = [ref for ref in current.refs if ref != app]
+        folder = _resolve_registered_path(current.path) if current.path else None
+        if remaining:
+            reason = f"still referenced by {', '.join(remaining)}"
+        else:
+            reason = _delete_block(component_id, current, document, folder, snapshot)
+        if dry_run:
+            if reason:
+                return ReleaseResult(
+                    False,
+                    True,
+                    f"would drop {app} from {component_id} and leave the files ({reason})",
+                )
+            return ReleaseResult(True, True, f"would remove {folder}")
+        if remaining:
+            current.refs = remaining
+        else:
+            del document.components[component_id]
+        _write(target, document)
+    if reason:
+        logger.warning(
+            "release left %s in place after dropping %s from %s: %s",
+            folder or component_id,
+            app,
+            component_id,
+            reason,
+        )
+        return ReleaseResult(
+            False,
+            True,
+            f"dropped {app} from {component_id}; left the files in place ({reason})",
+        )
+    if folder is not None and folder.is_dir():
+        shutil.rmtree(folder)
+    elif folder is not None and folder.is_file():
+        folder.unlink()
+    return ReleaseResult(True, True, f"removed {folder}")
+
+
+def _delete_block(
+    component_id: str,
+    current: Component,
+    document: Manifest,
+    folder: Path | None,
+    users_document: Mapping[str, Any],
+) -> str:
+    """Return why ``folder`` must not be deleted. An empty string allows it."""
+    if folder is None:
+        return "the component has no path"
+    hit = _protected_hit(folder)
+    if hit:
+        return f"the path is or contains the {hit} root"
+    if _contains_other(folder, document, component_id):
+        return "the path contains another component"
+    if any(entry_blocks(users_document.get(key)) for key in (component_id, folder.name)):
+        return "models/.users.json still lists a user"
+    models = models_dir().resolve()
+    blobs = (models / "blobs").resolve()
+    if folder.is_dir() and _same_path(folder.parent, models) and folder.name not in {"blobs", "."}:
+        if current.kind != "model":
+            return "only a model folder inside the models root can be removed"
+        return ""
+    if folder.is_file() and _same_path(folder.parent, blobs):
+        return ""
+    return "the path is not a per-model folder directly inside the models root"
+
+
+def _neutralise_reason(component_id: str, resolved: Path, document: Manifest) -> str:
+    """Return why this path must be cleared, or an empty string."""
+    hit = _protected_hit(resolved)
+    if hit:
+        return f"{resolved} is or contains the {hit} root"
+    for key, component in document.components.items():
+        if key == component_id or not component.path:
+            continue
+        other = _resolve_registered_path(component.path)
+        if resolved == other or _strict_contains(resolved, other):
+            return f"{resolved} overlaps component {key} at {other}"
+    return ""
+
+
+def _contains_other(folder: Path, document: Manifest, component_id: str) -> bool:
+    for key, component in document.components.items():
+        if key == component_id or not component.path:
+            continue
+        other = _resolve_registered_path(component.path)
+        if other == folder or _strict_contains(folder, other):
+            return True
+    return False
+
+
+def _refuse_protected(resolved: Path, shown: str) -> None:
+    hit = _protected_hit(resolved)
+    if hit:
+        raise ManifestError(f"refusing to register {shown}: the path is or contains the {hit} root")
+
+
+def _refuse_overlap(resolved: Path, document: Manifest, component_id: str) -> None:
+    for key, component in document.components.items():
+        if key == component_id or not component.path:
+            continue
+        other = _resolve_registered_path(component.path)
+        if (
+            resolved == other
+            or _strict_contains(resolved, other)
+            or _strict_contains(other, resolved)
+        ):
+            raise ManifestError(
+                f"refusing to register {resolved}: it overlaps component {key} at {other}"
+            )
+
+
+def _protected_hit(path: Path) -> str:
+    resolved = path.resolve()
+    roots = (
+        ("suite home", home()),
+        ("models", models_dir()),
+        ("model blobs", models_dir() / "blobs"),
+        ("runtime", runtime_dir()),
+        ("voices", voices_dir()),
+        ("projects", projects_dir()),
+        ("cache", cache_dir()),
+        ("trt cache", trt_cache_dir()),
+        ("state", state_dir()),
+    )
+    for name, root in roots:
+        if _same_or_ancestor(resolved, root.resolve()):
+            return name
+    return ""
+
+
+def _resolve_registered_path(text: str) -> Path:
+    candidate = Path(text)
+    if candidate.is_absolute():
+        return candidate.resolve()
+    return (shared_dir() / candidate).resolve()
+
+
+def _same_or_ancestor(path: Path, root: Path) -> bool:
+    left = os.path.normcase(str(path))
+    right = os.path.normcase(str(root))
+    return left == right or right.startswith(left + os.sep)
+
+
+def _strict_contains(outer: Path, inner: Path) -> bool:
+    base = os.path.normcase(str(outer))
+    cand = os.path.normcase(str(inner))
+    return cand.startswith(base + os.sep)
+
+
+def _same_path(left: Path, right: Path) -> bool:
+    return os.path.normcase(str(left.resolve())) == os.path.normcase(str(right.resolve()))
+
+
+def _stored_files(files: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for item in files:
+        raw = item.get("path")
+        rel = raw.strip() if isinstance(raw, str) else ""
+        if not rel or Path(rel).is_absolute() or ".." in Path(rel).parts:
+            raise ManifestError("component file list paths must stay inside the component")
+        size = item.get("size")
+        if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+            raise ManifestError("component file list sizes must be byte counts")
+        rows.append({"path": Path(rel).as_posix(), "size": size})
+    return rows
 
 
 def _load_migrate(path: Path) -> Manifest:

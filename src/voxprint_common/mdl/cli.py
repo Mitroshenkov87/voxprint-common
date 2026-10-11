@@ -45,7 +45,9 @@ from voxprint_common.mdl.events import TransferSession
 from voxprint_common.mdl.job import Outcome, download, plan, verify
 from voxprint_common.mdl.names import CLI_NAME, DISPLAY_NAME
 from voxprint_common.mdl.queue import enqueue, load_queue, run_or_attach
+from voxprint_common.mdl.readiness import publish_presence
 from voxprint_common.mdl.status import JobState, StatusError, load_status
+from voxprint_common.runtime_manifest import repair_manifest
 from voxprint_common.ui.mdl_window import (
     WindowResult,
     run_download_window,
@@ -155,6 +157,12 @@ def _parser() -> _Parser:
                 action="store_true",
                 help="run or attach until the queue is idle",
             )
+        if name == "verify":
+            command.add_argument(
+                "--repair",
+                action="store_true",
+                help="clear manifest paths that could delete a shared root; never deletes files",
+            )
     return parser
 
 
@@ -168,7 +176,7 @@ def _run(args: argparse.Namespace, session: Session | None) -> tuple[int, str, d
     if args.command == "status":
         if args.wait:
             return _wait(session)
-        return _status()
+        return _status(args)
     if args.command == "enqueue":
         return _enqueue(args)
     models = tuple(args.model) if args.model else None
@@ -177,6 +185,11 @@ def _run(args: argparse.Namespace, session: Session | None) -> tuple[int, str, d
     if args.command == "plan":
         outcome = plan(manifests, only=models)
     elif args.command == "verify":
+        if args.repair:
+            notes = repair_manifest(dry_run=args.dry_run)
+            if args.dry_run:
+                text = "\n".join(notes) if notes else "nothing to neutralise"
+                return EXIT_OK, text, {"ready": False}
         outcome = verify(manifests, only=models)
     elif args.command == "download":
         if args.dry_run:
@@ -303,8 +316,8 @@ def _gui(args: argparse.Namespace, session: Session | None) -> tuple[int, str, d
     return _window_code(outcome), message, _payload(status)
 
 
-def _status() -> tuple[int, str, dict[str, object]]:
-    status = load_status()
+def _status(args: argparse.Namespace) -> tuple[int, str, dict[str, object]]:
+    status = publish_presence(args.app)
     message = status.error or ("ready" if status.ready else status.state.value)
     return EXIT_OK, message, _payload(status)
 

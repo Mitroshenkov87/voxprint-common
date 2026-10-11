@@ -45,6 +45,7 @@ from voxprint_common.mdl.job import (
     download,
     progress_event,
 )
+from voxprint_common.mdl.readiness import disk_ready
 from voxprint_common.mdl.safety import UrlGuard
 from voxprint_common.mdl.status import JobState, Status, load_status, save_status
 from voxprint_common.paths import state_dir
@@ -279,6 +280,8 @@ def ensure_ready(app: str, progress_cb: ProgressCb | None = None) -> Ready | Fai
     done = finished is not None and finished.state == "done"
     idle = outcome.message == "nothing to download" or outcome.status.state is JobState.READY
     if outcome.code == EXIT_OK and (done or idle):
+        if not disk_ready(app):
+            return Failed(app, "needs download", outcome.status)
         return Ready(app, outcome.status)
     return Failed(app, outcome.message or outcome.status.error, outcome.status)
 

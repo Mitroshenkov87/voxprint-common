@@ -434,10 +434,20 @@ def _status_for(files: Sequence[PlannedFile], tier: VramTier, state: JobState) -
 
 def _note_local(status: Status, files: Sequence[PlannedFile]) -> None:
     for item, step in zip(files, status.steps, strict=True):
-        if item.destination.is_file() and item.destination.stat().st_size == item.size:
-            step.state = "verified"
-            step.received = item.size
+        if not item.destination.is_file():
+            step.state = "needs download"
+            step.received = 0
             step.source = "local"
+            continue
+        have = item.destination.stat().st_size
+        if have != item.size:
+            step.state = "needs repair"
+            step.received = have
+            step.source = "local"
+            continue
+        step.state = "verified"
+        step.received = item.size
+        step.source = "local"
     status.recompute()
 
 
@@ -585,6 +595,9 @@ def _publish(
 def _plan_message(status: Status) -> str:
     if status.ready:
         return "ready"
+    gaps = [step for step in status.steps if step.state in {"needs download", "needs repair"}]
+    if gaps:
+        return "; ".join(f"{step.state}: {step.model}" for step in gaps)
     if not status.steps:
         return "nothing to download"
     return f"planned {len(status.steps)} file(s), {status.bytes_total} bytes"
