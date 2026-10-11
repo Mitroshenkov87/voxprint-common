@@ -313,6 +313,9 @@ class WindowView:
     details_hide_label: str
     manage: ManageView | None = None
     background: str = ""
+    error_path: str = ""
+    open_folder_label: str = ""
+    footer: str = ""
 
 
 class SmoothedProgress:
@@ -381,8 +384,36 @@ def localized_name(names: dict[str, str], fallback: str, lang: str | None = None
     return fallback or code
 
 
+_COMMA_LANGS = frozenset({"de", "lv", "ru", "uk"})
+
+
+def _format_number(value: float, *, decimals: int, lang: str | None) -> str:
+    code = (lang or _active())[:2]
+    comma = code in _COMMA_LANGS
+    if decimals <= 0:
+        whole = str(round(value))
+        fraction = ""
+    else:
+        whole, fraction = f"{value:.{decimals}f}".split(".", 1)
+    sign = ""
+    if whole.startswith("-"):
+        sign, whole = "-", whole[1:]
+    if len(whole) > 3:
+        chunks: list[str] = []
+        while whole:
+            chunks.append(whole[-3:])
+            whole = whole[:-3]
+        whole = ("\u202f" if comma else ",").join(reversed(chunks))
+    if not fraction:
+        return sign + whole
+    return f"{sign}{whole}{',' if comma else '.'}{fraction}"
+
+
 def format_size(amount: int, *, lang: str | None = None) -> str:
-    """Return a short size such as ``1.5 MB``.
+    """Return a short size such as ``1.5 MB`` or ``457,8 МБ``.
+
+    German, Russian, Ukrainian, and Latvian use a decimal comma and a narrow
+    no-break space before the unit. English uses a dot and a normal space.
 
     Args:
         amount: Size in bytes.
@@ -390,12 +421,15 @@ def format_size(amount: int, *, lang: str | None = None) -> str:
     """
     value = float(max(0, amount))
     units = ("mdl.unit.b", "mdl.unit.kb", "mdl.unit.mb", "mdl.unit.gb")
+    code = (lang or _active())[:2]
+    gap = "\u202f" if code in _COMMA_LANGS else " "
     for index, key in enumerate(units):
         if value < 1024 or key == "mdl.unit.gb":
-            number = str(int(value)) if index == 0 else f"{value:.1f}"
-            return f"{number} {_t(key, lang)}"
+            number = _format_number(value, decimals=0 if index == 0 else 1, lang=lang)
+            return f"{number}{gap}{_t(key, lang)}"
         value /= 1024
-    return f"{value:.1f} {_t('mdl.unit.gb', lang)}"
+    number = _format_number(value, decimals=1, lang=lang)
+    return f"{number}{gap}{_t('mdl.unit.gb', lang)}"
 
 
 def format_speed(bps: float, *, lang: str | None = None) -> str:
@@ -537,6 +571,8 @@ def view_for(
     remaining = _overall_eta(snapshot)
     if snapshot.paused:
         detail = _t("mdl.overall.paused", code, done=done, total=total)
+    elif remaining is None:
+        detail = _t("mdl.overall.amounts", code, done=done, total=total)
     else:
         detail = _t(
             "mdl.overall.detail",
@@ -568,6 +604,13 @@ def view_for(
     open_app = focus if focus_ready else ""
     if all_set and not open_app and snapshot.apps:
         open_app = snapshot.apps[0].app_id
+    one_app = len(snapshot.apps) == 1
+    error_path, technical = _error_path(explanation)
+    folder_label = (
+        _t("mdl.open_folder", code)
+        if error_path and explanation is not None and explanation.code is ErrorCode.DISK
+        else ""
+    )
     return WindowView(
         mode=mode,
         focus_app=focus,
@@ -584,13 +627,13 @@ def view_for(
         error_what=_sentence(explanation, "what", code) if explanation else "",
         error_do_title=_t("mdl.error.do", code),
         error_do=_sentence(explanation, "do", code) if explanation else "",
-        technical=explanation.technical if explanation else "",
+        technical=technical,
         show_error=show_error,
         show_retry=show_error or snapshot.held,
         paused=snapshot.paused,
         show_pause=busy and not all_set,
         show_cancel=busy and not snapshot.held,
-        show_open=bool(open_app) and (all_set or focus_ready),
+        show_open=bool(open_app) and mode != "manage" and (all_set or one_app),
         open_label=_t("mdl.open", code, app=identity(open_app).display_name) if open_app else "",
         open_app=open_app,
         all_set=all_set,
@@ -606,6 +649,9 @@ def view_for(
         details_hide_label=_t("mdl.details.hide", code),
         manage=manage,
         background=background,
+        error_path=error_path,
+        open_folder_label=folder_label,
+        footer=_t("mdl.footer", code),
     )
 
 
@@ -641,27 +687,24 @@ def _group(slot: AppSlot, snapshot: Snapshot, lang: str) -> GroupView:
 
 def _row(item: QueueItem, lang: str) -> RowView:
     title = localized_name(item.names, item.fallback, lang)
-    speed = (
-        format_speed(item.speed_bps, lang=lang)
-        if item.state is ItemState.DOWNLOADING
-        else _t("mdl.eta.unknown", lang)
-    )
-    eta = (
-        format_eta(item.eta_s, lang=lang)
-        if item.state is ItemState.DOWNLOADING
-        else _t("mdl.eta.unknown", lang)
-    )
-    if item.state is ItemState.READY:
-        speed = _t("mdl.eta.unknown", lang)
-        eta = _t("mdl.eta.unknown", lang)
-    meta = _t(
-        "mdl.row.meta",
-        lang,
-        size=format_size(item.size, lang=lang),
-        source=source_label(item.source, lang=lang),
-        speed=speed,
-        eta=eta,
-    )
+    parts = [format_size(item.size, lang=lang)]
+    if item.state in {
+        ItemState.DOWNLOADING,
+        ItemState.VERIFYING,
+        ItemState.READY,
+        ItemState.PAUSED,
+    }:
+        label = source_label(item.source, lang=lang)
+        if source_id(item.source) == "local":
+            parts.append(label)
+        else:
+            parts.append(_t("mdl.row.from", lang, source=label))
+    if item.state is ItemState.DOWNLOADING and item.speed_bps > 0:
+        parts.append(format_speed(item.speed_bps, lang=lang))
+        eta = format_eta(item.eta_s, lang=lang)
+        if item.eta_s is not None and eta != _t("mdl.eta.unknown", lang):
+            parts.append(eta)
+    meta = " · ".join(parts)
     note = ""
     if len(item.apps) > 1:
         others = ", ".join(identity(app_id).display_name for app_id in item.apps)
@@ -699,7 +742,9 @@ def _headings(
             _t("mdl.all_set.line", lang, app=name),
             _t("mdl.status.all_set", lang, app=name),
         )
-    if snapshot.paused:
+    if explanation is not None and explanation.severity == "error":
+        status = _t("mdl.status.stopped", lang)
+    elif snapshot.paused:
         status = _t("mdl.status.paused", lang)
     elif snapshot.held:
         status = _t("mdl.status.cancelled", lang)
@@ -782,10 +827,24 @@ def _overall_eta(snapshot: Snapshot) -> float | None:
 def _sentence(explanation: Explanation, part: str, lang: str) -> str:
     key = explanation.what_key if part == "what" else explanation.do_key
     params = dict(explanation.params)
+    params.pop("path", None)
     if "need_bytes" in params:
         params["need"] = format_size(_int(params.pop("need_bytes")), lang=lang)
         params["free"] = format_size(_int(params.pop("free_bytes")), lang=lang)
+    params["folder"] = _t("mdl.disk.folder", lang)
     return _t(key, lang, **params)
+
+
+def _error_path(explanation: Explanation | None) -> tuple[str, str]:
+    if explanation is None:
+        return "", ""
+    technical = explanation.technical
+    raw = str(explanation.params.get("path") or "")
+    if not raw or raw == "—":
+        return "", technical
+    if raw not in technical:
+        technical = f"{technical}\n{raw}".strip()
+    return raw, technical
 
 
 def _int(value: str) -> int:

@@ -40,6 +40,7 @@ from voxprint_common.ui.theme import (
     GREEN,
     NOTE_BG,
     NOTE_BORDER,
+    PRIMARY,
     RED,
     TEXT_MUTED,
     build_style,
@@ -261,8 +262,16 @@ def _load_qt() -> object:
 
 
 def _builder(shot: bool) -> object:
-    from PySide6.QtCore import QRectF, Qt, QTimer
-    from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPixmap
+    from PySide6.QtCore import QRectF, Qt, QTimer, QUrl
+    from PySide6.QtGui import (
+        QColor,
+        QDesktopServices,
+        QFont,
+        QLinearGradient,
+        QPainter,
+        QPen,
+        QPixmap,
+    )
     from PySide6.QtWidgets import (
         QApplication,
         QFrame,
@@ -271,7 +280,6 @@ def _builder(shot: bool) -> object:
         QMenu,
         QMessageBox,
         QPlainTextEdit,
-        QProgressBar,
         QPushButton,
         QScrollArea,
         QSizePolicy,
@@ -362,13 +370,75 @@ def _builder(shot: bool) -> object:
             self.setFixedSize(side, side)
             self.setAccessibleName(title)
 
+        def set_mark(self, colour: str, shape: str, title: str) -> None:
+            """Repaint this tile. One widget stays in the header."""
+            self._colour = colour
+            self._shape = shape
+            self.setAccessibleName(title)
+            self.update()
+
         def paintEvent(self, event: object) -> None:
             del event
             painter = QPainter(self)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setClipRect(self.rect())
+            inset = 1.0
             paint_motif(
-                painter, QRectF(0, 0, self.width(), self.height()), self._shape, self._colour
+                painter,
+                QRectF(inset, inset, self.width() - 2 * inset, self.height() - 2 * inset),
+                self._shape,
+                self._colour,
             )
+            painter.end()
+
+    class SheenBar(QWidget):
+        """Rounded progress with a blue-to-yellow fill and a moving sheen."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.setFixedHeight(8)
+            self._value = 0.0
+            self._phase = 0.0
+            self._active = False
+
+        def set_fraction(self, value: float, active: bool) -> None:
+            """Set the filled fraction and whether the sheen should move."""
+            self._value = min(1.0, max(0.0, value))
+            self._active = active and self._value < 0.999
+            self.update()
+
+        def advance(self) -> None:
+            """Move the sheen one step while the bar is active."""
+            if not self._active:
+                return
+            self._phase = (self._phase + 0.035) % 1.0
+            self.update()
+
+        def paintEvent(self, event: object) -> None:
+            del event
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setPen(Qt.PenStyle.NoPen)
+            track = QRectF(0, 0, float(self.width()), float(self.height()))
+            painter.setBrush(QColor("#2a2a35"))
+            painter.drawRoundedRect(track, 4, 4)
+            filled = track.width() * self._value
+            if filled > 0.5:
+                fill = QRectF(0, 0, min(track.width(), max(8.0, filled)), track.height())
+                gradient = QLinearGradient(fill.topLeft(), fill.topRight())
+                gradient.setColorAt(0.0, QColor(ACCENT))
+                gradient.setColorAt(1.0, QColor(PRIMARY))
+                painter.setBrush(gradient)
+                painter.drawRoundedRect(fill, 4, 4)
+                if self._active and fill.width() > 16:
+                    painter.setClipRect(fill)
+                    center = fill.left() + self._phase * (fill.width() + 36) - 18
+                    sheen = QLinearGradient(center - 16, 0, center + 16, 0)
+                    sheen.setColorAt(0.0, QColor(255, 255, 255, 0))
+                    sheen.setColorAt(0.5, QColor(255, 255, 255, 80))
+                    sheen.setColorAt(1.0, QColor(255, 255, 255, 0))
+                    painter.setBrush(sheen)
+                    painter.drawRect(fill)
             painter.end()
 
     def chip_style(state: str) -> str:
@@ -395,7 +465,7 @@ def _builder(shot: bool) -> object:
             self.setObjectName("root")
             self.setWindowTitle(DISPLAY_NAME)
             self.setMinimumSize(_MIN_W, _MIN_H)
-            self.resize(980, 720)
+            self.resize(980, 640)
             self._view: WindowView | None = None
             self._smooth = SmoothedProgress()
             self._mode = "queue"
@@ -410,11 +480,13 @@ def _builder(shot: bool) -> object:
             self._sig = ""
             self.setStyleSheet(_stylesheet(False))
             root = QVBoxLayout(self)
-            root.setContentsMargins(22, 18, 22, 18)
-            root.setSpacing(12)
+            root.setContentsMargins(24, 16, 24, 16)
+            root.setSpacing(8)
             self._header = QHBoxLayout()
-            self._badge = Badge("#60a5fa", "dot", 64, DISPLAY_NAME)
+            self._header.setSpacing(16)
+            self._badge = Badge("#60a5fa", "dot", 56, DISPLAY_NAME)
             titles = QVBoxLayout()
+            titles.setSpacing(8)
             self._heading = QLabel("")
             self._heading.setObjectName("title")
             self._heading.setWordWrap(True)
@@ -433,18 +505,17 @@ def _builder(shot: bool) -> object:
             self._scroll.setWidgetResizable(True)
             self._scroll.setFrameShape(QFrame.Shape.NoFrame)
             self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            self._scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
             self._body = QWidget()
+            self._body.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
             self._rows = QVBoxLayout(self._body)
-            self._rows.setContentsMargins(0, 0, 0, 0)
-            self._rows.setSpacing(10)
+            self._rows.setContentsMargins(0, 0, 8, 0)
+            self._rows.setSpacing(8)
             self._scroll.setWidget(self._body)
-            root.addWidget(self._scroll, 1)
+            root.addWidget(self._scroll, 0)
             self._overall_caption = QLabel("")
             self._overall_caption.setObjectName("sectiontitle")
-            self._bar = QProgressBar()
-            self._bar.setRange(0, 1000)
-            self._bar.setTextVisible(False)
-            self._bar.setFixedHeight(14)
+            self._bar = SheenBar()
             self._overall_detail = QLabel("")
             self._overall_detail.setObjectName("hint")
             self._overall_detail.setWordWrap(True)
@@ -466,8 +537,13 @@ def _builder(shot: bool) -> object:
             self._do_title.setObjectName("sectiontitle")
             self._do = QLabel("")
             self._do.setWordWrap(True)
+            self._open_folder = QPushButton("")
+            self._open_folder.setObjectName("link")
+            self._open_folder.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._open_folder.hide()
             self._details_button = QPushButton("")
             self._details_button.setObjectName("disclosure")
+            self._details_button.setCursor(Qt.CursorShape.PointingHandCursor)
             self._technical = QPlainTextEdit()
             self._technical.setReadOnly(True)
             self._technical.setMaximumHeight(140)
@@ -476,7 +552,8 @@ def _builder(shot: bool) -> object:
             error_layout.addWidget(self._what)
             error_layout.addWidget(self._do_title)
             error_layout.addWidget(self._do)
-            error_layout.addWidget(self._details_button)
+            error_layout.addWidget(self._open_folder, 0, Qt.AlignmentFlag.AlignLeft)
+            error_layout.addWidget(self._details_button, 0, Qt.AlignmentFlag.AlignLeft)
             error_layout.addWidget(self._technical)
             root.addWidget(self._error)
             self._background = QLabel("")
@@ -497,9 +574,15 @@ def _builder(shot: bool) -> object:
             self._primary = QPushButton("")
             self._primary.setObjectName("primary")
             self._primary.setMinimumHeight(42)
+            self._footer = QLabel("")
+            self._footer.setObjectName("footer")
+            self._footer.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             root.addLayout(secondary)
             root.addWidget(self._primary)
+            root.addWidget(self._footer)
+            root.addStretch(1)
             self._details_button.clicked.connect(self._toggle_details)
+            self._open_folder.clicked.connect(self._on_open_folder)
             self._manage.clicked.connect(self._on_manage)
             self._pause.clicked.connect(self._on_pause)
             self._cancel.clicked.connect(self._on_cancel)
@@ -514,27 +597,27 @@ def _builder(shot: bool) -> object:
             self._smooth.set_target(view.overall)
             self._heading.setText(view.heading)
             self._subtitle.setText(view.subtitle)
-            self._badge = _swap_badge(self, self._badge, view.colour, view.motif, view.heading)
+            self._badge.set_mark(view.colour, view.motif, view.heading)
+            self._footer.setText(view.footer)
             self._rule.setStyleSheet(
                 f"background: {view.colour}; border: none; border-radius: 2px;"
             )
             self._overall_caption.setText(view.overall_caption)
             self._overall_detail.setText(view.overall_detail)
             self._status.setText(view.status)
-            show_bar = view.mode != "manage" or view.overall < 1
+            self._status.setVisible(bool(view.status) and not view.show_error)
             self._overall_caption.setVisible(view.mode != "manage")
             self._bar.setVisible(view.mode != "manage")
             self._overall_detail.setVisible(view.mode != "manage")
-            del show_bar
             self._error.setVisible(view.show_error)
             self._what_title.setText(view.error_what_title)
             self._what.setText(view.error_what)
             self._do_title.setText(view.error_do_title)
             self._do.setText(view.error_do)
+            self._open_folder.setText(view.open_folder_label)
+            self._open_folder.setVisible(bool(view.open_folder_label))
             self._technical.setPlainText(view.technical)
-            self._details_button.setText(
-                view.details_hide_label if self._details else view.details_label
-            )
+            self._details_button.setText(self._details_caption(view))
             self._background.setText(view.background)
             self._background.setVisible(bool(view.background))
             self._pause.setText(view.pause_label)
@@ -563,11 +646,22 @@ def _builder(shot: bool) -> object:
         def tick(self) -> None:
             """Ease the overall bar one frame."""
             value = self._smooth.tick(0.05)
-            self._bar.setValue(int(value * 1000))
+            view = self._view
+            active = bool(
+                view
+                and view.mode != "manage"
+                and not view.paused
+                and not view.all_set
+                and not view.show_error
+                and view.overall < 1
+            )
+            self._bar.set_fraction(value, active)
+            self._bar.advance()
 
         def resizeEvent(self, event: object) -> None:
             super().resizeEvent(event)
             self._fit_width()
+            self._fit_scroll()
 
         def keyPressEvent(self, event: object) -> None:
             key = getattr(event, "key", lambda: None)()
@@ -598,18 +692,50 @@ def _builder(shot: bool) -> object:
             self._finish_from_view()
 
         def _fit_width(self) -> None:
-            width = max(200, self._scroll.viewport().width() - 4)
-            self._body.setMaximumWidth(width)
+            viewport = self._scroll.viewport().width()
+            if viewport < 80:
+                return
+            self._body.setMinimumWidth(0)
+            self._body.setMaximumWidth(16_777_215)
+            limit = max(160, viewport - 32)
             for label in self._body.findChildren(QLabel):
-                label.setMaximumWidth(max(120, width - 48))
+                label.setMaximumWidth(limit)
+
+        def _fit_scroll(self) -> None:
+            needed = max(1, self._body.sizeHint().height())
+            room = max(96, self.height() - 300)
+            self._scroll.setFixedHeight(min(needed, room))
+
+        def _fit_to_content(self, limit: tuple[int, int]) -> None:
+            """Shrink a short queue so the list is not a tall empty pane."""
+            self.resize(limit[0], limit[1])
+            for _ in range(2):
+                self._fit_scroll()
+                layout = self.layout()
+                if layout is not None:
+                    layout.activate()
+                bottom = self._footer.geometry().bottom()
+                height = max(_MIN_H, min(limit[1], bottom + 20))
+                self.resize(limit[0], height)
+            self._fit_width()
+            self._fit_scroll()
+
+        def _details_caption(self, view: WindowView) -> str:
+            label = view.details_hide_label if self._details else view.details_label
+            mark = "▾ " if self._details else "▸ "
+            return mark + label
 
         def _toggle_details(self) -> None:
             self._details = not self._details
             self._technical.setVisible(self._details)
             if self._view is not None:
-                self._details_button.setText(
-                    self._view.details_hide_label if self._details else self._view.details_label
-                )
+                self._details_button.setText(self._details_caption(self._view))
+
+        def _on_open_folder(self) -> None:
+            view = self._view
+            if view is None or not view.error_path:
+                return
+            QDesktopServices.openUrl(QUrl.fromLocalFile(view.error_path))
 
         def _on_manage(self) -> None:
             if self._controller is None:
@@ -750,16 +876,6 @@ def _builder(shot: bool) -> object:
             self._manifest = manifest
             self._refresh()
 
-    def _swap_badge(
-        window: DownloadWindow, old: Badge, colour: str, shape: str, title: str
-    ) -> Badge:
-        if old._colour == colour and old._shape == shape:
-            return old
-        badge = Badge(colour, shape, 64, title)
-        window._header.replaceWidget(old, badge)
-        old.deleteLater()
-        return badge
-
     def _rebuild(window: DownloadWindow, view: WindowView) -> None:
         while window._rows.count():
             item = window._rows.takeAt(0)
@@ -793,7 +909,6 @@ def _builder(shot: bool) -> object:
                 window._rows.addWidget(empty)
             for group in view.groups:
                 window._rows.addWidget(_group_card(window, group))
-        window._rows.addStretch(1)
 
     def _section(
         window: DownloadWindow, title: str, rows: tuple[ManageRow, ...], empty: str
@@ -813,11 +928,23 @@ def _builder(shot: bool) -> object:
     def _group_card(window: DownloadWindow, group: GroupView) -> QFrame:
         card = QFrame()
         card.setObjectName("card")
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(14, 12, 14, 12)
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        outer = QHBoxLayout(card)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        stripe = QFrame()
+        stripe.setFixedWidth(4)
+        stripe.setStyleSheet(
+            f"background: {group.colour}; border: none; "
+            "border-top-left-radius: 16px; border-bottom-left-radius: 16px;"
+        )
+        outer.addWidget(stripe)
+        layout = QVBoxLayout()
+        layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(8)
         head = QHBoxLayout()
-        head.addWidget(Badge(group.colour, group.motif, 36, group.title))
+        head.setSpacing(8)
+        head.addWidget(Badge(group.colour, group.motif, 32, group.title))
         headline = QLabel(group.headline)
         headline.setObjectName("sectiontitle")
         headline.setWordWrap(True)
@@ -832,12 +959,14 @@ def _builder(shot: bool) -> object:
         layout.addLayout(head)
         for row in group.rows:
             layout.addWidget(_file_row(row))
+        outer.addLayout(layout, 1)
         return card
 
     def _file_row(row: RowView) -> QWidget:
         host = QWidget()
         layout = QHBoxLayout(host)
-        layout.setContentsMargins(0, 4, 0, 4)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
         mark = QWidget()
         mark.setFixedSize(12, 12)
         mark.setStyleSheet(f"background: {_dot(row.state)}; border-radius: 6px;")
@@ -979,10 +1108,36 @@ def _builder(shot: bool) -> object:
         extra = f"""
         QPushButton:focus {{ border: 2px solid {ACCENT}; }}
         QPushButton#primary:focus {{ border: 2px solid #1c1604; }}
-        QFrame#errorCard {{
-            background: {NOTE_BG}; border: 1px solid {NOTE_BORDER}; border-radius: 12px;
+        QPushButton#disclosure {{
+            background: transparent; border: none; padding: 4px 2px;
+            font-weight: 400; font-size: 13px; text-align: left; color: {TEXT_MUTED};
         }}
-        QScrollArea, QScrollArea > QWidget > QWidget {{ background: transparent; }}
+        QPushButton#disclosure:hover {{ color: {ACCENT}; background: transparent; }}
+        QPushButton#link {{
+            background: transparent; border: none; padding: 2px 0;
+            color: {ACCENT}; text-align: left; font-weight: 400;
+        }}
+        QPushButton#link:hover {{ color: #93c5fd; background: transparent; }}
+        QFrame#card {{ border-radius: 16px; }}
+        QFrame#card:hover {{ border: 1px solid #4c6a92; }}
+        QFrame#errorCard {{
+            background: {NOTE_BG}; border: 1px solid {NOTE_BORDER}; border-radius: 16px;
+        }}
+        QScrollArea, QScrollArea > QWidget > QWidget {{ background: transparent; border: none; }}
+        QScrollBar:vertical {{
+            background: transparent; width: 8px; margin: 4px 0 4px 0;
+        }}
+        QScrollBar::handle:vertical {{
+            background: #3d4f6f; min-height: 24px; border-radius: 4px;
+        }}
+        QScrollBar::handle:vertical:hover {{ background: #5b7aa8; }}
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+            height: 0; background: transparent; border: none;
+        }}
+        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+            background: transparent;
+        }}
+        QScrollBar:horizontal {{ height: 0; background: transparent; }}
         QLabel {{ background: transparent; }}
         """
         return style + extra
@@ -1005,9 +1160,13 @@ def _builder(shot: bool) -> object:
                 window.tick()
             window.show()
             app.processEvents()
+            window._fit_to_content(size)
+            app.processEvents()
             if apply_backdrop(window):
                 window.setStyleSheet(_stylesheet(True))
             app.processEvents()
+            window._fit_width()
+            window._fit_scroll()
 
             def tick() -> None:
                 window.tick()
@@ -1030,6 +1189,8 @@ def _builder(shot: bool) -> object:
         window = DownloadWindow()
         window.bind(controller, app_id, open_cmd, mode, manifest)
         window.show()
+        app.processEvents()
+        window._fit_to_content((window.width(), 720))
         app.processEvents()
         if apply_backdrop(window):
             window.setStyleSheet(_stylesheet(True))
