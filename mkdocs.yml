@@ -1,0 +1,61 @@
+site_name: voxprint-common
+site_description: Shared Python library for the Voxprint AI Media Suite.
+site_url: https://mitroshenkov87.github.io/voxprint-common/
+repo_url: https://github.com/Mitroshenkov87/voxprint-common
+repo_name: Mitroshenkov87/voxprint-common
+copyright: Copyright 2026 Aleksandr Mitroshenkov
+
+theme:
+  name: material
+  palette: slate
+  features:
+    - navigation.sections
+    - content.code.copy
+
+markdown_extensions:
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
+  - admonition
+  - pymdownx.superfences
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: google
+            show_root_heading: true
+            show_root_full_path: false
+            show_source: false
+            members_order: source
+            merge_init_into_class: true
+            filters: ["!^_"]
+            show_if_no_docstring: false
+
+nav:
+  - Overview: index.md
+  - Migration: migration.md
+  - CLI protocol: cli.md
+  - API:
+      - paths: api/paths.md
+      - atomic: api/atomic.md
+      - hashing: api/hashing.md
+      - buildinfo: api/buildinfo.md
+      - suite_settings: api/suite_settings.md
+      - gpu_lock: api/gpu_lock.md
+      - thermal: api/thermal.md
+      - gpu_probe: api/gpu_probe.md
+      - licence: api/licence.md
+      - runtime_manifest: api/runtime_manifest.md
+      - download: api/download.md
+      - cli_protocol: api/cli_protocol.md
+      - selftest: api/selftest.md
+      - ui.theme: api/theme.md
+      - ui.splash: api/splash.md
+      - provenance: api/provenance.md
+
+watch:
+  - src/voxprint_common
