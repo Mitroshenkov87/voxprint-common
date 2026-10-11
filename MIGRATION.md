@@ -2,7 +2,11 @@
 
 voxprint-common is a library. Each app bundles the wheel in its installer, or installs that wheel into its own environment or the shared runtime. It is not a suite application, and adopting it is never a reason to install another app.
 
-Pin `voxprint-common==0.2.3`. The import package is `voxprint_common`. `voxprint_common.API` is `1`.
+Pin `voxprint-common==0.2.4`. The import package is `voxprint_common`. `voxprint_common.API` is `1`.
+
+## Changes in 0.2.4
+
+Call `release_component` to drop a shared ref. It will not delete the models root, the runtime, or any directory another app still lists in `models/.users.json`. `ready(app)` checks file sizes and does not trust `mdl-status.json` alone. `voxprint-mdl verify --repair` clears a bad manifest path without deleting files.
 
 ## Changes in 0.2.3
 
