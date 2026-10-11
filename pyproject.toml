@@ -1,0 +1,83 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "voxprint-common"
+version = "0.1.0"
+description = "Shared Python library for the Voxprint AI Media Suite."
+readme = "README.md"
+requires-python = ">=3.14"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{name = "Aleksandr Mitroshenkov"}]
+keywords = ["voxprint"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.14",
+    "Typing :: Typed",
+]
+dependencies = []
+
+[project.optional-dependencies]
+ui = ["PySide6>=6.8"]
+dev = [
+    "build>=1.2",
+    "interrogate>=1.7",
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.27",
+    "pytest>=8.3",
+    "ruff>=0.8",
+]
+
+[project.urls]
+Homepage = "https://github.com/Mitroshenkov87/voxprint-common"
+Documentation = "https://mitroshenkov87.github.io/voxprint-common/"
+Issues = "https://github.com/Mitroshenkov87/voxprint-common/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/voxprint_common"]
+
+[tool.hatch.build.targets.wheel.sources]
+"src" = ""
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/voxprint_common/py.typed" = "voxprint_common/py.typed"
+"src/voxprint_common/ui/tokens.json" = "voxprint_common/ui/tokens.json"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+markers = [
+    "windows: Windows-only behaviour",
+    "posix: POSIX-only behaviour",
+]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/voxprint_common/ui/splash.py" = ["E402"]
+
+[tool.interrogate]
+ignore-init-method = false
+ignore-init-module = false
+ignore-magic = true
+ignore-module = false
+ignore-private = true
+ignore-semiprivate = true
+ignore-nested-functions = true
+ignore-property-decorators = true
+fail-under = 65
+exclude = ["tests", "docs", "build", "dist"]
+verbose = 1
+color = false
