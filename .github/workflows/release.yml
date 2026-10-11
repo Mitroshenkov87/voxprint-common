@@ -30,14 +30,29 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          python - <<'PY'
+          import json
+          import os
+
+          tag = os.environ["GITHUB_REF_NAME"]
+          version = tag.removeprefix("v")
+          codename = json.load(open("BUILD.json", encoding="utf-8"))["codename"]
+          url = (
+              "https://github.com/Mitroshenkov87/voxprint-common/releases/download/"
+              f"{tag}/voxprint_common-{version}-py3-none-any.whl"
+          )
+          notes = (
+              f"Codename: {codename}.\n\n"
+              "The wheel and sdist are the release assets. Each archive has a "
+              ".sha256 file next to it. Offline installers vendor the wheel from "
+              "this release instead of pinning a git commit.\n\n"
+              f"Pin:\n\nvoxprint-common @ {url}\n"
+          )
+          with open("release-notes.md", "w", encoding="utf-8") as handle:
+              handle.write(notes)
+          PY
           tag="${GITHUB_REF_NAME}"
-          codename="$(python -c 'import json; print(json.load(open("BUILD.json"))["codename"])')"
+          version="${tag#v}"
           gh release create "$tag" dist/* \
-            --title "voxprint-common ${tag#v}" \
-            --notes "Codename: ${codename}.
-
-The wheel and sdist are the release assets. Each archive has a .sha256 file next to it. Offline installers vendor the wheel from this release instead of pinning a git commit.
-
-Pin:
-
-voxprint-common @ https://github.com/Mitroshenkov87/voxprint-common/releases/download/${tag}/voxprint_common-${tag#v}-py3-none-any.whl"
+            --title "voxprint-common ${version}" \
+            --notes-file release-notes.md
