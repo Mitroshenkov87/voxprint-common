@@ -756,10 +756,8 @@ def _headings(
         and explanation.severity == "note"
     ):
         status = _t("mdl.status.checksum_again", lang)
-    elif any(item.state is ItemState.VERIFYING for item in snapshot.items):
-        status = _t("mdl.status.verifying", lang)
-    elif any(item.state is ItemState.DOWNLOADING for item in snapshot.items):
-        status = _t("mdl.status.downloading", lang)
+    elif (active := _active_status(snapshot, lang)) is not None:
+        status = active
     elif snapshot.note_code == "mirror":
         status = _t("mdl.status.mirror", lang)
     else:
@@ -769,6 +767,26 @@ def _headings(
     else:
         heading = _t("mdl.heading.queue", lang)
     return heading, _t("mdl.subtitle.queue", lang), status
+
+
+def _active_status(snapshot: Snapshot, lang: str) -> str | None:
+    """Name the file that is downloading, or the one being checked if none is."""
+    total = len(snapshot.items)
+    for state, key in (
+        (ItemState.DOWNLOADING, "mdl.status.downloading"),
+        (ItemState.VERIFYING, "mdl.status.verifying"),
+    ):
+        for index, item in enumerate(snapshot.items, start=1):
+            if item.state is not state:
+                continue
+            return _t(
+                key,
+                lang,
+                index=index,
+                total=total,
+                name=localized_name(item.names, item.fallback, lang),
+            )
+    return None
 
 
 def _active_explanation(snapshot: Snapshot, lang: str) -> Explanation | None:
