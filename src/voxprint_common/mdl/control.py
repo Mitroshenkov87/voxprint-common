@@ -37,7 +37,7 @@ from voxprint_common.mdl.present import (
 from voxprint_common.mdl.queue import enqueue, run_or_attach
 from voxprint_common.mdl.status import JobState, Status, load_status
 from voxprint_common.paths import models_dir
-from voxprint_common.runtime_manifest import load, remove_ref
+from voxprint_common.runtime_manifest import load, release_component
 from voxprint_common.ui.splash import identity
 
 __all__ = [
@@ -336,14 +336,8 @@ class Controller:
         )
 
     def remove_model(self, app_id: str, component_id: str) -> bool:
-        """Drop this app's ref. The file is deleted only when no app still uses it."""
-        document = load()
-        component = document.components.get(component_id)
-        path = Path(component.path) if component is not None and component.path else None
-        deleted = remove_ref(component_id, app_id)
-        if deleted and path is not None and path.is_file():
-            path.unlink()
-        return deleted
+        """Drop this app's ref. A folder is removed only when the release checks pass."""
+        return release_component(component_id, app_id).deleted
 
     def verify_app(self, app_id: str, manifest: Path) -> None:
         """Re-hash the planned files for one manifest."""

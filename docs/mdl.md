@@ -162,6 +162,12 @@ The window reads the queue in `voxprint_common.mdl.queue`. It does not write a s
 
 ![A long Latvian queue on a 720-wide window](img/mdl-window/lv-queue.png)
 
+## Safety
+
+`ready(app)` plans the detected tier and checks each required file. A missing file is `needs download`. A short file is `needs repair`. Runtime components such as `runtime-py314-torch2.11-cu130` use the size list stored on the component. The status file is not enough: a half-wiped store is not ready, and `download --app` fetches the missing files.
+
+A component path that is the suite home, the models root, the shared runtime, voices, cache, projects, or state — or that contains one of those, or overlaps another component — is rejected. `release_component` deletes a directory only when it is a single model folder directly under the models root and neither the shared manifest nor `models/.users.json` still names a user. `verify --repair` clears a dangerous path in the manifest and does not delete the files. Writes to the manifest and to `.users.json` re-read under the lock and keep unknown keys.
+
 ## Languages
 
 `voxprint_common.i18n` loads one JSON file per language from `locales/`. English is the source and the fallback. The package ships `en`, `de`, `ru`, `uk`, and `lv`. The active language is the `ui_language` key when that key is present in `suite.json`, then `VOXPRINT_LANG`, then the system UI locale, then English. `add_catalogs` lets an app point at its own `locales` directory. Later folders override the same key.
