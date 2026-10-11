@@ -15,7 +15,15 @@ voxprint-mdl download --app enlarge --manifest "/opt/voxprint-ai-suite/enlarge/m
 
 `download` enqueues and then runs the worker, or attaches if another process already holds it. `enqueue` only appends the job. `status --wait` attaches until the queue is idle. On Windows the manifest path is `C:\Program Files\VOXPrint AI Suite\Enlarge\mdl.json` (or `voxprint-app-models.json`).
 
-`--gui` opens the progress window. It needs `voxprint-common[ui]`. The labels are Russian: the step list columns are model, size, source, speed, and time remaining, with overall progress, Отмена, and Повторить after a failure. Without `--gui` the job is headless and suitable for a silent install. A hook failure uses exit code 2, so Повторить runs the job again.
+`--gui` opens the download window. It needs `voxprint-common[ui]`. Labels come from `voxprint_common.i18n` (English, German, Russian, Ukrainian, Latvian). Without `--gui` the job is headless and suitable for a silent install. A hook failure uses exit code 2. The window's Retry runs the job again.
+
+Apps keep a Manage models button and drop their own download screens. The button runs:
+
+```bash
+voxprint-mdl --gui --app clarity
+```
+
+That focuses the single window on the manage page for that app. `voxprint-mdl worker` keeps the queue and the window process running. A second launch, from another installer or from Manage models, focuses the window that is already open. New files appear in the same queue, grouped by app. Closing the window does not cancel the transfer. On Windows the process stays in the notification area when a tray icon is available. Otherwise the window says that downloads continue in the background.
 
 Omit `--manifest` to discover every installed app. Discovery reads `<home>/state/installed-apps.json` when that file exists (`{"schema": 1, "apps": [{"id": "enlarge", "path": "..."}]}`), then `mdl.json`, then `voxprint-app-models.json`. An empty registry means nothing is installed. When the registry is absent, the command looks under the suite root: `VOXPRINT_SUITE_ROOT`, otherwise `%PROGRAMFILES%\VOXPrint AI Suite\<App Name>` on Windows and `/opt/voxprint-ai-suite/<app>` on Linux.
 
@@ -125,3 +133,44 @@ Transfers use HTTP Range and keep the `.partial` file across a dropped connectio
 Hugging Face URLs use `hf_xet` when that package is installed, `HF_HUB_DISABLE_XET` is unset, and the response offers an xet hash. Otherwise the transfer stays on HTTP Range. Install the package beside the library when you want it: `python -m pip install hf-xet`.
 
 The job lowers CPU and IO priority on Windows and Linux, and holds a sleep inhibit through `voxprint_common.power.keep_awake` for as long as it runs. `--gui` also asks to keep the display awake.
+
+## Download window
+
+There is one window for the whole queue. Each app is a group with that app's splash motif. Overall progress is the bytes of every queued file, eased so the bar does not jump backwards. An app can show "Open" while another app is still downloading. The Open button is the only thing that launches an app.
+
+Pause and Resume talk to the worker's `TransferSession`. Cancel asks for confirmation and says the download can resume later. Errors are a short "What happened" and "What to do", with Retry. The traceback stays behind Details and in the log file.
+
+Manage models lists installed files with size and status, and optional models this GPU tier can run. A model whose minimum VRAM is above the card is hidden. Add enqueues that model. Remove drops this app's ref and deletes the file only when no other app still uses it. Verify re-hashes the plan.
+
+The window reads the queue in `voxprint_common.mdl.queue`. It does not write a second queue file.
+
+![Download queue in English](img/mdl-window/en-queue.png)
+
+![Two apps, Clarity ready while Enlarge is still downloading](img/mdl-window/en-multi.png)
+
+![A disk error with Retry](img/mdl-window/en-error.png)
+
+![Paused](img/mdl-window/en-paused.png)
+
+![All set](img/mdl-window/en-all-set.png)
+
+![Manage models](img/mdl-window/en-manage.png)
+
+![The same queue in Russian](img/mdl-window/ru-queue.png)
+
+![A long German error on a 720-wide window](img/mdl-window/de-error.png)
+
+![A long Latvian queue on a 720-wide window](img/mdl-window/lv-queue.png)
+
+## Languages
+
+`voxprint_common.i18n` loads one JSON file per language from `locales/`. English is the source and the fallback. The package ships `en`, `de`, `ru`, `uk`, and `lv`. The active language is the `ui_language` key when that key is present in `suite.json`, then `VOXPRINT_LANG`, then the system UI locale, then English. `add_catalogs` lets an app point at its own `locales` directory. Later folders override the same key.
+
+Apps check their own UI in CI:
+
+```yaml
+- name: UI strings
+  run: python -m voxprint_common.i18n.check --src src/<pkg> --locales src/<pkg>/locales --langs en,ru,de,uk,lv
+```
+
+The checker fails on a hard-coded user-facing string in a Qt call, a key missing from a shipped locale, or a `{placeholder}` sequence that differs between languages. An unused key is a warning. `# i18n: ignore` skips one call. Splash titles use `splash.app.<id>` and keep the same brand spelling in every language.

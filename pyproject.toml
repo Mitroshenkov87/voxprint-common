@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "voxprint-common"
-version = "0.2.1"
+version = "0.2.2"
 description = "Shared Python library for the Voxprint AI Media Suite."
 readme = "README.md"
 requires-python = ">=3.14"
@@ -56,6 +56,11 @@ packages = ["src/voxprint_common"]
 "src/voxprint_common/mdl/data/model-index.json" = "voxprint_common/mdl/data/model-index.json"
 "src/voxprint_common/mdl/data/examples/pyannote-embedding.json" = "voxprint_common/mdl/data/examples/pyannote-embedding.json"
 "src/voxprint_common/mdl/data/examples/pyannote-speaker-diarization-community-1.json" = "voxprint_common/mdl/data/examples/pyannote-speaker-diarization-community-1.json"
+"src/voxprint_common/i18n/locales/en.json" = "voxprint_common/i18n/locales/en.json"
+"src/voxprint_common/i18n/locales/de.json" = "voxprint_common/i18n/locales/de.json"
+"src/voxprint_common/i18n/locales/ru.json" = "voxprint_common/i18n/locales/ru.json"
+"src/voxprint_common/i18n/locales/uk.json" = "voxprint_common/i18n/locales/uk.json"
+"src/voxprint_common/i18n/locales/lv.json" = "voxprint_common/i18n/locales/lv.json"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
@@ -77,7 +82,11 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 "src/voxprint_common/ui/splash.py" = ["E402"]
 # Russian UI text uses letters that look like Latin.
 "src/voxprint_common/mdl/progress_ui.py" = ["RUF001", "RUF002", "RUF003"]
+"src/voxprint_common/i18n/__init__.py" = ["RUF001", "RUF002", "RUF003"]
 "tests/test_mdl.py" = ["RUF001", "RUF002", "RUF003"]
+"tests/test_i18n.py" = ["RUF001", "RUF002", "RUF003"]
+"tests/test_i18n_check.py" = ["RUF001", "RUF002", "RUF003"]
+"tests/test_mdl_window.py" = ["RUF001", "RUF002", "RUF003"]
 
 [tool.interrogate]
 ignore-init-method = false

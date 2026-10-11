@@ -55,6 +55,8 @@ nav:
       - runtime_manifest: api/runtime_manifest.md
       - download: api/download.md
       - mdl: api/mdl.md
+      - mdl window: api/mdl_window.md
+      - i18n: api/i18n.md
       - cli_protocol: api/cli_protocol.md
       - selftest: api/selftest.md
       - ui.theme: api/theme.md

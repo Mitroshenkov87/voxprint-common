@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from voxprint_common.i18n import reset
+
 
 @pytest.fixture(autouse=True)
 def _isolate_suite(
@@ -18,3 +20,7 @@ def _isolate_suite(
     monkeypatch.delenv("GITHUB_RUN_NUMBER", raising=False)
     monkeypatch.delenv("HF_TOKEN", raising=False)
     monkeypatch.delenv("HUGGING_FACE_HUB_TOKEN", raising=False)
+    monkeypatch.delenv("VOXPRINT_LANG", raising=False)
+    reset()
+    yield
+    reset()

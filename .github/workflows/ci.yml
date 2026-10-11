@@ -26,6 +26,8 @@ jobs:
           python -m ruff format --check src tests
       - name: Docstrings
         run: python -m interrogate -c pyproject.toml src/voxprint_common
+      - name: UI strings
+        run: python -m voxprint_common.i18n.check --src src/voxprint_common --locales src/voxprint_common/i18n/locales --langs en,ru,de,uk,lv
       - name: Tests
         shell: bash
         run: |
@@ -38,7 +40,7 @@ jobs:
       - name: Wheel
         run: python -m build
       - name: Install wheel
-        run: python -c "import glob, subprocess, sys, zipfile; wheels = glob.glob('dist/*.whl'); assert len(wheels) == 1, wheels; names = zipfile.ZipFile(wheels[0]).namelist(); assert any(name.endswith('voxprint_common/ui/tokens.json') for name in names), names; assert any(name.endswith('voxprint_common/py.typed') for name in names), names; assert any(name.endswith('voxprint_common/mdl/schemas/voxprint-model.schema.json') for name in names), names; assert any(name.endswith('voxprint_common/mdl/data/model-index.json') for name in names), names; assert any(name.endswith('voxprint_common/mdl/data/examples/pyannote-embedding.json') for name in names), names; assert any(name.endswith('voxprint_common/mdl/data/examples/pyannote-speaker-diarization-community-1.json') for name in names), names; subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--force-reinstall', '--no-deps', wheels[0]])"
+        run: python -c "import glob, subprocess, sys, zipfile; wheels = glob.glob('dist/*.whl'); assert len(wheels) == 1, wheels; names = zipfile.ZipFile(wheels[0]).namelist(); assert any(name.endswith('voxprint_common/ui/tokens.json') for name in names), names; assert any(name.endswith('voxprint_common/py.typed') for name in names), names; assert any(name.endswith('voxprint_common/mdl/schemas/voxprint-model.schema.json') for name in names), names; assert any(name.endswith('voxprint_common/mdl/data/model-index.json') for name in names), names; assert any(name.endswith('voxprint_common/mdl/data/examples/pyannote-embedding.json') for name in names), names; assert any(name.endswith('voxprint_common/mdl/data/examples/pyannote-speaker-diarization-community-1.json') for name in names), names; assert any(name.endswith('voxprint_common/i18n/locales/en.json') for name in names), names; assert any(name.endswith('voxprint_common/i18n/locales/ru.json') for name in names), names; subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--force-reinstall', '--no-deps', wheels[0]])"
 
   docs:
     runs-on: ubuntu-latest

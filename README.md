@@ -34,6 +34,7 @@ The docs site is [mitroshenkov87.github.io/voxprint-common](https://mitroshenkov
 | `voxprint_common.selftest` | `checks.json` helpers |
 | `voxprint_common.ui.theme` | Suite palette. Qt is not imported |
 | `voxprint_common.ui.splash` | 960×540 splash. PySide6 loads only when a splash is shown |
+| `voxprint_common.i18n` | JSON catalogs. English, German, Russian, Ukrainian, Latvian |
 | `voxprint_common.mdl` | VOXPrint MDL. Shared model download, `voxprint-mdl` |
 | `voxprint_common.provenance` | Documented stub. Embedding arrives in a later version |
 
@@ -59,10 +60,10 @@ An app that ships an installer copies the wheel into its payload and installs th
 Offline installers vendor the wheel from the GitHub release. They do not pin a git commit.
 
 ```text
-voxprint-common @ https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.2.1/voxprint_common-0.2.1-py3-none-any.whl
+voxprint-common @ https://github.com/Mitroshenkov87/voxprint-common/releases/download/v0.2.2/voxprint_common-0.2.2-py3-none-any.whl
 ```
 
-The same directory has the sdist and a `.sha256` file beside each archive. Check the wheel against `voxprint_common-0.2.1-py3-none-any.whl.sha256` before installing it. A normal environment pin is `voxprint-common==0.2.1`.
+The same directory has the sdist and a `.sha256` file beside each archive. Check the wheel against `voxprint_common-0.2.2-py3-none-any.whl.sha256` before installing it. A normal environment pin is `voxprint-common==0.2.2`.
 
 ## Usage
 
@@ -100,7 +101,7 @@ voxprint-mdl download --app enlarge --manifest "/opt/voxprint-ai-suite/enlarge/m
 voxprint-mdl status --json --wait
 ```
 
-`download` enqueues and runs the single worker, or attaches when another process already holds the queue. `--gui` needs the `ui` extra and shows the Russian progress window. Without it, the same job is headless. Exit 0 means the status file is ready when the plan had nothing left to fetch, or the download finished. Exit 2 means the job failed, including a disk check that refused to start and a post-install hook that failed. The app opens its own window only after `voxprint_common.mdl.ready()` is true. A missing status file is not ready.
+`download` enqueues and runs the single worker, or attaches when another process already holds the queue. `--gui` needs the `ui` extra and opens the shared download window. `voxprint-mdl --gui --app clarity` opens Manage models for that app. Without `--gui` the job is headless. Exit 0 means the status file is ready when the plan had nothing left to fetch, or the download finished. Exit 2 means the job failed, including a disk check that refused to start and a post-install hook that failed. The app opens its own window only after `voxprint_common.mdl.ready()` is true. A missing status file is not ready.
 
 The full contract, including `mdl.json` and the status file, is in the docs under Model downloader.
 

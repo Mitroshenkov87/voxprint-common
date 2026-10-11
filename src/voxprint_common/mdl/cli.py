@@ -1,6 +1,8 @@
 """``voxprint-mdl`` command line.
 
-Subcommands: ``plan``, ``enqueue``, ``download``, ``status``, ``verify``.
+Subcommands: ``plan``, ``enqueue``, ``download``, ``status``, ``verify``, ``worker``.
+
+``voxprint-mdl --gui --app <id>`` opens Manage models with no subcommand.
 
 ``enqueue`` appends a job and exits. ``download`` enqueues when ``--app`` or
 ``--manifest`` is set, then runs the single worker or attaches to the one
@@ -25,7 +27,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-import threading
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -45,6 +46,12 @@ from voxprint_common.mdl.job import Outcome, download, plan, verify
 from voxprint_common.mdl.names import CLI_NAME, DISPLAY_NAME
 from voxprint_common.mdl.queue import enqueue, load_queue, run_or_attach
 from voxprint_common.mdl.status import JobState, StatusError, load_status
+from voxprint_common.ui.mdl_window import (
+    WindowResult,
+    run_download_window,
+    run_manage_window,
+    serve,
+)
 
 __all__ = ["main"]
 
@@ -68,10 +75,14 @@ class _Parser(argparse.ArgumentParser):
 def main(argv: Sequence[str] | None = None) -> int:
     """Run one subcommand and return the process exit code.
 
+    ``voxprint-mdl --gui --app <id>`` opens Manage models without a subcommand.
+
     Args:
         argv: Arguments without the program name. Defaults to ``sys.argv[1:]``.
     """
     args_list = list(sys.argv[1:] if argv is None else argv)
+    if _bare_gui(args_list):
+        return _open_named_window(args_list)
     want_json = "--json" in args_list
     parser = _parser()
     try:
@@ -121,6 +132,7 @@ def _parser() -> _Parser:
         ("download", "enqueue, then run the worker or attach to it"),
         ("status", "print the status file"),
         ("verify", "re-hash the planned models"),
+        ("worker", "keep the download window and the queue worker running"),
     ):
         command = commands.add_parser(name, help=help_text)
         command.add_argument(
@@ -147,6 +159,8 @@ def _parser() -> _Parser:
 
 
 def _run(args: argparse.Namespace, session: Session | None) -> tuple[int, str, dict[str, object]]:
+    if args.command == "worker":
+        return serve(), "", {}
     if args.gui and args.command != "download":
         return EXIT_USAGE, "--gui is only valid with download", {}
     if args.gui:
@@ -238,40 +252,55 @@ def _wait(session: Session | None) -> tuple[int, str, dict[str, object]]:
     return outcome.code, outcome.message, _payload(outcome.status)
 
 
+def _bare_gui(argv: Sequence[str]) -> bool:
+    commands = {"plan", "enqueue", "download", "status", "verify", "worker"}
+    return "--gui" in argv and not any(token in commands for token in argv)
+
+
+def _open_named_window(argv: Sequence[str]) -> int:
+    app = ""
+    tokens = list(argv)
+    if "--app" in tokens:
+        index = tokens.index("--app")
+        if index + 1 < len(tokens):
+            app = tokens[index + 1]
+    if not app:
+        return EXIT_USAGE
+    try:
+        outcome = run_manage_window(app)
+    except ImportError as exc:
+        print(f"{DISPLAY_NAME} needs the ui extra for --gui ({exc})", file=sys.stderr)
+        return EXIT_FAILED
+    return _window_code(outcome)
+
+
+def _window_code(outcome: WindowResult) -> int:
+    match outcome:
+        case WindowResult.READY:
+            return EXIT_OK
+        case WindowResult.CANCELLED:
+            return EXIT_CANCELLED
+        case WindowResult.FAILED:
+            return EXIT_FAILED
+        case _ as unreachable:
+            raise AssertionError(unreachable)
+
+
 def _gui(args: argparse.Namespace, session: Session | None) -> tuple[int, str, dict[str, object]]:
     del session
+    app = args.app or "suite"
+    manifests = [Path(item) for item in args.manifest]
     try:
-        from voxprint_common.mdl.progress_ui import run_window
-    except ImportError as exc:
-        return EXIT_FAILED, f"{DISPLAY_NAME} needs the ui extra for --gui ({exc})", {}
-
-    def start(cancel: object, on_status: object) -> Outcome:
-        event = cancel if isinstance(cancel, threading.Event) else None
-        if args.dry_run:
-            return download(
-                [Path(item) for item in args.manifest] if args.manifest else None,
-                dry_run=True,
-                cancel=event,
-                display=True,
-                on_status=on_status if callable(on_status) else None,
-                only=tuple(args.model) if args.model else None,
-            )
-        transfer = TransferSession(event)
-
-        def on_event(_event: object) -> None:
-            if callable(on_status):
-                on_status(load_status())
-
-        transfer.subscribe(on_event)
-        return _queue_download(args, transfer)
-
-    try:
-        code = run_window(start)  # type: ignore[arg-type]
+        outcome = run_download_window(
+            app,
+            manifest=manifests[0] if manifests else None,
+            manifests=manifests or None,
+        )
     except ImportError as exc:
         return EXIT_FAILED, f"{DISPLAY_NAME} needs the ui extra for --gui ({exc})", {}
     status = load_status()
     message = status.error or ("ready" if status.ready else status.state.value)
-    return code, message, _payload(status)
+    return _window_code(outcome), message, _payload(status)
 
 
 def _status() -> tuple[int, str, dict[str, object]]:

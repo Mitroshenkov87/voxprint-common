@@ -31,5 +31,5 @@ Later engine work in the same branch:
 ## OPEN
 
 * 0.2.1 is the pinnable wheel for the apps adopting MDL. Later engine notes belong in 0.2.2.
-* The progress window is the existing one. `item_id`, `display_name`, and the queue rows are copied through; a new window is out of scope.
+* The shared download window, Manage models, and `voxprint_common.i18n` shipped in 0.2.2.
 * The index `sha256` is the bundled example descriptor. The weight repos do not publish `voxprint-model.json` yet.

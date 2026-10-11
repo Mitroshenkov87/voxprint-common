@@ -17,9 +17,11 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 
 from voxprint_common.buildinfo import BuildInfo, label
+from voxprint_common.i18n import tr
 
 __all__ = [
     "BAR_PX",
@@ -32,10 +34,13 @@ __all__ = [
     "STAGE_PX",
     "VERSION_PX",
     "WIDTH",
+    "AppIdentity",
+    "Motif",
     "Splash",
     "SplashEvent",
     "SplashLayout",
     "display_name",
+    "identity",
     "layout",
     "parse_colour",
 ]
@@ -53,18 +58,55 @@ FADE_MS = 200
 _SHADOW = 28
 _GAP = 8
 
-_DISPLAY_NAMES = {
-    "enlarge": "Voxprint AI Enlarge",
-    "clarity": "Voxprint AI Clarity",
-    "canvas": "Voxprint AI Canvas",
-    "plotweaver": "Voxprint AI Plotweaver",
-    "audiobook": "Voxprint AI Audiobook Builder",
-    "audiobook-builder": "Voxprint AI Audiobook Builder",
-    "dubber": "Voxprint AI Movie Dubber",
-    "movie-dubber": "Voxprint AI Movie Dubber",
-    "forge": "Voxprint AI Model Forge",
-    "model-forge": "Voxprint AI Model Forge",
-    "lucent": "Voxprint AI Lucent",
+
+class Motif(StrEnum):
+    """Small mark painted beside an app name."""
+
+    LENS = "lens"
+    EXPAND = "expand"
+    FRAME = "frame"
+    PEN = "pen"
+    BOOK = "book"
+    WAVE = "wave"
+    FORGE = "forge"
+    DOT = "dot"
+
+
+@dataclass(frozen=True)
+class AppIdentity:
+    """Splash title, identity colour, and motif for one suite id."""
+
+    app_id: str
+    display_name: str
+    colour: str
+    motif: Motif
+
+
+_IDENTITIES = (
+    AppIdentity("enlarge", "VOXPrint AI Enlarge", "#f5d76e", Motif.EXPAND),
+    AppIdentity("clarity", "VOXPrint AI Clarity", "#7dd3fc", Motif.LENS),
+    AppIdentity("canvas", "VOXPrint AI Canvas", "#c4b5fd", Motif.FRAME),
+    AppIdentity("plotweaver", "VOXPrint AI Plotweaver", "#86efac", Motif.PEN),
+    AppIdentity("audiobook-builder", "VOXPrint AI Audiobook Builder", "#fdba74", Motif.BOOK),
+    AppIdentity("movie-dubber", "VOXPrint AI Movie Dubber", "#f9a8d4", Motif.WAVE),
+    AppIdentity("model-forge", "VOXPrint AI Model Forge", "#fca5a5", Motif.FORGE),
+    AppIdentity("lucent", "VOXPrint AI Lucent", "#fde68a", Motif.DOT),
+)
+_BY_ID = {item.app_id: item for item in _IDENTITIES}
+_TITLE_KEYS = {
+    "enlarge": "splash.app.enlarge",
+    "clarity": "splash.app.clarity",
+    "canvas": "splash.app.canvas",
+    "plotweaver": "splash.app.plotweaver",
+    "audiobook-builder": "splash.app.audiobook-builder",
+    "movie-dubber": "splash.app.movie-dubber",
+    "model-forge": "splash.app.model-forge",
+    "lucent": "splash.app.lucent",
+}
+_ALIASES = {
+    "audiobook": "audiobook-builder",
+    "dubber": "movie-dubber",
+    "forge": "model-forge",
 }
 
 
@@ -122,15 +164,49 @@ def layout(width: int = WIDTH, height: int = HEIGHT) -> SplashLayout:
     )
 
 
+def identity(app: str) -> AppIdentity:
+    """Return the splash identity for a suite id.
+
+    The title is ``splash.app.<id>`` from the UI catalogs. Brand spelling is
+    the same in every language. A missing catalog line falls back to the
+    English brand stored beside the motif.
+
+    Args:
+        app: ``BuildInfo.app`` or a suite id. A known id such as ``clarity``
+            carries the VOXPrint display name, an identity colour, and a motif.
+            Any other string keeps that text and a neutral mark.
+
+    Returns:
+        The identity used by the splash title and the download window.
+    """
+    key = app.strip().lower()
+    found = _BY_ID.get(_ALIASES.get(key, key))
+    if found is not None:
+        title_key = _TITLE_KEYS[found.app_id]
+        title = tr(title_key)
+        if title == title_key:
+            title = found.display_name
+        return AppIdentity(found.app_id, title, found.colour, found.motif)
+    text = app.strip() or tr("splash.app.fallback")
+    if text == "splash.app.fallback":
+        text = "VOXPrint"
+    return AppIdentity(key or "app", text, "#60a5fa", Motif.DOT)
+
+
 def display_name(app: str) -> str:
     """Return the splash title for a suite id or a name that is already written out.
 
+    A known id is the brand string in the splash catalogs. The spelling is the
+    same in every language.
+
     Args:
         app: ``BuildInfo.app``. A known id such as ``enlarge`` becomes
-            ``Voxprint AI Enlarge``. Any other string is used as written.
+            ``VOXPrint AI Enlarge``. Any other string is used as written.
     """
-    key = app.strip()
-    return _DISPLAY_NAMES.get(key.lower(), key)
+    key = app.strip().lower()
+    if key in _BY_ID or key in _ALIASES:
+        return identity(app).display_name
+    return app.strip()
 
 
 def parse_colour(value: str) -> tuple[int, int, int]:
@@ -167,7 +243,7 @@ class SplashEvent:
 
 
 class Splash:
-    """Borderless startup window for one Voxprint app."""
+    """Borderless startup window for one VOXPrint app."""
 
     def __init__(
         self,
@@ -203,8 +279,12 @@ class Splash:
     def set_stage(self, text: str) -> None:
         """Set the stage line under the build label.
 
+        The splash does not translate this line. Pass text that already went
+        through :func:`voxprint_common.i18n.tr`. The title is the app name from
+        the splash catalogs, with the same brand spelling in every language.
+
         Args:
-            text: Short status, for example ``Loading models``.
+            text: Short status, already translated.
         """
         self._stage = text
         self._window.sync(self)
