@@ -12,6 +12,7 @@ and the palette scorer.
 
 from __future__ import annotations
 
+from html import escape
 from pathlib import Path
 from typing import assert_never
 
@@ -43,7 +44,7 @@ from voxprint_common.ui.keymap import (
     load_overrides,
 )
 from voxprint_common.ui.palette import score_text
-from voxprint_common.ui.theme import build_shell_style
+from voxprint_common.ui.theme import PRIMARY, TEXT, TEXT_MUTED, TEXT_ON_ACCENT, build_shell_style
 
 __all__ = [
     "ADOPTION",
@@ -85,7 +86,14 @@ def reference_layout() -> Layout[str]:
 
 
 def grab_shell(
-    path: Path, *, language: str, show_palette: bool = False, glass: bool = False
+    path: Path,
+    *,
+    language: str,
+    show_palette: bool = False,
+    glass: bool = False,
+    palette_query: str = "",
+    hot_split: bool = False,
+    reveal_close: bool = False,
 ) -> None:
     """Paint the reference shell and save a PNG.
 
@@ -95,6 +103,9 @@ def grab_shell(
         show_palette: Open the command palette before the grab.
         glass: Use the translucent window background. Offscreen grabs use
             the plain background unless this is true.
+        palette_query: Filter typed into the palette after it opens.
+        hot_split: Paint the root divider in the drag colour.
+        reveal_close: Show the close control on the first closable tab.
     """
     set_language(language)
     _qt()
@@ -106,6 +117,14 @@ def grab_shell(
     app.processEvents()
     if show_palette:
         shell.open_palette()
+        if palette_query:
+            shell._query.setText(palette_query)
+        app.processEvents()
+    if hot_split:
+        shell._set_dragging(shell._root_splitter(), True)
+        app.processEvents()
+    if reveal_close:
+        shell._reveal_one_close()
         app.processEvents()
     path.parent.mkdir(parents=True, exist_ok=True)
     shell.grab().save(str(path))
@@ -132,6 +151,9 @@ class ReferenceShell:
         self._glass = glass
         self._float_cards: list[object] = []
         self._shortcuts: list[tuple[object, str, str]] = []
+        self._watches: list[object] = []
+        self._fitting = False
+        self._palette_query = ""
         self.widget = widgets.QWidget()
         self.widget.setObjectName("shell")
         self.widget.setFocusPolicy(qt.StrongFocus)
@@ -149,11 +171,17 @@ class ReferenceShell:
         self._query.setObjectName("paletteQuery")
         self._query.setPlaceholderText(tr("shell.palette.placeholder"))
         self._hits = widgets.QListWidget()
+        self._hits.setObjectName("paletteHits")
+        self._hits.setSpacing(4)
+        self._hits.setFocusPolicy(qt.NoFocus)
+        self._hits.setHorizontalScrollBarPolicy(qt.ScrollBarAlwaysOff)
+        self._hits.currentRowChanged.connect(self._sync_palette_selection)
         self._empty = widgets.QLabel(tr("shell.palette.empty"))
         self._empty.setObjectName("panel")
         self._build_chrome()
         self._build_palette()
         self._install_shortcuts()
+        self._install_resize_watch()
         self.rebuild()
 
     def resize(self, width: int, height: int) -> None:
@@ -164,6 +192,7 @@ class ReferenceShell:
             height: Height in pixels.
         """
         self.widget.resize(width, height)
+        self._fill_toolbar()
 
     def show(self) -> None:
         """Show the window."""
@@ -335,25 +364,30 @@ class ReferenceShell:
                 shortcut.setEnabled(when != "text" and (when == "global" or when in active))  # type: ignore[attr-defined]
 
     def _refill_palette(self, query: str) -> None:
+        self._palette_query = query
         self._hits.clear()
         scored: list[tuple[int, str, str]] = []
         for spec in self.registry:
             if not self.registry.enabled(spec):
                 continue
-            value = score_text(query, tr(spec.title_key), spec.command_id)
+            label = tr(spec.title_key)
+            value = score_text(query, label, spec.command_id)
             if value is None:
                 continue
-            scored.append((value, tr(spec.title_key), spec.command_id))
+            scored.append((value, label, spec.command_id))
         scored.sort(key=lambda item: (-item[0], item[1]))
         for _score, label, command_id in scored:
-            chord = self.keymap.chord_for(self.registry, command_id)
-            suffix = f"    {display_chord(chord)}" if chord else ""
-            item = self._widgets.QListWidgetItem(label + suffix)
+            item = self._widgets.QListWidgetItem()
             item.setData(self._qt.UserRole, command_id)
+            item.setData(self._qt.UserRole + 1, label)
+            row = self._palette_row(command_id, label, query, selected=False)
+            item.setSizeHint(row.sizeHint())
             self._hits.addItem(item)
+            self._hits.setItemWidget(item, row)
         self._empty.setVisible(not scored)
         if scored:
             self._hits.setCurrentRow(0)
+        self._sync_palette_selection(self._hits.currentRow())
 
     def _run_palette(self) -> None:
         current = self._hits.currentItem()
@@ -365,37 +399,66 @@ class ReferenceShell:
             self.run(command_id)
 
     def _fill_toolbar(self) -> None:
+        if self._fitting:
+            return
+        self._fitting = True
+        try:
+            self._fill_toolbar_now()
+        finally:
+            self._fitting = False
+
+    def _fill_toolbar_now(self) -> None:
         widgets = self._widgets
         layout = self._toolbar.layout()
         if layout is None:
             layout = widgets.QHBoxLayout(self._toolbar)
             layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(8)
         while layout.count():
             item = layout.takeAt(0)
             widget = item.widget()
             if widget is not None:
+                widget.hide()
+                widget.setParent(None)
                 widget.deleteLater()
-        width = max(self.widget.width() - 48, 200)
-        fitted = fit_toolbar([size for _command, size in _TOOLBAR], float(width), 8.0, 72.0)
+        made: list[tuple[str, object, int]] = []
+        for command_id, _size in _TOOLBAR:
+            button = self._toolbar_button(_command_label(command_id), command_id == "file.save")
+            made.append((command_id, button, int(button.minimumWidth())))
+        more = self._toolbar_button(tr("shell.toolbar.overflow"), False)
+        available = self.widget.width() - 24
+        if available < 120:
+            available = 1000
+        fitted = fit_toolbar(
+            [float(width) for _command, _button, width in made],
+            float(available),
+            8.0,
+            float(more.minimumWidth()),
+        )
         shown = {index for index, _size in fitted.shown} if fitted is not None else set()
-        overflow = list(fitted.overflow) if fitted is not None else []
-        for index, (command_id, _size) in enumerate(_TOOLBAR):
+        overflow = list(fitted.overflow) if fitted is not None else list(range(len(made)))
+        for index, (command_id, button, _width) in enumerate(made):
             if index not in shown:
+                button.hide()  # type: ignore[attr-defined]
+                button.setParent(None)  # type: ignore[attr-defined]
+                button.deleteLater()  # type: ignore[attr-defined]
                 continue
-            button = widgets.QPushButton(_command_label(command_id))
-            if command_id == "file.save":
-                button.setObjectName("primary")
-            button.clicked.connect(lambda _checked=False, command=command_id: self.run(command))
+            button.clicked.connect(lambda _checked=False, command=command_id: self.run(command))  # type: ignore[attr-defined]
             layout.addWidget(button)
         if overflow:
-            more = widgets.QPushButton(tr("shell.toolbar.overflow"))
             menu = widgets.QMenu(more)
             for index in overflow:
-                command_id = _TOOLBAR[index][0]
-            action = menu.addAction(_command_label(command_id))
-            action.triggered.connect(lambda _checked=False, command=command_id: self.run(command))
+                command_id = made[index][0]
+                action = menu.addAction(_command_label(command_id))
+                action.triggered.connect(
+                    lambda _checked=False, command=command_id: self.run(command)
+                )
             more.setMenu(menu)
             layout.addWidget(more)
+        else:
+            more.hide()
+            more.setParent(None)
+            more.deleteLater()
         layout.addStretch(1)
 
     def _mount(self, node: Split[str] | Tabs[str] | Stack[str], path: tuple[bool, ...]) -> object:
@@ -407,13 +470,16 @@ class ReferenceShell:
                 tabs.addTab(_page(self, panel), _panel_title(panel))
             tabs.setCurrentIndex(node.active)
             tabs.currentChanged.connect(lambda index, names=panels: self._on_tab(index, names))
+            self._arm_tabs(tabs, panels)
             return tabs
         if isinstance(node, Split):
             vertical = node.axis is SplitAxis.VERTICAL
             splitter = widgets.QSplitter(self._qt.Vertical if vertical else self._qt.Horizontal)
+            splitter.setObjectName("rootSplit" if path == () else "dockSplit")
+            splitter.setHandleWidth(9)
+            splitter.setChildrenCollapsible(False)
             splitter.addWidget(self._mount(node.first, (*path, False)))
             splitter.addWidget(self._mount(node.second, (*path, True)))
-            splitter.setChildrenCollapsible(False)
             total = 1000
             mode = node.size.mode
             if mode is SizeMode.RATIO:
@@ -425,9 +491,7 @@ class ReferenceShell:
             else:
                 assert_never(mode)
             splitter.setSizes([first, total - first])
-            splitter.splitterMoved.connect(
-                lambda _pos, _index, here=path, widget=splitter: self._resized(here, widget)
-            )
+            self._paint_split(splitter, vertical, path)
             return splitter
         if isinstance(node, Stack):
             column = widgets.QWidget()
@@ -476,17 +540,166 @@ class ReferenceShell:
             card.deleteLater()  # type: ignore[attr-defined]
         self._float_cards.clear()
 
-    def _resized(self, path: tuple[bool, ...], splitter: object) -> None:
+    def _commit_split(self, path: tuple[bool, ...], splitter: object) -> None:
         if self._building:
             return
         sizes = splitter.sizes()  # type: ignore[attr-defined]
         total = sum(sizes)
         if total <= 0:
             return
+        ratio = sizes[0] / total
+        current = _ratio_at(self.history.layout.root, path)
+        if current is not None and abs(current - ratio) < 0.002:
+            return
         try:
-            self.history.layout.apply(ResizeSplit(path, SplitSize.ratio(sizes[0] / total)))
+            self.history.apply(ResizeSplit(path, SplitSize.ratio(ratio)))
         except DockError:
             return
+
+    def _palette_row(self, command_id: str, label: str, query: str, *, selected: bool) -> object:
+        widgets = self._widgets
+        row = widgets.QWidget()
+        row.setObjectName("paletteRow")
+        row.setAttribute(self._qt.WA_StyledBackground, True)
+        row.setProperty("selected", "true" if selected else "false")
+        row.setMinimumHeight(40)
+        layout = widgets.QHBoxLayout(row)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(8)
+        title = widgets.QLabel()
+        title.setObjectName("paletteTitle")
+        title.setTextFormat(self._qt.RichText)
+        title.setText(self._highlight(label, query, selected))
+        layout.addWidget(title)
+        group = widgets.QLabel(tr(_group_key(command_id)))
+        group.setObjectName("paletteGroup")
+        layout.addWidget(group)
+        layout.addStretch(1)
+        spec = self.registry.get(command_id)
+        chord = self.keymap.chord_for(self.registry, command_id) if spec is not None else None
+        if chord:
+            for part in display_chord(chord).split("+"):
+                chip = widgets.QLabel(part)
+                chip.setObjectName("paletteChip")
+                layout.addWidget(chip)
+        return row
+
+    def _highlight(self, text: str, query: str, selected: bool) -> str:
+        base = TEXT_ON_ACCENT if selected else TEXT
+        marks = _match_indexes(text, query)
+        parts: list[str] = []
+        for index, char in enumerate(text):
+            piece = escape(char)
+            if index not in marks:
+                parts.append(f'<span style="color: {base};">{piece}</span>')
+            elif selected:
+                parts.append(f'<b><span style="color: {base};">{piece}</span></b>')
+            else:
+                parts.append(f'<span style="color: {PRIMARY}; font-weight: 600;">{piece}</span>')
+        return "".join(parts)
+
+    def _sync_palette_selection(self, row: int) -> None:
+        for index in range(self._hits.count()):
+            item = self._hits.item(index)
+            widget = self._hits.itemWidget(item)
+            if widget is None:
+                continue
+            selected = index == row
+            widget.setProperty("selected", "true" if selected else "false")
+            label = item.data(self._qt.UserRole + 1)
+            title = widget.findChild(self._widgets.QLabel, "paletteTitle")
+            if title is not None and isinstance(label, str):
+                title.setText(self._highlight(label, self._palette_query, selected))
+            _restyle(widget)
+
+    def _toolbar_button(self, text: str, primary: bool) -> object:
+        button = self._widgets.QPushButton(text, self._toolbar)
+        if primary:
+            button.setObjectName("primary")
+        policy = self._widgets.QSizePolicy.Policy
+        button.setSizePolicy(policy.Minimum, policy.Fixed)
+        button.ensurePolished()
+        button.setMinimumWidth(button.sizeHint().width())
+        return button
+
+    def _install_resize_watch(self) -> None:
+        watch = _resize_watch(self)
+        self.widget.installEventFilter(watch)
+        self._watches.append(watch)
+
+    def _paint_split(self, splitter: object, vertical: bool, path: tuple[bool, ...]) -> None:
+        widgets = self._widgets
+        handle = splitter.handle(1)  # type: ignore[attr-defined]
+        line = widgets.QFrame(handle)
+        line.setObjectName("splitLine")
+        line.setFrameShape(widgets.QFrame.Shape.NoFrame)
+        line.setAttribute(self._qt.WA_StyledBackground, True)
+        line.setAttribute(self._qt.WA_TransparentForMouseEvents, True)
+        if vertical:
+            line.setFixedHeight(1)
+        else:
+            line.setFixedWidth(1)
+        handle.setMouseTracking(True)
+        handle.setAttribute(self._qt.WA_Hover, True)
+        _place_hairline(handle, line, vertical)
+        watch = _split_watch(self, splitter, handle, line, vertical, path)
+        handle.installEventFilter(watch)
+        self._watches.append(watch)
+
+    def _set_dragging(self, splitter: object, dragging: bool) -> None:
+        splitter.setProperty("dragging", dragging)  # type: ignore[attr-defined]
+        self._paint_lines(splitter, dragging)
+
+    def _set_hot(self, splitter: object, hot: bool) -> None:
+        if bool(splitter.property("dragging")):  # type: ignore[attr-defined]
+            return
+        self._paint_lines(splitter, hot)
+
+    def _paint_lines(self, splitter: object, hot: bool) -> None:
+        handle = splitter.handle(1)  # type: ignore[attr-defined]
+        line = handle.findChild(self._widgets.QFrame, "splitLine")
+        if line is None or bool(line.property("hot")) == hot:
+            return
+        line.setProperty("hot", hot)
+        _restyle(line)
+
+    def _root_splitter(self) -> object:
+        found = self._dock.findChild(self._widgets.QSplitter, "rootSplit")
+        if found is None:
+            return self.widget.findChild(self._widgets.QSplitter, "rootSplit")
+        return found
+
+    def _reveal_one_close(self) -> None:
+        buttons = self.widget.findChildren(self._widgets.QToolButton, "tabClose")
+        if buttons:
+            buttons[0].show()
+
+    def _arm_tabs(self, tabs: object, panels: tuple[str, ...]) -> None:
+        bar = tabs.tabBar()  # type: ignore[attr-defined]
+        bar.setMouseTracking(True)
+        bar.setAttribute(self._qt.WA_Hover, True)
+        buttons: dict[int, object] = {}
+        icon = _close_icon()
+        for index, panel in enumerate(panels):
+            if panel == _CENTRE:
+                continue
+            button = self._widgets.QToolButton(bar)
+            button.setObjectName("tabClose")
+            button.setIcon(icon)
+            button.setIconSize(_qt_core().QSize(12, 12))
+            button.setToolTip(tr("shell.tab.close"))
+            button.hide()
+            button.clicked.connect(lambda _checked=False, name=panel: self._close_panel(name))
+            side = self._widgets.QTabBar.ButtonPosition.RightSide
+            bar.setTabButton(index, side, button)
+            buttons[index] = button
+        watch = _tab_watch(bar, buttons)
+        bar.installEventFilter(watch)
+        self._watches.append(watch)
+
+    def _close_panel(self, panel: str) -> None:
+        self.active = panel
+        self._close_active()
 
     def _activate(self, panel: str) -> None:
         if self._building:
@@ -542,6 +755,156 @@ class ReferenceShell:
         return isinstance(
             focus, self._widgets.QLineEdit | self._widgets.QPlainTextEdit | self._widgets.QTextEdit
         )
+
+
+def _match_indexes(text: str, query: str) -> set[int]:
+    """Return indexes of a case-insensitive subsequence match.
+
+    An empty query, or a query that is not a subsequence, matches nothing.
+    The walk is the same one :func:`voxprint_common.ui.palette.fuzzy_score` uses.
+    """
+    if query == "":
+        return set()
+    letters = text.lower()
+    marks: set[int] = set()
+    index = 0
+    for char in query.lower():
+        found = False
+        while index < len(letters):
+            if letters[index] == char:
+                marks.add(index)
+                index += 1
+                found = True
+                break
+            index += 1
+        if not found:
+            return set()
+    return marks
+
+
+def _group_key(command_id: str) -> str:
+    """Return the palette category key for a command id."""
+    prefix = command_id.split(".", 1)[0]
+    if prefix == "file":
+        return "shell.group.file"
+    if prefix == "edit":
+        return "shell.group.edit"
+    return "shell.group.panels"
+
+
+def _ratio_at(node: Split[str] | Tabs[str] | Stack[str], path: tuple[bool, ...]) -> float | None:
+    """Return the ratio stored on the split at ``path``.
+
+    None means that node is missing or is not a ratio split.
+    """
+    current: Split[str] | Tabs[str] | Stack[str] = node
+    for step in path:
+        if not isinstance(current, Split):
+            return None
+        current = current.second if step else current.first
+    if isinstance(current, Split) and current.size.mode is SizeMode.RATIO:
+        return float(current.size.value)
+    return None
+
+
+def _restyle(widget: object) -> None:
+    style = widget.style()  # type: ignore[attr-defined]
+    style.unpolish(widget)
+    style.polish(widget)
+    widget.update()  # type: ignore[attr-defined]
+    kind = _widgets().QWidget  # type: ignore[attr-defined]
+    for child in widget.findChildren(kind):  # type: ignore[attr-defined]
+        child_style = child.style()
+        child_style.unpolish(child)
+        child_style.polish(child)
+        child.update()
+
+
+def _place_hairline(handle: object, line: object, vertical: bool) -> None:
+    rect = handle.rect()  # type: ignore[attr-defined]
+    if vertical:
+        top = max((rect.height() - 1) // 2, 0)
+        line.setGeometry(0, top, max(rect.width(), 1), 1)  # type: ignore[attr-defined]
+        return
+    left = max((rect.width() - 1) // 2, 0)
+    line.setGeometry(left, 0, 1, max(rect.height(), 1))  # type: ignore[attr-defined]
+
+
+def _close_icon() -> object:
+    core = _qt_core()
+    gui = _qt()[1]
+    pixmap = gui.QPixmap(12, 12)
+    pixmap.fill(core.Qt.transparent)
+    painter = gui.QPainter(pixmap)
+    painter.setPen(gui.QPen(gui.QColor(TEXT_MUTED)))
+    painter.drawLine(3, 3, 8, 8)
+    painter.drawLine(8, 3, 3, 8)
+    painter.end()
+    return gui.QIcon(pixmap)
+
+
+def _resize_watch(shell: ReferenceShell) -> object:
+    core = _qt_core()
+
+    class _Watch(core.QObject):
+        def eventFilter(self, watched: object, event: object) -> bool:
+            kind = event.type()  # type: ignore[attr-defined]
+            if kind == core.QEvent.Type.Resize and not shell._building:
+                shell._fill_toolbar()
+            return False
+
+    return _Watch(shell.widget)
+
+
+def _split_watch(
+    shell: ReferenceShell,
+    splitter: object,
+    handle: object,
+    line: object,
+    vertical: bool,
+    path: tuple[bool, ...],
+) -> object:
+    core = _qt_core()
+
+    class _Watch(core.QObject):
+        def eventFilter(self, watched: object, event: object) -> bool:
+            kind = event.type()  # type: ignore[attr-defined]
+            if kind in {core.QEvent.Type.Resize, core.QEvent.Type.Show}:
+                _place_hairline(handle, line, vertical)
+            elif kind == core.QEvent.Type.MouseButtonPress:
+                shell._set_dragging(splitter, True)
+            elif kind == core.QEvent.Type.MouseButtonRelease:
+                shell._set_dragging(splitter, False)
+                shell._set_hot(splitter, False)
+                shell._commit_split(path, splitter)
+            elif kind in {core.QEvent.Type.HoverEnter, core.QEvent.Type.HoverMove}:
+                shell._set_hot(splitter, True)
+            elif kind == core.QEvent.Type.HoverLeave:
+                shell._set_hot(splitter, False)
+            return False
+
+    return _Watch(handle)
+
+
+def _tab_watch(bar: object, buttons: dict[int, object]) -> object:
+    core = _qt_core()
+
+    class _Watch(core.QObject):
+        def eventFilter(self, watched: object, event: object) -> bool:
+            kind = event.type()  # type: ignore[attr-defined]
+            if kind in {core.QEvent.Type.HoverMove, core.QEvent.Type.MouseMove}:
+                index = bar.tabAt(event.position().toPoint())  # type: ignore[attr-defined]
+                for tab_index, button in buttons.items():
+                    button.setVisible(tab_index == index)  # type: ignore[attr-defined]
+            elif kind == core.QEvent.Type.HoverLeave:
+                local = bar.mapFromGlobal(core.QCursor.pos())  # type: ignore[attr-defined]
+                if bar.rect().contains(local):  # type: ignore[attr-defined]
+                    return False
+                for button in buttons.values():
+                    button.hide()  # type: ignore[attr-defined]
+            return False
+
+    return _Watch(bar)
 
 
 def _page(shell: ReferenceShell, panel: str) -> object:
@@ -638,6 +1001,17 @@ def _qt() -> tuple[object, object, object]:
     from PySide6 import QtCore, QtGui, QtWidgets
 
     return QtCore.Qt, QtGui, QtWidgets
+
+
+def _qt_core() -> object:
+    """Import ``PySide6.QtCore``.
+
+    The import stays inside this function so a headless caller can import
+    :func:`reference_layout` without the ``ui`` extra.
+    """
+    from PySide6 import QtCore
+
+    return QtCore
 
 
 def _widgets() -> object:

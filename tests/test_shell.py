@@ -59,12 +59,16 @@ def test_offscreen_shell_screenshots(tmp_path: Path) -> None:
     assert completed.returncode == 0, completed.stdout + "\n" + completed.stderr
     english = (tmp_path / "en-shell.png").read_bytes()
     russian = (tmp_path / "ru-shell.png").read_bytes()
+    german = (tmp_path / "de-shell.png").read_bytes()
     palette = (tmp_path / "en-palette.png").read_bytes()
     russian_palette = (tmp_path / "ru-palette.png").read_bytes()
-    for blob in (english, russian, palette, russian_palette):
+    split = (tmp_path / "en-split.png").read_bytes()
+    for blob in (english, russian, german, palette, russian_palette, split):
         assert blob.startswith(b"\x89PNG")
         assert len(blob) > 1000
     assert english != russian
+    assert english != german
     assert palette != russian_palette
     assert english != palette
+    assert english != split
     assert "PySide6" not in sys.modules

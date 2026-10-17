@@ -52,8 +52,12 @@ Shared command ids are `file.save`, `edit.undo`, `edit.redo`, and `view.palette`
 
 ![Russian reference shell](img/shell/ru-shell.png)
 
+![German reference shell](img/shell/de-shell.png)
+
 ![English command palette](img/shell/en-palette.png)
 
 ![Russian command palette](img/shell/ru-palette.png)
 
-The translucent Acrylic backgrounds are a stylesheet flag (`glass=True`). An offscreen grab cannot show operating-system blur, so these pictures use the solid background.
+![Splitter while dragging](img/shell/en-split.png)
+
+The German picture shows the close control on a side tab. The last picture is the root divider while it is dragged: a one-pixel line in the accent blue, with the wider hit area left invisible. The translucent Acrylic backgrounds are a stylesheet flag (`glass=True`). An offscreen grab cannot show operating-system blur, so these pictures use the solid background.

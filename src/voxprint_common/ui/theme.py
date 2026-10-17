@@ -273,11 +273,14 @@ QTabWidget::pane {{
     border-radius: {radius}px;
 }}
 QTabBar::tab {{
-    background: {CONTROL_BG}; color: {TEXT_MUTED}; padding: 0 12px;
-    min-height: {density.panel_header_px}px; border: {density.border_px}px solid {CONTROL_BORDER};
-    border-bottom: none; border-top-left-radius: {radius}px; border-top-right-radius: {radius}px;
+    background: transparent; color: {TEXT_MUTED}; padding: 0 12px;
+    min-height: {density.panel_header_px}px; border: none;
+    border-top: 2px solid transparent; margin-right: 2px;
 }}
-QTabBar::tab:selected {{ background: {MENU_BG}; color: {TEXT}; }}
+QTabBar::tab:hover {{ color: {TEXT}; }}
+QTabBar::tab:selected {{
+    background: {CONTROL_BG}; color: {TEXT}; border-top: 2px solid {ACCENT};
+}}
 QPushButton {{
     background: {CONTROL_BG}; border: {density.border_px}px solid {CONTROL_BORDER};
     border-radius: {radius}px; padding: 4px 12px; min-height: {density.panel_header_px}px;
@@ -293,11 +296,39 @@ QLineEdit, QListWidget {{
     border-radius: {radius}px; padding: 4px 8px;
 }}
 QListWidget::item:selected {{ background: {MENU_SELECTION}; color: #ffffff; }}
+QListWidget#paletteHits {{ background: {card_bg}; border: none; padding: 4px; }}
+QListWidget#paletteHits::item {{
+    background: transparent; color: {TEXT}; border: none; padding: 0;
+}}
+QListWidget#paletteHits::item:selected {{ background: transparent; color: {TEXT}; }}
+QWidget#paletteRow {{ background: transparent; border-radius: {radius}px; }}
+QWidget#paletteRow[selected="true"] {{ background: {ACCENT}; }}
+QWidget#paletteRow QLabel#paletteTitle {{ background: transparent; color: {TEXT}; }}
+QWidget#paletteRow QLabel#paletteGroup {{
+    background: transparent; color: {TEXT_MUTED}; font-size: 11px;
+}}
+QWidget#paletteRow[selected="true"] QLabel#paletteTitle,
+QWidget#paletteRow[selected="true"] QLabel#paletteGroup {{ color: {TEXT_ON_ACCENT}; }}
+QLabel#paletteChip {{
+    background: {CONTROL_BG}; color: {TEXT_MUTED};
+    border: {density.border_px}px solid {CONTROL_BORDER};
+    border-radius: {radius}px; padding: 0 6px; font-size: 11px;
+}}
+QWidget#paletteRow[selected="true"] QLabel#paletteChip {{
+    background: transparent; color: {TEXT_ON_ACCENT}; border-color: {TEXT_ON_ACCENT};
+}}
 QMenuBar {{ background: transparent; }}
 QMenuBar::item:selected {{ background: {MENU_SELECTION}; color: #ffffff; }}
 QMenu {{ background: {MENU_BG}; border: {density.border_px}px solid {CONTROL_BORDER}; }}
 QMenu::item:selected {{ background: {MENU_SELECTION}; color: #ffffff; }}
-QSplitter::handle {{ background: {CONTROL_BORDER}; }}
+QSplitter::handle {{ background: transparent; }}
+QFrame#splitLine {{ background: {CONTROL_BORDER}; border: none; }}
+QFrame#splitLine[hot="true"] {{ background: {ACCENT}; }}
+QToolButton#tabClose {{
+    background: transparent; border: none; padding: 0; min-width: 14px; max-width: 14px;
+    min-height: 14px; max-height: 14px;
+}}
+QToolButton#tabClose:hover {{ background: {CONTROL_HOVER}; }}
 """
 
 
