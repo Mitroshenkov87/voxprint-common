@@ -23,6 +23,7 @@ from voxprint_common.mdl.catalog import (
     load_manifest,
 )
 from voxprint_common.mdl.events import ItemProgress, ProgressEvent, TransferSession
+from voxprint_common.mdl.hooks import remove_outputs
 from voxprint_common.mdl.job import detect_tier, verify
 from voxprint_common.mdl.present import (
     AppSlot,
@@ -337,7 +338,10 @@ class Controller:
 
     def remove_model(self, app_id: str, component_id: str) -> bool:
         """Drop this app's ref. A folder is removed only when the release checks pass."""
-        return release_component(component_id, app_id).deleted
+        deleted = release_component(component_id, app_id).deleted
+        if deleted:
+            remove_outputs(app_id, component_id)
+        return deleted
 
     def verify_app(self, app_id: str, manifest: Path) -> None:
         """Re-hash the planned files for one manifest."""

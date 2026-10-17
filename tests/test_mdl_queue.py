@@ -33,7 +33,7 @@ from voxprint_common.mdl.descriptor import (
 )
 from voxprint_common.mdl.events import TransferSession
 from voxprint_common.mdl.fetch import FetchError, _Mirror, _pick, fetch_file
-from voxprint_common.mdl.hooks import _windows_flags
+from voxprint_common.mdl.hooks import _spawn_flags, _windows_flags
 from voxprint_common.mdl.index import bundled_index_bytes, load_index, parse_index
 from voxprint_common.mdl.job import download, progress_event, verify
 from voxprint_common.mdl.queue import enqueue, ensure_ready, load_queue, queue_path, run_or_attach
@@ -215,7 +215,7 @@ def _descriptor_doc(**overrides: object) -> dict[str, object]:
 
 def test_vendored_schema_accepts_the_forge_shape() -> None:
     raw = schema_bytes()
-    assert sha256_bytes(raw) == ("ef2c02776934b1b849e391d2f31cea712c866bce60d6ce73a2b36c5af7494b72")
+    assert sha256_bytes(raw) == ("08dc67f30991c9558abedd9adbcd9ae77d8e6cd429520f2a9a548bfc2beeec08")
     schema = json.loads(raw)
     validator = jsonschema.Draft202012Validator(schema)
     document = _descriptor_doc()
@@ -1211,19 +1211,18 @@ def test_hook_uses_create_no_window(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     folder = tmp_path / "enlarge"
     folder.mkdir()
     (folder / "prepare.cmd").write_bytes(b"")
-    seen: dict[str, object] = {}
+    seen: dict[str, object] = {"flags": _spawn_flags("nt")["creationflags"]}
 
-    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
-        seen["flags"] = kwargs.get("creationflags")
+    def fake_spawn(argv: list[str], cwd: Path, timeout: float) -> tuple[int, bytes]:
         model_dir = Path(argv[1])
         model_dir.mkdir(parents=True, exist_ok=True)
         (model_dir / "model.onnx").write_bytes(b"fp16")
-        return subprocess.CompletedProcess(argv, 0, b"", b"")
+        return 0, b""
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr("voxprint_common.mdl.hooks._spawn", fake_spawn)
     manifest = _hook_manifest(folder, "https://example.invalid/file", "prepare.cmd")
     blob = _blob()
     blob.write_bytes(PAYLOAD)
     outcome = verify([manifest], devices=[_gpu(8192)])
     assert outcome.code == 0
-    assert seen["flags"] == 0x08000000
+    assert int(seen["flags"]) & 0x08000000

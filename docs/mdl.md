@@ -118,6 +118,51 @@ Hugging Face mirrors need a revision. `main` is accepted when the manifest says 
 
 An entry whose only URL is a gated upstream (`pyannote/speaker-diarization-community-1`, `pyannote/embedding`) is rejected. The public copies are `Mitroshenkov87/voxprint-pyannote-speaker-diarization-community-1` and `Mitroshenkov87/voxprint-pyannote-embedding`, with the same dataset names under the Kaggle owner `mitroshenkov87`. `public_mirror_urls` builds those URLs and does not read `HF_TOKEN`.
 
+## ONNX models, pre-built artifacts, and post_install
+
+`runtime.engine` may be `onnxruntime` (with `llama.cpp`, `diffusers`, and `nunchaku`). TensorRT is not an engine.
+
+A model, or one file entry, may carry an optional `onnx_prebuilt` artifact (not to be confused with the `prebuilt` list of fallback sets): `path`, `sha256`, `size`, exactly one of `url` or `sources` (the same `mirror_policy` and `sources` rules as model files), and `built_for: {"onnxruntime": "<version spec>", "opset": <int>}`. The app reports the installed onnxruntime with `voxprint_common.mdl.prebuilt.set_onnxruntime_probe(lambda: (onnxruntime.__version__, max_opset))`. When the version does not match the spec, the opset is above what that onnxruntime runs, there is no probe, or the artifact has no `size`, the artifact is stale: it is not downloaded, the warning is logged, `voxprint-mdl --check` prints `stale onnx_prebuilt: ...`, and the source files plus `post_install` are used. A fresh artifact is downloaded beside the source files and the model's own `post_install` is skipped.
+
+`post_install` is `{"cli", "args", "timeout_s"?, "outputs"?}`:
+
+* `cli` is an executable name in the owning app's install folder (`<install>/<cli>` or `<install>/bin/<cli>`, plus `.exe` on Windows). It is never looked up on `PATH`, a path is rejected, and a symlink that leaves the install folder is refused.
+* `args` may use only `{id}`, `{model_dir}`, `{source_path}`, `{prebuilt_path}` (the downloaded `onnx_prebuilt` file, empty when it is stale), and `{cache_dir}`. Any other placeholder is rejected when the manifest is read. The command runs without a shell, with `VOXPRINT_OFFLINE=1` and `HTTP_PROXY`, `HTTPS_PROXY`, and `ALL_PROXY` set to `http://127.0.0.1:9`.
+* `timeout_s` defaults to 600 and is capped at 3600. A timeout kills the whole process tree. Stdout and stderr go to `<home>/state/mdl-hook.log`, keeping the last 64 KB per run.
+* `outputs[].path` is relative to `{model_dir}` (`<models>/<app>/<id>`). An absolute path, `..`, or a path that resolves outside is rejected when the manifest is read and again at run time. An output with `sha256` must match. Outputs count as installed files: ready reports `needs preparing` until they exist, verify re-hashes them, and removing the model deletes them.
+* A failure, a timeout, or a checksum mismatch leaves the model not ready. `--check` prints `not ready: <app>/<id>: <reason>`, and the next install runs the command again.
+
+Enlarge ships the `.pth` weights and a pre-built `.onnx`, and prepares the ONNX itself when the pre-built one is stale:
+
+```json
+{
+  "id": "realesrgan-x4",
+  "files": [{"path": "RealESRGAN_x4plus.pth", "size": 67040989, "sha256": "<sha256>",
+             "mirrors": ["https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth"]}],
+  "onnx_prebuilt": {"path": "RealESRGAN_x4plus.onnx", "sha256": "<sha256>", "size": 67200000,
+               "url": "https://huggingface.co/voxprint/enlarge-models/resolve/main/RealESRGAN_x4plus.onnx",
+               "built_for": {"onnxruntime": ">=1.20,<2", "opset": 17}},
+  "post_install": {"cli": "voxprint-enlarge-cli", "args": ["--prepare-model", "{id}"],
+                   "outputs": [{"path": "RealESRGAN_x4plus.onnx"}]}
+}
+```
+
+Clarity writes an fp16 ONNX into the model folder at install time:
+
+```json
+{
+  "id": "clarity-restore",
+  "files": [{"path": "restore.pth", "size": 123456789, "sha256": "<sha256>",
+             "mirrors": ["https://huggingface.co/voxprint/clarity-models/resolve/main/restore.pth"]}],
+  "post_install": {"cli": "voxprint-clarity-cli",
+                   "args": ["--prepare-model", "{id}", "--out", "{model_dir}"],
+                   "timeout_s": 1200,
+                   "outputs": [{"path": "restore-fp16.onnx"}]}
+}
+```
+
+The older app-manifest form, `{"argv", "timeout_s", "produces"}`, still works and may also use `{models_root}`.
+
 ## Model index
 
 The bundled index is the serial 9 snapshot of `Mitroshenkov87/voxprint-model-index` (head `15edeab0f7a874c27d2b38ef6ecb69106ff94df8`, 29 models, sha256 `104742f9d8cc7c8f693f963dbd871471a3e57fda3d585d52b105b3855d49f45f`), signed with Model Forge's key. `model-index.pin.json` records the head, serial `9`, `generated_at` `2026-10-18T04:09:36Z`, and the sha256, which the bundled file must match. A remote index may be the object `{head, serial, generated_at, models}` or a plain list.

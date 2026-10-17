@@ -9,14 +9,16 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from importlib.resources import files
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 __all__ = [
     "APP_SCHEMA",
     "MODEL_SCHEMA",
+    "PLACEHOLDERS",
     "AppModels",
     "BuildInfo",
     "Descriptor",
@@ -25,13 +27,16 @@ __all__ = [
     "FallbackSet",
     "FileGroup",
     "MirrorRef",
+    "OnnxPrebuilt",
     "OptionalRef",
     "PostInstall",
     "RuntimeInfo",
     "TierInfo",
+    "inside_relative",
     "parse_app_manifest",
     "parse_descriptor",
     "parse_descriptor_text",
+    "parse_onnx_prebuilt",
     "parse_post_install",
     "schema_bytes",
 ]
@@ -45,7 +50,7 @@ _PATH = re.compile(r"^(?!voxprint-model\.json$)(?!/)(?!.*\\)(?!.*\.\./)[^\\]+$")
 _CARD = re.compile(r"^(?:|https://\S+)$")
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _SHA = re.compile(r"^[0-9a-f]{64}$")
-_ENGINES = frozenset({"llama.cpp", "diffusers", "nunchaku"})
+_ENGINES = frozenset({"llama.cpp", "diffusers", "nunchaku", "onnxruntime"})
 _KINDS = frozenset({"hf", "kaggle", "gdrive", "modelscope", "url"})
 _POLICIES = frozenset({"race", "strict-priority"})
 _TIER_KEYS = frozenset({"8gb", "16gb", "24gb"})
@@ -69,7 +74,14 @@ _MODEL_KEYS = frozenset(
         "build",
     }
 )
-_MODEL_OPTIONAL = frozenset({"mirror_policy", "file_groups", "prebuilt"})
+_MODEL_OPTIONAL = frozenset(
+    {"mirror_policy", "file_groups", "prebuilt", "onnx_prebuilt", "post_install"}
+)
+_CLI = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+PLACEHOLDERS = frozenset({"id", "model_dir", "source_path", "prebuilt_path", "cache_dir"})
+_PLACEHOLDER = re.compile(r"\{([^{}]*)\}")
+DEFAULT_TIMEOUT_S = 600.0
+MAX_TIMEOUT_S = 3600.0
 _MIRROR_KEYS = frozenset({"kind", "ref", "revision", "ours"})
 
 
@@ -182,6 +194,8 @@ class Descriptor:
     mirror_policy: str = "race"
     file_groups: tuple[FileGroup, ...] = ()
     fallbacks: tuple[FallbackSet, ...] = ()
+    onnx_prebuilt: tuple[OnnxPrebuilt, ...] = ()
+    post_install: PostInstall | None = None
 
     def policy_for(self, path: str) -> str:
         """Return the mirror policy for one file.
@@ -238,6 +252,28 @@ class PostInstall:
     timeout_s: float
     produces: tuple[str, ...]
     model_id: str = ""
+    cli: str = ""
+    output_sha256: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class OnnxPrebuilt:
+    """An optional pre-built artifact, such as an ``.onnx`` export.
+
+    ``onnxruntime`` is a version spec such as ``>=1.20,<2``. ``opset`` is the
+    ONNX opset the artifact was exported with. ``sources`` are resolved URLs
+    or mirror refs, tried with ``mirror_policy``.
+    """
+
+    path: str
+    sha256: str
+    size: int | None
+    sources: tuple[Any, ...]
+    url: str
+    mirror_policy: str
+    onnxruntime: str
+    opset: int
+    source_file: str = ""
 
 
 @dataclass(frozen=True)
@@ -278,11 +314,12 @@ def parse_descriptor(payload: object) -> Descriptor:
     if row.get("schema") != MODEL_SCHEMA:
         raise DescriptorError("schema must be voxprint-model/1")
     files = _files(row.get("files"))
+    model_id = _ident(row.get("id"), "id")
     policy = "race"
     if "mirror_policy" in row:
         policy = _named_policy(row.get("mirror_policy"), "mirror_policy")
     return Descriptor(
-        id=_ident(row.get("id"), "id"),
+        id=model_id,
         display_name=_text(row.get("display_name"), "display_name"),
         app_ids=_app_ids(row.get("app_ids")),
         task=_text(row.get("task"), "task"),
@@ -299,6 +336,8 @@ def parse_descriptor(payload: object) -> Descriptor:
         on_demand=_bool(row.get("on_demand"), "on_demand"),
         build=_build(row.get("build")),
         fallbacks=_fallbacks(row.get("prebuilt"), {item.path for item in files}),
+        onnx_prebuilt=_onnx_prebuilts(row),
+        post_install=_post_install(row.get("post_install"), "post_install", model_id),
     )
 
 
@@ -371,7 +410,7 @@ def _object(
 def _files(value: object) -> tuple[DescriptorFile, ...]:
     rows = _list(value, "files", minimum=1)
     files: list[DescriptorFile] = []
-    allowed = {"path", "size", "sha256", "mirror_policy", "sources"}
+    allowed = {"path", "size", "sha256", "mirror_policy", "sources", "onnx_prebuilt"}
     for row in rows:
         if not isinstance(row, dict) or not {"path", "size", "sha256"} <= set(row) <= allowed:
             raise DescriptorError("files entries need path, size, and sha256")
@@ -575,6 +614,8 @@ def _post_install(value: object, label: str, model_id: str = "") -> PostInstall 
         return None
     if not isinstance(value, dict):
         raise DescriptorError(f"{label} must be an object")
+    if "cli" in value:
+        return _cli_hook(value, label, model_id)
     allowed = {"argv", "timeout_s", "produces"}
     if set(value) != allowed:
         raise DescriptorError(f"{label} needs argv, timeout_s, and produces")
@@ -600,6 +641,131 @@ def _post_install(value: object, label: str, model_id: str = "") -> PostInstall 
         if path.is_absolute() or ".." in path.parts:
             raise DescriptorError(f"{label} produces must stay inside the model folder")
     return PostInstall(tuple(argv), float(timeout), tuple(produces), model_id)
+
+
+def _cli_hook(value: dict[str, Any], label: str, model_id: str) -> PostInstall:
+    extra = set(value) - {"cli", "args", "timeout_s", "outputs"}
+    if extra or "args" not in value:
+        raise DescriptorError(f"{label} takes cli, args, timeout_s, and outputs")
+    cli = value.get("cli")
+    if not isinstance(cli, str) or _CLI.fullmatch(cli) is None:
+        raise DescriptorError(f"{label} cli must be the app's own executable name, not a path")
+    args = value.get("args")
+    if not isinstance(args, list) or any(not isinstance(item, str) for item in args):
+        raise DescriptorError(f"{label} args must be a list of strings")
+    for item in args:
+        for name in _PLACEHOLDER.findall(item):
+            if name not in PLACEHOLDERS:
+                raise DescriptorError(f"{label} placeholder {{{name}}} is not allowed")
+        if _PLACEHOLDER.sub("", item).count("{") or _PLACEHOLDER.sub("", item).count("}"):
+            raise DescriptorError(f"{label} args have an unbalanced brace")
+    timeout = value.get("timeout_s", DEFAULT_TIMEOUT_S)
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:
+        raise DescriptorError(f"{label} timeout_s must be a positive number")
+    outputs = value.get("outputs", [])
+    if not isinstance(outputs, list):
+        raise DescriptorError(f"{label} outputs must be a list")
+    paths: list[str] = []
+    digests: list[str] = []
+    for row in outputs:
+        if not isinstance(row, dict) or "path" not in row or set(row) - {"path", "sha256"}:
+            raise DescriptorError(f"{label} outputs entries need path and optional sha256")
+        paths.append(inside_relative(row.get("path"), f"{label} outputs"))
+        digest = row.get("sha256", "")
+        if digest and (not isinstance(digest, str) or _SHA.fullmatch(digest) is None):
+            raise DescriptorError(f"{label} outputs sha256 must be 64 lowercase hex characters")
+        digests.append(str(digest))
+    return PostInstall(
+        (cli, *args),
+        min(float(timeout), MAX_TIMEOUT_S),
+        tuple(paths),
+        model_id,
+        cli=cli,
+        output_sha256=tuple(digests),
+    )
+
+
+def inside_relative(value: object, label: str) -> str:
+    """Return ``value`` when it is a relative path that stays inside its folder.
+
+    Args:
+        value: The path string from a document.
+        label: Field name used in errors.
+
+    Raises:
+        DescriptorError: The path is absolute, uses ``..``, or a backslash.
+    """
+    if not isinstance(value, str) or not value or "\\" in value:
+        raise DescriptorError(f"{label} path must be a relative path")
+    pure = PurePosixPath(value)
+    if pure.is_absolute() or ".." in pure.parts or PureWindowsPath(value).drive:
+        raise DescriptorError(f"{label} path must stay inside the model folder")
+    return value
+
+
+def parse_onnx_prebuilt(
+    value: object,
+    label: str = "onnx_prebuilt",
+    source_file: str = "",
+    *,
+    mirrors: Callable[[object, str], tuple[Any, ...]] | None = None,
+) -> OnnxPrebuilt:
+    """Parse one ``prebuilt`` object.
+
+    Args:
+        value: The JSON value.
+        label: Field name used in errors.
+        source_file: The file it replaces, when it sits on a file entry.
+        mirrors: Parser for ``sources``. Defaults to ``voxprint-model/1``
+            mirror refs; ``mdl.json`` passes its own mirror format.
+
+    Raises:
+        DescriptorError: The object is not a pre-built artifact.
+    """
+    allowed = {"path", "sha256", "size", "url", "sources", "mirror_policy", "built_for"}
+    if not isinstance(value, dict) or not {"path", "sha256", "built_for"} <= set(value) <= allowed:
+        raise DescriptorError(f"{label} needs path, sha256, built_for, and url or sources")
+    if ("url" in value) == ("sources" in value):
+        raise DescriptorError(f"{label} needs exactly one of url or sources")
+    path = value.get("path")
+    if not isinstance(path, str) or _PATH.fullmatch(path) is None:
+        raise DescriptorError(f"{label} path is not allowed: {path!r}")
+    digest = value.get("sha256")
+    if not isinstance(digest, str) or _SHA.fullmatch(digest) is None:
+        raise DescriptorError(f"{label} sha256 must be 64 lowercase hex characters")
+    size = value.get("size")
+    if size is not None and (isinstance(size, bool) or not isinstance(size, int) or size < 0):
+        raise DescriptorError(f"{label} size must be a non-negative integer")
+    url = value.get("url", "")
+    if "url" in value and (not isinstance(url, str) or not url.startswith("https://")):
+        raise DescriptorError(f"{label} url must be https")
+    parse = mirrors or _mirrors
+    sources = parse(value.get("sources"), f"{label}.sources") if "sources" in value else ()
+    policy = "race"
+    if "mirror_policy" in value:
+        policy = _named_policy(value.get("mirror_policy"), f"{label}.mirror_policy")
+    built = value.get("built_for")
+    if not isinstance(built, dict) or set(built) != {"onnxruntime", "opset"}:
+        raise DescriptorError(f"{label} built_for needs onnxruntime and opset")
+    spec = built.get("onnxruntime")
+    opset = built.get("opset")
+    if not isinstance(spec, str) or not spec.strip():
+        raise DescriptorError(f"{label} built_for.onnxruntime must be a version spec")
+    if isinstance(opset, bool) or not isinstance(opset, int) or opset < 1:
+        raise DescriptorError(f"{label} built_for.opset must be a positive integer")
+    return OnnxPrebuilt(path, digest, size, sources, url, policy, spec.strip(), opset, source_file)
+
+
+def _onnx_prebuilts(row: dict[str, Any]) -> tuple[OnnxPrebuilt, ...]:
+    found: list[OnnxPrebuilt] = []
+    if "onnx_prebuilt" in row:
+        found.append(parse_onnx_prebuilt(row.get("onnx_prebuilt")))
+    for item in row.get("files") or ():
+        if isinstance(item, dict) and "onnx_prebuilt" in item:
+            found.append(
+                parse_onnx_prebuilt(item["onnx_prebuilt"], "files.onnx_prebuilt", str(item["path"]))
+            )
+    return tuple(found)
 
 
 def _unavailable(value: object) -> tuple[tuple[str, str], ...]:

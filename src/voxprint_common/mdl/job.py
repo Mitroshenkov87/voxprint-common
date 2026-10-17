@@ -282,7 +282,7 @@ def verify(
         status.error = "sha256 mismatch: " + ", ".join(mismatches)
         return _publish(status, EXIT_FAILED, status.error, on_status)
     try:
-        apply_hooks(files)
+        apply_hooks(files, deep=True)
     except HookError as exc:
         _mark_hook(status, exc)
         return _publish(status, EXIT_FAILED, str(exc), on_status)
