@@ -12,6 +12,8 @@ key is preserved, so one app does not wipe another's settings.
   Missing or invalid values mean 2. The accepted range is 1 through 8.
 * ``keymap``: schema 1 overrides for the shared command chords. Bad entries
   are dropped by :mod:`voxprint_common.ui.keymap`. Other keys are preserved.
+* ``ui.expert_mode``: true or false. False, the default, is simple mode.
+  :class:`voxprint_common.ui.expert.ExpertMode` notifies listeners.
 
 ``VOXPRINT_MODELS_DIR`` is applied by :func:`voxprint_common.paths.models_dir`,
 not by the getters here.
@@ -34,6 +36,7 @@ __all__ = [
     "DEFAULT_THEME",
     "KEYS",
     "SCHEMA",
+    "expert_mode",
     "file",
     "gpu",
     "keep_awake_during_jobs",
@@ -42,6 +45,7 @@ __all__ = [
     "models_dir",
     "normalize_gpu",
     "read",
+    "set_expert_mode",
     "set_gpu",
     "set_keep_awake_during_jobs",
     "set_keymap",
@@ -56,7 +60,15 @@ __all__ = [
 ]
 
 SCHEMA = 1
-KEYS = ("ui_language", "theme", "models_dir", "gpu", "keep_awake_during_jobs", "mdl_parallel_files")
+KEYS = (
+    "ui_language",
+    "theme",
+    "models_dir",
+    "gpu",
+    "keep_awake_during_jobs",
+    "mdl_parallel_files",
+    "ui.expert_mode",
+)
 DEFAULT_PARALLEL_FILES = 2
 DEFAULT_THEME = "glass-dark"
 THEMES = frozenset({DEFAULT_THEME})
@@ -134,6 +146,35 @@ def keep_awake_during_jobs() -> bool:
     return True
 
 
+def expert_mode() -> bool:
+    """Return whether Expert mode is on.
+
+    A missing or invalid stored value is false. The file is not created.
+    """
+    stored = read().get("ui.expert_mode")
+    if isinstance(stored, bool):
+        return stored
+    return False
+
+
+def set_expert_mode(enabled: bool) -> bool:
+    """Store Expert mode. False is simple mode.
+
+    Listeners live on :class:`voxprint_common.ui.expert.ExpertMode`. This
+    function only writes the file.
+
+    Args:
+        enabled: True shows expert commands, panels, and settings.
+
+    Returns:
+        The stored value.
+
+    Raises:
+        ValueError: ``enabled`` is not a bool.
+    """
+    return bool(set_value("ui.expert_mode", enabled))
+
+
 def mdl_parallel_files() -> int:
     """Return how many model files to fetch at once.
 
@@ -175,6 +216,7 @@ def values() -> dict[str, Any]:
         "gpu": gpu(),
         "keep_awake_during_jobs": keep_awake_during_jobs(),
         "mdl_parallel_files": mdl_parallel_files(),
+        "ui.expert_mode": expert_mode(),
     }
 
 
@@ -406,6 +448,10 @@ def _validate(key: str, value: object) -> object:
     if key == "mdl_parallel_files":
         if isinstance(value, bool) or not isinstance(value, int) or value < 1 or value > 8:
             raise ValueError(f"mdl_parallel_files must be an integer from 1 to 8, got {value!r}")
+        return value
+    if key == "ui.expert_mode":
+        if not isinstance(value, bool):
+            raise ValueError(f"ui.expert_mode must be true or false, got {value!r}")
         return value
     raise ValueError(f"not a shared setting: {key!r}")
 

@@ -259,7 +259,20 @@ def build_shell_style(glass: bool, *, more: bool = False) -> str:
 QWidget#shell {{ background: {root_bg}; }}
 QLabel#titlebar {{ font-size: 15px; font-weight: 600; background: transparent; }}
 QLabel#status {{ color: {TEXT_MUTED}; background: transparent; }}
+QLabel#expertChip {{
+    color: {TEXT_MUTED}; background: {CONTROL_BG};
+    border: {density.border_px}px solid {CONTROL_BORDER};
+    border-radius: {radius}px; padding: 1px 8px; font-size: 11px;
+}}
 QLabel#panel {{ background: transparent; }}
+QLabel#settingGroup {{
+    color: {TEXT_MUTED}; font-weight: 600; background: transparent; padding-top: 6px;
+}}
+QCheckBox {{ background: transparent; spacing: 8px; }}
+QSpinBox, QDoubleSpinBox, QComboBox {{
+    background: {CONTROL_BG}; border: {density.border_px}px solid {CONTROL_BORDER};
+    border-radius: {radius}px; padding: 2px 8px; min-height: {density.panel_header_px}px;
+}}
 QFrame#dock {{
     background: {card_bg}; border: {density.border_px}px solid {CONTROL_BORDER};
     border-radius: {radius}px;

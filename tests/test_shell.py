@@ -20,6 +20,8 @@ def test_headless_layout_and_adoption() -> None:
     assert layout.contains("layers")
     assert layout.contains("canvas")
     assert layout.contains("history")
+    assert layout.contains("settings")
+    assert layout.contains("advanced")
     assert ADOPTION == (
         "canvas",
         "enlarge",
@@ -63,7 +65,21 @@ def test_offscreen_shell_screenshots(tmp_path: Path) -> None:
     palette = (tmp_path / "en-palette.png").read_bytes()
     russian_palette = (tmp_path / "ru-palette.png").read_bytes()
     split = (tmp_path / "en-split.png").read_bytes()
-    for blob in (english, russian, german, palette, russian_palette, split):
+    simple = (tmp_path / "en-simple.png").read_bytes()
+    expert = (tmp_path / "en-expert.png").read_bytes()
+    russian_expert = (tmp_path / "ru-expert.png").read_bytes()
+    pictures = (
+        english,
+        russian,
+        german,
+        palette,
+        russian_palette,
+        split,
+        simple,
+        expert,
+        russian_expert,
+    )
+    for blob in pictures:
         assert blob.startswith(b"\x89PNG")
         assert len(blob) > 1000
     assert english != russian
@@ -71,4 +87,7 @@ def test_offscreen_shell_screenshots(tmp_path: Path) -> None:
     assert palette != russian_palette
     assert english != palette
     assert english != split
+    assert simple != expert
+    assert expert != russian_expert
+    assert simple != english
     assert "PySide6" not in sys.modules

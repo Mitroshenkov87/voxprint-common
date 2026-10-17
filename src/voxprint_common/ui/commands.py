@@ -3,8 +3,9 @@
 A command id is stable (``view.palette``, ``canvas.generate``). The title is
 an i18n key, not a hard-coded sentence. The default chord uses ``Mod`` for
 the primary modifier. ``platforms`` replaces that chord on one operating
-system. ``when`` names the context that must be active. ``enabled_id`` is a
-predicate the app turns on and off.
+system. ``when`` names the context that must be active. ``expert`` hides the
+command until Expert mode is on. ``enabled_id`` is a predicate the app turns
+on and off.
 
 Qt is not imported.
 """
@@ -41,6 +42,7 @@ class CommandSpec:
     platforms: tuple[tuple[str, str], ...] = ()
     when: str = "global"
     enabled_id: str | None = None
+    expert: bool = False
 
 
 class Registry:
@@ -97,6 +99,17 @@ class Registry:
             return True
         return self._enabled.get(spec.enabled_id, False)
 
+    def visible(self, *, expert: bool) -> tuple[CommandSpec, ...]:
+        """Return commands to show for this mode.
+
+        Expert commands are left out when ``expert`` is false. Whether a
+        command is enabled is a separate check.
+
+        Args:
+            expert: True when Expert mode is on.
+        """
+        return tuple(spec for spec in self._commands.values() if expert or not spec.expert)
+
     def __iter__(self) -> Iterator[CommandSpec]:
         return iter(self._commands.values())
 
@@ -114,7 +127,8 @@ def reference_commands() -> tuple[CommandSpec, ...]:
     """Return the shared commands the reference shell registers.
 
     App commands are added beside these. Ids already used here stay shared:
-    ``file.save``, ``edit.undo``, ``edit.redo``, and ``view.palette``.
+    ``file.save``, ``edit.undo``, ``edit.redo``, ``view.palette``, and
+    ``view.toggle_expert_mode``. The toggle has no default chord.
     """
     return (
         CommandSpec("file.save", "command.file.save", "Mod+S"),
@@ -124,4 +138,5 @@ def reference_commands() -> tuple[CommandSpec, ...]:
         CommandSpec("view.close_panel", "command.view.close_panel", "Mod+W"),
         CommandSpec("view.float_panel", "command.view.float_panel", "Mod+Shift+F"),
         CommandSpec("view.focus_canvas", "command.view.focus_canvas", "Mod+1"),
+        CommandSpec("view.toggle_expert_mode", "command.view.toggle_expert_mode"),
     )

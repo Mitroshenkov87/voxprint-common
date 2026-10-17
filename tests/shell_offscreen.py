@@ -85,12 +85,107 @@ def main() -> None:
     _check_split_undo(app, QPoint, QEvent, QPointF, Qt, QMouseEvent, QApplication)
     _check_split_colour(app, ACCENT)
 
+    _check_expert(app)
     grab_shell(out / "en-shell.png", language="en")
     grab_shell(out / "ru-shell.png", language="ru")
     grab_shell(out / "de-shell.png", language="de", reveal_close=True)
     grab_shell(out / "en-palette.png", language="en", show_palette=True, palette_query="pa")
     grab_shell(out / "ru-palette.png", language="ru", show_palette=True, palette_query="па")
     grab_shell(out / "en-split.png", language="en", hot_split=True)
+    grab_shell(out / "en-simple.png", language="en", show_settings=True, expert=False)
+    grab_shell(out / "en-expert.png", language="en", show_settings=True, expert=True)
+    grab_shell(out / "ru-expert.png", language="ru", show_settings=True, expert=True)
+
+
+def _check_expert(app: object) -> None:
+    from PySide6.QtWidgets import QMenuBar
+
+    from voxprint_common.i18n import set_language, tr
+    from voxprint_common.ui.dock import layout_json
+    from voxprint_common.ui.shell import ReferenceShell
+
+    set_language("en")
+    shell = ReferenceShell()
+    shell.resize(1100, 700)
+    shell.show()
+    app.processEvents()  # type: ignore[attr-defined]
+    assert "advanced" in layout_json(shell.history.layout)
+    assert tr("shell.panel.advanced") not in _tab_titles(shell)
+    assert tr("shell.panel.settings") in _tab_titles(shell)
+    chip = shell.find("QLabel", "expertChip")
+    assert chip is not None and chip.isVisible() is False  # type: ignore[attr-defined]
+    assert shell.find("QCheckBox", "image.content_filter") is None
+    assert shell.find("QSpinBox", "shell.steps") is None
+    pictures = shell.find("QSpinBox", "shell.pictures")
+    assert pictures is not None and pictures.value() == 1  # type: ignore[attr-defined]
+    assert pictures.toolTip() == ""  # type: ignore[attr-defined]
+    shell.show_panel("settings")
+    app.processEvents()  # type: ignore[attr-defined]
+    before = layout_json(shell.history.layout)
+    shell.run("view.toggle_expert_mode")
+    app.processEvents()  # type: ignore[attr-defined]
+    assert layout_json(shell.history.layout) == before
+    assert chip.isVisible() is True  # type: ignore[attr-defined]
+    assert chip.text() == tr("shell.status.expert")  # type: ignore[attr-defined]
+    assert tr("shell.panel.advanced") in _tab_titles(shell)
+    content = shell.find("QCheckBox", "image.content_filter")
+    steps = shell.find("QSpinBox", "shell.steps")
+    sampler = shell.find("QComboBox", "shell.sampler")
+    assert content is not None and content.isChecked() is True  # type: ignore[attr-defined]
+    assert content.toolTip() == tr("setting.image.content_filter.help")  # type: ignore[attr-defined]
+    assert steps is not None and steps.value() == 20  # type: ignore[attr-defined]
+    assert steps.toolTip() == tr("setting.shell.steps.help")  # type: ignore[attr-defined]
+    assert sampler is not None and sampler.currentText() == tr("setting.shell.sampler.euler")  # type: ignore[attr-defined]
+    pictures = shell.find("QSpinBox", "shell.pictures")
+    assert pictures is not None and pictures.toolTip() == ""  # type: ignore[attr-defined]
+    bar = shell.widget.findChild(QMenuBar)
+    assert bar is not None
+    view = next(action.menu() for action in bar.actions() if action.text() == tr("shell.menu.view"))
+    labels = [action.text().split("\t")[0] for action in view.actions()]
+    assert tr("command.view.toggle_expert_mode") in labels
+    shell.open_palette()
+    shell._query.setText("Expert")
+    app.processEvents()  # type: ignore[attr-defined]
+    ids = [shell._hits.item(row).data(shell._qt.UserRole) for row in range(shell._hits.count())]
+    assert "view.toggle_expert_mode" in ids
+    shell.run("view.toggle_expert_mode")
+    app.processEvents()  # type: ignore[attr-defined]
+    assert layout_json(shell.history.layout) == before
+    assert chip.isVisible() is False  # type: ignore[attr-defined]
+    hidden_filter = shell.find("QCheckBox", "image.content_filter")
+    assert hidden_filter is None or hidden_filter.isVisible() is False  # type: ignore[attr-defined]
+    assert tr("shell.panel.advanced") not in _tab_titles(shell)
+    shell.close()
+    app.processEvents()  # type: ignore[attr-defined]
+
+    for language in _LOCALES:
+        set_language(language)
+        local = ReferenceShell()
+        local.resize(900, 600)
+        local.show()
+        app.processEvents()  # type: ignore[attr-defined]
+        local_bar = local.widget.findChild(QMenuBar)
+        assert local_bar is not None
+        local_view = next(
+            action.menu()
+            for action in local_bar.actions()
+            if action.text() == tr("shell.menu.view")
+        )
+        local_labels = [action.text().split("\t")[0] for action in local_view.actions()]
+        assert tr("command.view.toggle_expert_mode") in local_labels
+        local.close()
+        app.processEvents()  # type: ignore[attr-defined]
+
+
+def _tab_titles(shell: object) -> set[str]:
+    titles: set[str] = set()
+    bars = shell.widget.findChildren(shell._widgets.QTabBar)  # type: ignore[attr-defined]
+    for bar in bars:
+        if not bar.isVisible():
+            continue
+        for index in range(bar.count()):
+            titles.add(bar.tabText(index))
+    return titles
 
 
 def _check_toolbar(app: object, language: str) -> None:

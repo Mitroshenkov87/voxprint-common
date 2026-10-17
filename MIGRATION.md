@@ -308,6 +308,16 @@ The old 480-pixel square layout is retired. Lucent's C++ splash stays in Lucent.
 
 `voxprint_common.provenance` is a documented stub. `embed_image`, `finalize`, and `detect` raise `ProvenanceUnavailable`. There was no per-app module to replace. Do not add watermark keys to `suite.json` in this version. `Report.NO_MARK_NOTE` is `no mark found does not prove the file is human-made`.
 
+## Expert mode
+
+Apps open in simple mode. `state/suite.json` key `ui.expert_mode` is false until the user turns it on. `voxprint_common.ui.expert.ExpertMode` reads and writes that bool and notifies listeners. Commands, panels, and settings take `expert: bool = False`. `Registry.visible`, `visible_layout`, and `Settings.visible` omit expert items while the mode is off. A hidden expert panel stays in the app's layout JSON.
+
+`view.toggle_expert_mode` has no default chord. Put it in the View menu and the command palette. A keymap `when` of `expert` runs only while the mode is on.
+
+Image apps (Canvas first, then Enlarge, Clarity, and Lucent) use `IMAGE_CONTENT_FILTER` for the adult-content bool. The descriptor is the whole feature: no classifier and no extra flow live in this library.
+
+Canvas adopts the shell, including this rule, before the other apps.
+
 ## Not in 0.1
 
 These stay in the apps. A later version may take them.

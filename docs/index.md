@@ -14,7 +14,7 @@ print(home())
 print(load("BUILD.json").label())
 ```
 
-PySide6 is optional. Importing `voxprint_common.ui.theme`, `voxprint_common.ui.tokens`, `voxprint_common.ui.dock`, `voxprint_common.ui.commands`, `voxprint_common.ui.keymap`, `voxprint_common.ui.palette`, `voxprint_common.ui.splash`, or `voxprint_common.mdl` does not load Qt. Constructing `Splash`, `ReferenceShell`, or running `voxprint-mdl download --gui`, does. The [shared UI](ui.md) adoption order starts with Canvas.
+PySide6 is optional. Importing `voxprint_common.ui.theme`, `voxprint_common.ui.tokens`, `voxprint_common.ui.dock`, `voxprint_common.ui.commands`, `voxprint_common.ui.keymap`, `voxprint_common.ui.expert`, `voxprint_common.ui.settings`, `voxprint_common.ui.palette`, `voxprint_common.ui.splash`, or `voxprint_common.mdl` does not load Qt. Constructing `Splash`, `ReferenceShell`, or running `voxprint-mdl download --gui`, does. The [shared UI](ui.md) adoption order starts with Canvas.
 
 VOXPrint MDL is the shared model downloader. Installers run `voxprint-mdl` after copying files. An app opens its window when [the status file reports ready](mdl.md). The download window and Manage models are the same process. UI strings live in [i18n](api/i18n.md).
 

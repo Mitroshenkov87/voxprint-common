@@ -85,6 +85,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 "src/voxprint_common/i18n/__init__.py" = ["RUF001", "RUF002", "RUF003"]
 "tests/test_mdl.py" = ["RUF001", "RUF002", "RUF003"]
 "tests/test_i18n.py" = ["RUF001", "RUF002", "RUF003"]
+"tests/test_expert.py" = ["RUF001", "RUF002", "RUF003"]
 "tests/test_i18n_check.py" = ["RUF001", "RUF002", "RUF003"]
 "tests/test_mdl_window.py" = ["RUF001", "RUF002", "RUF003"]
 

@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import assert_never
 
 from voxprint_common.i18n import set_language, tr
-from voxprint_common.ui.commands import Registry, reference_commands
+from voxprint_common.ui.commands import CommandSpec, Registry, reference_commands
 from voxprint_common.ui.dock import (
     Activate,
     Close,
@@ -26,6 +26,7 @@ from voxprint_common.ui.dock import (
     DockHistory,
     Float,
     Layout,
+    PanelSpec,
     Permissions,
     ResizeSplit,
     SetStackOpen,
@@ -36,7 +37,9 @@ from voxprint_common.ui.dock import (
     Stack,
     Tabs,
     fit_toolbar,
+    visible_layout,
 )
+from voxprint_common.ui.expert import ExpertMode, active_contexts
 from voxprint_common.ui.keymap import (
     KeyMap,
     display_chord,
@@ -45,6 +48,7 @@ from voxprint_common.ui.keymap import (
     load_overrides,
 )
 from voxprint_common.ui.palette import score_text
+from voxprint_common.ui.settings import SettingSpec, SettingType, reference_settings
 from voxprint_common.ui.theme import PRIMARY, TEXT, TEXT_MUTED, TEXT_ON_ACCENT, build_shell_style
 
 __all__ = [
@@ -52,6 +56,7 @@ __all__ = [
     "ReferenceShell",
     "grab_shell",
     "reference_layout",
+    "reference_panels",
 ]
 
 ADOPTION = (
@@ -76,14 +81,28 @@ _TOOLBAR = (
 def reference_layout() -> Layout[str]:
     """Return the factory layout: prompt and layers, the centre, and history.
 
-    The centre panel is protected. Side splits around it are allowed.
+    Settings sits beside history. Advanced is an expert panel in that same
+    group. The centre panel is protected. Side splits around it are allowed.
+    Hiding Advanced does not remove it from the stored layout.
     """
     left = Tabs(["prompt", "layers"], 0)
     centre = Tabs([_CENTRE], 0)
-    history = Tabs(["history"], 0)
-    inner = Split(SplitAxis.HORIZONTAL, SplitSize.fixed_second(260.0), centre, history, 140.0)
+    right = Tabs(["history", "settings", "advanced"], 0)
+    inner = Split(SplitAxis.HORIZONTAL, SplitSize.fixed_second(260.0), centre, right, 140.0)
     root = Split(SplitAxis.HORIZONTAL, SplitSize.ratio(0.24), left, inner, 160.0)
     return Layout(root)
+
+
+def reference_panels() -> tuple[PanelSpec, ...]:
+    """Return the panels the reference shell knows, including expert ones."""
+    return (
+        PanelSpec("prompt", "shell.panel.prompt"),
+        PanelSpec("layers", "shell.panel.layers"),
+        PanelSpec("canvas", "shell.panel.canvas"),
+        PanelSpec("history", "shell.panel.history"),
+        PanelSpec("settings", "shell.panel.settings"),
+        PanelSpec("advanced", "shell.panel.advanced", expert=True),
+    )
 
 
 def grab_shell(
@@ -95,6 +114,8 @@ def grab_shell(
     palette_query: str = "",
     hot_split: bool = False,
     reveal_close: bool = False,
+    show_settings: bool = False,
+    expert: bool = False,
 ) -> None:
     """Paint the reference shell and save a PNG.
 
@@ -107,12 +128,17 @@ def grab_shell(
         palette_query: Filter typed into the palette after it opens.
         hot_split: Paint the root divider in the drag colour.
         reveal_close: Show the close control on the first closable tab.
+        show_settings: Select the Settings panel before the grab.
+        expert: Turn Expert mode on before the grab.
     """
     set_language(language)
     _qt()
     widgets = _widgets()
     app = widgets.QApplication.instance() or widgets.QApplication([])
     shell = ReferenceShell(glass=glass)
+    shell.expert.set_enabled(expert)
+    if show_settings:
+        shell.show_panel("settings")
     shell.resize(1100, 700)
     shell.show()
     app.processEvents()
@@ -142,6 +168,8 @@ class ReferenceShell:
         self._gui = gui
         self._widgets = widgets
         self.history = DockHistory(reference_layout())
+        self.expert = ExpertMode()
+        self._stop_expert = lambda: None
         self.registry = Registry(reference_commands())
         overrides = load_overrides()
         self.keymap = KeyMap()
@@ -166,6 +194,9 @@ class ReferenceShell:
         self.widget.setWindowTitle(tr("shell.window.title"))
         self._status = widgets.QLabel(tr("shell.status.ready"))
         self._status.setObjectName("status")
+        self._expert_chip = widgets.QLabel(tr("shell.status.expert"))
+        self._expert_chip.setObjectName("expertChip")
+        self._expert_chip.setVisible(self.expert.enabled())
         self._toolbar = widgets.QWidget()
         self._dock = widgets.QWidget()
         self._palette = widgets.QFrame(self.widget)
@@ -186,6 +217,7 @@ class ReferenceShell:
         self._build_palette()
         self._install_shortcuts()
         self._install_resize_watch()
+        self._stop_expert = self.expert.subscribe(self._on_expert)
         self.rebuild()
 
     def resize(self, width: int, height: int) -> None:
@@ -204,6 +236,7 @@ class ReferenceShell:
 
     def close(self) -> None:
         """Hide and close the window."""
+        self._stop_expert()
         app = self._widgets.QApplication.instance()
         if app is not None:
             with contextlib.suppress(RuntimeError):
@@ -265,6 +298,23 @@ class ReferenceShell:
         if command_id == "view.focus_canvas":
             self._activate(_CENTRE)
             return
+        if command_id == "view.toggle_expert_mode":
+            self.expert.toggle()
+            return
+
+    def show_panel(self, panel: str) -> None:
+        """Select ``panel`` and paint the dock again.
+
+        Args:
+            panel: Panel id in the stored layout.
+        """
+        self.active = panel
+        try:
+            self.history.layout.apply(Activate(panel))
+        except DockError:
+            return
+        self.rebuild()
+        self._sync_shortcuts()
 
     def rebuild(self) -> None:
         """Paint the current dock tree again."""
@@ -279,10 +329,11 @@ class ReferenceShell:
             if widget is not None:
                 widget.hide()
                 widget.deleteLater()
-        root = self.history.layout.root
+        view = self._view()
+        root = view.root
         if root is not None:
             layout.addWidget(self._mount(root, ()))
-        self._mount_floats()
+        self._mount_floats(view)
         self._fill_toolbar()
         if self._palette.isVisible():
             self._palette.raise_()
@@ -300,24 +351,39 @@ class ReferenceShell:
         file_menu = menu_bar.addMenu(tr("shell.menu.file"))
         edit_menu = menu_bar.addMenu(tr("shell.menu.edit"))
         view_menu = menu_bar.addMenu(tr("shell.menu.view"))
-        self._add_action(file_menu, "file.save", "command.file.save")
-        self._add_action(edit_menu, "edit.undo", "command.edit.undo")
-        self._add_action(edit_menu, "edit.redo", "command.edit.redo")
-        self._add_action(view_menu, "view.palette", "command.view.palette")
-        self._add_action(view_menu, "view.close_panel", "command.view.close_panel")
-        self._add_action(view_menu, "view.float_panel", "command.view.float_panel")
-        self._add_action(view_menu, "view.focus_canvas", "command.view.focus_canvas")
         root.addWidget(menu_bar)
         root.addWidget(self._toolbar)
         root.addWidget(self._dock, 1)
-        root.addWidget(self._status)
+        status_row = widgets.QWidget()
+        row = widgets.QHBoxLayout(status_row)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
+        row.addWidget(self._status, 1)
+        row.addWidget(self._expert_chip)
+        root.addWidget(status_row)
+        self._file_menu = file_menu
+        self._edit_menu = edit_menu
+        self._view_menu = view_menu
+        self._fill_menus()
 
-    def _add_action(self, menu: object, command_id: str, title_key: str) -> None:
-        spec = self.registry.get(command_id)
-        label = tr(title_key)
-        if spec is not None and spec.chord:
+    def _fill_menus(self) -> None:
+        self._file_menu.clear()
+        self._edit_menu.clear()
+        self._view_menu.clear()
+        for spec in self.registry.visible(expert=self.expert.enabled()):
+            if spec.command_id.startswith("file."):
+                self._add_action(self._file_menu, spec)
+            elif spec.command_id.startswith("edit."):
+                self._add_action(self._edit_menu, spec)
+            elif spec.command_id.startswith("view."):
+                self._add_action(self._view_menu, spec)
+
+    def _add_action(self, menu: object, spec: CommandSpec) -> None:
+        label = tr(spec.title_key)
+        if spec.chord:
             label = f"{label}\t{display_chord(spec.chord)}"
         action = menu.addAction(label)  # type: ignore[attr-defined]
+        command_id = spec.command_id
         action.triggered.connect(lambda _checked=False, command=command_id: self.run(command))
 
     def _build_palette(self) -> None:
@@ -358,12 +424,32 @@ class ReferenceShell:
         self._palette.hide()
         self.run(command_id)
 
+    def _contexts(self) -> tuple[str, ...]:
+        focused = ("canvas",) if self.active == _CENTRE else ()
+        return active_contexts(*focused, expert=self.expert.enabled())
+
+    def _on_expert(self, enabled: bool) -> None:
+        del enabled
+        self._expert_chip.setText(tr("shell.status.expert"))
+        self._expert_chip.setVisible(self.expert.enabled())
+        self._fill_menus()
+        if self.palette_open():
+            self._refill_palette(self._palette_query)
+        self._sync_shortcuts()
+        self.rebuild()
+
+    def _view(self) -> Layout[str]:
+        return visible_layout(self.history.layout, reference_panels(), expert=self.expert.enabled())
+
     def _sync_shortcuts(self, *_widgets: object) -> None:
         text = self._text_focus()
-        active = ("global", "canvas") if self.active == _CENTRE else ("global",)
+        active = self._contexts()
+        expert_on = self.expert.enabled()
         for shortcut, command_id, when in self._shortcuts:
             spec = self.registry.get(command_id)
             allowed = spec is not None and self.registry.enabled(spec)
+            if spec is not None and spec.expert and not expert_on:
+                allowed = False
             if not allowed:
                 shortcut.setEnabled(False)  # type: ignore[attr-defined]
                 continue
@@ -374,9 +460,18 @@ class ReferenceShell:
 
     def _refill_palette(self, query: str) -> None:
         self._palette_query = query
+        for index in range(self._hits.count()):
+            item = self._hits.item(index)
+            widget = self._hits.itemWidget(item)
+            if widget is None:
+                continue
+            self._hits.removeItemWidget(item)
+            widget.hide()
+            widget.setParent(None)
+            widget.deleteLater()
         self._hits.clear()
         scored: list[tuple[int, str, str]] = []
-        for spec in self.registry:
+        for spec in self.registry.visible(expert=self.expert.enabled()):
             if not self.registry.enabled(spec):
                 continue
             label = tr(spec.title_key)
@@ -521,9 +616,9 @@ class ReferenceShell:
             return
         self._activate(panels[index])
 
-    def _mount_floats(self) -> None:
+    def _mount_floats(self, view: Layout[str]) -> None:
         self._clear_floats()
-        for group in self.history.layout.floating:
+        for group in view.floating:
             card = self._widgets.QFrame(self.widget)
             card.setObjectName("float")
             card.setGeometry(*(int(value) for value in group.rect))
@@ -867,6 +962,8 @@ def _match_indexes(text: str, query: str) -> set[int]:
 
 def _group_key(command_id: str) -> str:
     """Return the palette category key for a command id."""
+    if command_id == "view.toggle_expert_mode":
+        return "shell.group.view"
     prefix = command_id.split(".", 1)[0]
     if prefix == "file":
         return "shell.group.file"
@@ -1061,6 +1158,8 @@ def _tab_watch(bar: object, buttons: dict[int, object]) -> object:
 
 
 def _page(shell: ReferenceShell, panel: str) -> object:
+    if panel == "settings":
+        return _settings_page(shell)
     widgets = shell._widgets
     page = widgets.QWidget()
     layout = widgets.QVBoxLayout(page)
@@ -1078,6 +1177,74 @@ def _page(shell: ReferenceShell, panel: str) -> object:
     return page
 
 
+def _settings_page(shell: ReferenceShell) -> object:
+    """Build the Settings panel from the descriptors the current mode shows."""
+    widgets = shell._widgets
+    page = widgets.QWidget()
+    page.setObjectName("settings")
+    column = widgets.QVBoxLayout(page)
+    column.setContentsMargins(12, 8, 12, 8)
+    column.setSpacing(6)
+    group = ""
+    for spec in reference_settings().visible(expert=shell.expert.enabled()):
+        if spec.group != group:
+            group = spec.group
+            heading = widgets.QLabel(tr(f"setting.group.{group}"))
+            heading.setObjectName("settingGroup")
+            column.addWidget(heading)
+        control = _setting_control(shell, spec)
+        if spec.type is not SettingType.BOOL:
+            label = widgets.QLabel(tr(spec.label_key))
+            label.setObjectName("panel")
+            column.addWidget(label)
+        column.addWidget(control)
+    column.addStretch(1)
+    return page
+
+
+def _setting_control(shell: ReferenceShell, spec: SettingSpec) -> object:
+    widgets = shell._widgets
+    kind = spec.type
+    if kind is SettingType.BOOL:
+        box = widgets.QCheckBox(tr(spec.label_key))
+        box.setObjectName(spec.setting_id)
+        box.setChecked(spec.default is True)
+        control = box
+    elif kind is SettingType.ENUM:
+        combo = widgets.QComboBox()
+        combo.setObjectName(spec.setting_id)
+        selected = 0
+        for index, choice in enumerate(spec.choices):
+            combo.addItem(tr(choice.label_key), choice.value)
+            if choice.value == spec.default:
+                selected = index
+        combo.setCurrentIndex(selected)
+        control = combo
+    elif kind is SettingType.INT:
+        spin = widgets.QSpinBox()
+        spin.setObjectName(spec.setting_id)
+        spin.setRange(int(spec.minimum or 0), int(spec.maximum or 0))
+        spin.setValue(int(spec.default) if isinstance(spec.default, int) else 0)
+        control = spin
+    elif kind is SettingType.FLOAT:
+        spin = widgets.QDoubleSpinBox()
+        spin.setObjectName(spec.setting_id)
+        spin.setRange(float(spec.minimum or 0), float(spec.maximum or 0))
+        spin.setSingleStep(0.1)
+        spin.setValue(float(spec.default) if isinstance(spec.default, int | float) else 0.0)
+        control = spin
+    elif kind is SettingType.PATH:
+        edit = widgets.QLineEdit()
+        edit.setObjectName(spec.setting_id)
+        edit.setText(spec.default if isinstance(spec.default, str) else "")
+        control = edit
+    else:
+        assert_never(kind)
+    if spec.expert:
+        control.setToolTip(tr(spec.help_key))  # type: ignore[attr-defined]
+    return control
+
+
 def _panel_title(panel: str) -> str:
     if panel == "prompt":
         return tr("shell.panel.prompt")
@@ -1087,6 +1254,10 @@ def _panel_title(panel: str) -> str:
         return tr("shell.panel.canvas")
     if panel == "history":
         return tr("shell.panel.history")
+    if panel == "settings":
+        return tr("shell.panel.settings")
+    if panel == "advanced":
+        return tr("shell.panel.advanced")
     return panel
 
 
@@ -1099,6 +1270,8 @@ def _panel_body(panel: str) -> str:
         return tr("shell.panel.canvas.body")
     if panel == "history":
         return tr("shell.panel.history.body")
+    if panel == "advanced":
+        return tr("shell.panel.advanced.body")
     return panel
 
 
@@ -1117,6 +1290,8 @@ def _command_label(command_id: str) -> str:
         return tr("command.view.float_panel")
     if command_id == "view.focus_canvas":
         return tr("command.view.focus_canvas")
+    if command_id == "view.toggle_expert_mode":
+        return tr("command.view.toggle_expert_mode")
     return command_id
 
 

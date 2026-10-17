@@ -2,7 +2,8 @@
 
 Import :mod:`voxprint_common.ui.theme`, :mod:`voxprint_common.ui.tokens`,
 :mod:`voxprint_common.ui.dock`, :mod:`voxprint_common.ui.commands`,
-:mod:`voxprint_common.ui.keymap`, or :mod:`voxprint_common.ui.palette`
+:mod:`voxprint_common.ui.keymap`, :mod:`voxprint_common.ui.expert`,
+:mod:`voxprint_common.ui.settings`, or :mod:`voxprint_common.ui.palette`
 without Qt. :mod:`voxprint_common.ui.splash` and :mod:`voxprint_common.ui.shell`
 load PySide6 only when a window is constructed.
 """
