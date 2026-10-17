@@ -59,6 +59,6 @@ def verify(message: bytes, signature: bytes, key: bytes) -> bool:
         return False
     try:
         Ed25519PublicKey.from_public_bytes(key).verify(signature, message)
-    except (InvalidSignature, ValueError):
+    except InvalidSignature, ValueError:
         return False
     return True
