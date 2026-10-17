@@ -76,6 +76,12 @@ def main() -> None:
     for language in _LOCALES:
         _check_toolbar(app, language)
     _check_palette(app)
+    _check_overflow(app)
+    _check_focus_canvas(app, Qt, QTest)
+    _check_close_retarget(app, Qt, QTest)
+    _check_split_geometry(app)
+    _check_split_click(app, QPoint, QEvent, QPointF, Qt, QMouseEvent, QApplication)
+    _check_tab_close(app, Qt, QTest)
     _check_split_undo(app, QPoint, QEvent, QPointF, Qt, QMouseEvent, QApplication)
     _check_split_colour(app, ACCENT)
 
@@ -216,6 +222,248 @@ def _check_split_undo(
     app.processEvents()  # type: ignore[attr-defined]
 
 
+def _check_overflow(app: object) -> None:
+    from voxprint_common.i18n import set_language, tr
+    from voxprint_common.ui.shell import ReferenceShell
+
+    set_language("de")
+    commands = (
+        tr("command.file.save"),
+        tr("command.edit.undo"),
+        tr("command.edit.redo"),
+        tr("command.view.palette"),
+    )
+    shell = ReferenceShell()
+    shell.resize(1100, 700)
+    shell.show()
+    shell._toolbar_available = 280
+    shell._fill_toolbar()
+    app.processEvents()  # type: ignore[attr-defined]
+    buttons = [
+        button
+        for button in shell._toolbar.findChildren(shell._widgets.QPushButton)
+        if button.isVisible()
+    ]
+    more = next((button for button in buttons if button.menu() is not None), None)
+    assert more is not None
+    menu_labels = [action.text() for action in more.menu().actions()]
+    visible = [button.text() for button in buttons if button.menu() is None]
+    missing = [label for label in commands if label not in visible]
+    assert len(missing) >= 2, (visible, menu_labels)
+    assert menu_labels == missing, (menu_labels, missing)
+    assert more.width() + 1 >= more.sizeHint().width(), (more.width(), more.sizeHint().width())
+    limit = shell._toolbar_available
+    assert more.geometry().right() <= limit + 1
+    for button in buttons:
+        text = button.text()
+        assert "\u2026" not in text and "..." not in text
+        advance = button.fontMetrics().horizontalAdvance(text)
+        assert advance <= button.contentsRect().width() + 1, (text, advance, button.width())
+        assert button.geometry().right() <= limit + 1
+    shell.close()
+    app.processEvents()  # type: ignore[attr-defined]
+
+
+def _check_focus_canvas(app: object, qt: object, test: object) -> None:
+    from voxprint_common.i18n import set_language
+    from voxprint_common.ui.shell import ReferenceShell
+
+    set_language("en")
+    shell = ReferenceShell()
+    shell.resize(1100, 700)
+    shell.show()
+    shell.widget.setFocus()
+    app.processEvents()  # type: ignore[attr-defined]
+    spec = shell.registry.get("view.focus_canvas")
+    assert spec is not None and spec.when == "global"
+    shell._activate("prompt")
+    app.processEvents()  # type: ignore[attr-defined]
+    assert shell.active == "prompt"
+    test.keyClick(shell.widget, qt.Key_1, qt.ControlModifier)  # type: ignore[attr-defined]
+    app.processEvents()  # type: ignore[attr-defined]
+    assert shell.active == "canvas"
+    shell.close()
+    app.processEvents()  # type: ignore[attr-defined]
+
+
+def _check_close_retarget(app: object, qt: object, test: object) -> None:
+    from voxprint_common.i18n import set_language, tr
+    from voxprint_common.ui.shell import ReferenceShell
+
+    set_language("en")
+    shell = ReferenceShell()
+    shell.resize(1100, 700)
+    shell.show()
+    shell.widget.setFocus()
+    shell._activate("prompt")
+    app.processEvents()  # type: ignore[attr-defined]
+    test.keyClick(shell.widget, qt.Key_W, qt.ControlModifier)  # type: ignore[attr-defined]
+    app.processEvents()  # type: ignore[attr-defined]
+    assert not shell.history.layout.contains("prompt")
+    assert shell.active == "layers"
+    status = shell.find("QLabel", "status")
+    assert status is not None
+    assert status.text() != tr("shell.status.protected")  # type: ignore[attr-defined]
+    test.keyClick(shell.widget, qt.Key_W, qt.ControlModifier)  # type: ignore[attr-defined]
+    app.processEvents()  # type: ignore[attr-defined]
+    assert not shell.history.layout.contains("layers")
+    assert shell.active == "canvas"
+    assert shell.history.layout.contains("canvas")
+    shell.close()
+    app.processEvents()  # type: ignore[attr-defined]
+
+
+def _check_split_geometry(app: object) -> None:
+    from voxprint_common.i18n import set_language
+    from voxprint_common.ui.shell import ReferenceShell
+
+    set_language("en")
+    shell = ReferenceShell()
+    shell.resize(1100, 700)
+    shell.show()
+    app.processEvents()  # type: ignore[attr-defined]
+    inner = shell.find("QSplitter", "dockSplit")
+    root = shell.find("QSplitter", "rootSplit")
+    assert inner is not None and root is not None
+    assert abs(inner.sizes()[1] - 260) <= 1, inner.sizes()  # type: ignore[attr-defined]
+    assert inner.widget(0).minimumWidth() >= 140  # type: ignore[attr-defined]
+    assert inner.widget(1).minimumWidth() >= 140  # type: ignore[attr-defined]
+    assert root.widget(0).minimumWidth() >= 160  # type: ignore[attr-defined]
+    assert root.widget(1).minimumWidth() >= 160  # type: ignore[attr-defined]
+    inner.moveSplitter(inner.width(), 1)  # type: ignore[attr-defined]
+    app.processEvents()  # type: ignore[attr-defined]
+    assert inner.sizes()[1] >= 140, inner.sizes()  # type: ignore[attr-defined]
+    shell.resize(1280, 700)
+    app.processEvents()  # type: ignore[attr-defined]
+    assert abs(inner.sizes()[1] - 260) <= 1, inner.sizes()  # type: ignore[attr-defined]
+    shell.close()
+    app.processEvents()  # type: ignore[attr-defined]
+
+
+def _check_split_click(
+    app: object,
+    point: object,
+    event_type: object,
+    pointf: object,
+    qt: object,
+    mouse_event: object,
+    application: object,
+) -> None:
+    from voxprint_common.i18n import set_language
+    from voxprint_common.ui.dock import SizeMode
+    from voxprint_common.ui.shell import ReferenceShell
+
+    set_language("en")
+    shell = ReferenceShell()
+    shell.resize(1100, 700)
+    shell.show()
+    app.processEvents()  # type: ignore[attr-defined]
+    root = shell.history.layout.root
+    inner = root.second  # type: ignore[union-attr]
+    assert root.size.mode is SizeMode.RATIO  # type: ignore[union-attr]
+    assert inner.size.mode is SizeMode.FIXED_SECOND  # type: ignore[union-attr]
+    ratio = root.size.value  # type: ignore[union-attr]
+    fixed = inner.size.value  # type: ignore[union-attr]
+    for name in ("rootSplit", "dockSplit"):
+        splitter = shell.find("QSplitter", name)
+        assert splitter is not None
+        _click_handle(splitter, point, event_type, pointf, qt, mouse_event, application)
+    app.processEvents()  # type: ignore[attr-defined]
+    assert shell.history.can_undo is False
+    assert shell.history.layout.root.size.mode is SizeMode.RATIO  # type: ignore[union-attr]
+    assert shell.history.layout.root.size.value == ratio  # type: ignore[union-attr]
+    assert shell.history.layout.root.second.size.mode is SizeMode.FIXED_SECOND  # type: ignore[union-attr]
+    assert shell.history.layout.root.second.size.value == fixed  # type: ignore[union-attr]
+    shell.close()
+    app.processEvents()  # type: ignore[attr-defined]
+
+
+def _click_handle(
+    splitter: object,
+    point: object,
+    event_type: object,
+    pointf: object,
+    qt: object,
+    mouse_event: object,
+    application: object,
+) -> None:
+    handle = splitter.handle(1)  # type: ignore[attr-defined]
+    center = handle.rect().center()
+    local = pointf(center)  # type: ignore[operator]
+    global_pos = pointf(handle.mapToGlobal(center))  # type: ignore[attr-defined]
+    press = mouse_event(
+        event_type.Type.MouseButtonPress,  # type: ignore[attr-defined]
+        local,
+        global_pos,
+        qt.MouseButton.LeftButton,  # type: ignore[attr-defined]
+        qt.MouseButton.LeftButton,  # type: ignore[attr-defined]
+        qt.KeyboardModifier.NoModifier,  # type: ignore[attr-defined]
+    )
+    application.sendEvent(handle, press)  # type: ignore[attr-defined]
+    release = mouse_event(
+        event_type.Type.MouseButtonRelease,  # type: ignore[attr-defined]
+        local,
+        global_pos,
+        qt.MouseButton.LeftButton,  # type: ignore[attr-defined]
+        qt.MouseButton.NoButton,  # type: ignore[attr-defined]
+        qt.KeyboardModifier.NoModifier,  # type: ignore[attr-defined]
+    )
+    application.sendEvent(handle, release)  # type: ignore[attr-defined]
+
+
+def _check_tab_close(app: object, qt: object, test: object) -> None:
+    from voxprint_common.i18n import set_language, tr
+    from voxprint_common.ui.shell import ReferenceShell
+
+    set_language("en")
+    shell = ReferenceShell()
+    shell.resize(1100, 700)
+    shell.show()
+    app.processEvents()  # type: ignore[attr-defined]
+    side = shell._widgets.QTabBar.ButtonPosition.RightSide
+    bars = shell.widget.findChildren(shell._widgets.QTabBar)
+    inactive = None
+    for bar in bars:
+        for index in range(bar.count()):
+            button = bar.tabButton(index, side)
+            if bar.tabText(index) == tr("shell.panel.canvas"):
+                assert button is None
+                continue
+            assert button is not None
+            if index == bar.currentIndex():
+                assert button.isVisible()
+            else:
+                assert not button.isVisible()
+                inactive = (bar, index, button)
+    assert inactive is not None
+    bar, index, button = inactive
+    test.mouseMove(bar, bar.tabRect(index).center())  # type: ignore[attr-defined]
+    app.processEvents()  # type: ignore[attr-defined]
+    assert button.isVisible()
+    current = bar.currentIndex()
+    test.mouseMove(bar, bar.tabRect(current).center())  # type: ignore[attr-defined]
+    app.processEvents()  # type: ignore[attr-defined]
+    assert button.isVisible() is False
+    assert bar.tabButton(current, side).isVisible()
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QHoverEvent
+    from PySide6.QtWidgets import QApplication
+
+    outside = QPointF(-20, -20)
+    leave = QHoverEvent(
+        QEvent.Type.HoverLeave,
+        outside,
+        outside,
+        QPointF(bar.tabRect(index).center()),
+    )
+    QApplication.sendEvent(bar, leave)
+    app.processEvents()  # type: ignore[attr-defined]
+    assert button.isVisible() is False
+    assert bar.tabButton(current, side).isVisible()
+    shell.close()
+    app.processEvents()  # type: ignore[attr-defined]
+
+
 def _check_split_colour(app: object, accent: str) -> None:
     from voxprint_common.i18n import set_language
     from voxprint_common.ui.shell import ReferenceShell
@@ -231,10 +479,14 @@ def _check_split_colour(app: object, accent: str) -> None:
     assert line is not None and line.width() == 1 and line.height() > 20
     shell._set_dragging(splitter, True)
     app.processEvents()  # type: ignore[attr-defined]
+    assert line.width() >= 3 and line.height() > 20
     image = shell.grab().toImage()  # type: ignore[attr-defined]
     point = line.mapTo(shell.widget, line.rect().center())
     colour = image.pixelColor(point).name().lower()
     assert colour == accent.lower(), (colour, accent, point.x(), point.y())
+    for dx in (-1, 1):
+        side = image.pixelColor(point.x() + dx, point.y()).name().lower()
+        assert side == accent.lower(), (dx, side, accent)
     shell.close()
     app.processEvents()  # type: ignore[attr-defined]
 

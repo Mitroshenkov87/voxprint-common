@@ -123,5 +123,5 @@ def reference_commands() -> tuple[CommandSpec, ...]:
         CommandSpec("view.palette", "command.view.palette", "Mod+K"),
         CommandSpec("view.close_panel", "command.view.close_panel", "Mod+W"),
         CommandSpec("view.float_panel", "command.view.float_panel", "Mod+Shift+F"),
-        CommandSpec("view.focus_canvas", "command.view.focus_canvas", "Mod+1", when="canvas"),
+        CommandSpec("view.focus_canvas", "command.view.focus_canvas", "Mod+1"),
     )

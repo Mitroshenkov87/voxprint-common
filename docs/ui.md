@@ -60,4 +60,4 @@ Shared command ids are `file.save`, `edit.undo`, `edit.redo`, and `view.palette`
 
 ![Splitter while dragging](img/shell/en-split.png)
 
-The German picture shows the close control on a side tab. The last picture is the root divider while it is dragged: a one-pixel line in the accent blue, with the wider hit area left invisible. The translucent Acrylic backgrounds are a stylesheet flag (`glass=True`). An offscreen grab cannot show operating-system blur, so these pictures use the solid background.
+The German picture shows the close control on the active side tab. Inactive tabs keep that control hidden until the pointer is over them. The last picture is the root divider while it is dragged: the resting line is one pixel in the border colour, and the drag stroke is a wider accent-blue line. The hit area stays wider than the stroke and stays invisible. The translucent Acrylic backgrounds are a stylesheet flag (`glass=True`). An offscreen grab cannot show operating-system blur, so these pictures use the solid background.

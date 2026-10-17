@@ -12,6 +12,7 @@ and the palette scorer.
 
 from __future__ import annotations
 
+import contextlib
 from html import escape
 from pathlib import Path
 from typing import assert_never
@@ -153,6 +154,9 @@ class ReferenceShell:
         self._shortcuts: list[tuple[object, str, str]] = []
         self._watches: list[object] = []
         self._fitting = False
+        self._applying_splits: set[int] = set()
+        self._press_sizes: dict[tuple[bool, ...], tuple[int, ...]] = {}
+        self._toolbar_available: int | None = None
         self._palette_query = ""
         self.widget = widgets.QWidget()
         self.widget.setObjectName("shell")
@@ -200,6 +204,11 @@ class ReferenceShell:
 
     def close(self) -> None:
         """Hide and close the window."""
+        app = self._widgets.QApplication.instance()
+        if app is not None:
+            with contextlib.suppress(RuntimeError):
+                app.focusChanged.disconnect(self._sync_shortcuts)
+        self._shortcuts.clear()
         self.widget.close()
 
     def grab(self) -> object:
@@ -426,7 +435,14 @@ class ReferenceShell:
             button = self._toolbar_button(_command_label(command_id), command_id == "file.save")
             made.append((command_id, button, int(button.minimumWidth())))
         more = self._toolbar_button(tr("shell.toolbar.overflow"), False)
-        available = self.widget.width() - 24
+        menu = widgets.QMenu(more)
+        more.setMenu(menu)
+        more.ensurePolished()
+        more.setMinimumWidth(max(int(more.minimumWidth()), int(more.sizeHint().width())))
+        if self._toolbar_available is None:
+            available = self.widget.width() - 24
+        else:
+            available = self._toolbar_available
         if available < 120:
             available = 1000
         fitted = fit_toolbar(
@@ -446,14 +462,12 @@ class ReferenceShell:
             button.clicked.connect(lambda _checked=False, command=command_id: self.run(command))  # type: ignore[attr-defined]
             layout.addWidget(button)
         if overflow:
-            menu = widgets.QMenu(more)
             for index in overflow:
                 command_id = made[index][0]
                 action = menu.addAction(_command_label(command_id))
                 action.triggered.connect(
                     lambda _checked=False, command=command_id: self.run(command)
                 )
-            more.setMenu(menu)
             layout.addWidget(more)
         else:
             more.hide()
@@ -480,18 +494,8 @@ class ReferenceShell:
             splitter.setChildrenCollapsible(False)
             splitter.addWidget(self._mount(node.first, (*path, False)))
             splitter.addWidget(self._mount(node.second, (*path, True)))
-            total = 1000
-            mode = node.size.mode
-            if mode is SizeMode.RATIO:
-                first = int(total * node.size.value)
-            elif mode is SizeMode.FIXED_FIRST:
-                first = int(min(node.size.value, total))
-            elif mode is SizeMode.FIXED_SECOND:
-                first = int(max(total - node.size.value, 0))
-            else:
-                assert_never(mode)
-            splitter.setSizes([first, total - first])
             self._paint_split(splitter, vertical, path)
+            self._apply_split_geometry(splitter, path)
             return splitter
         if isinstance(node, Stack):
             column = widgets.QWidget()
@@ -541,20 +545,85 @@ class ReferenceShell:
         self._float_cards.clear()
 
     def _commit_split(self, path: tuple[bool, ...], splitter: object) -> None:
-        if self._building:
+        if self._building or self._applying_splits:
             return
-        sizes = splitter.sizes()  # type: ignore[attr-defined]
+        sizes = tuple(int(value) for value in splitter.sizes())  # type: ignore[attr-defined]
+        if self._press_sizes.get(path) == sizes:
+            return
         total = sum(sizes)
-        if total <= 0:
+        if total <= 0 or len(sizes) < 2:
             return
-        ratio = sizes[0] / total
-        current = _ratio_at(self.history.layout.root, path)
-        if current is not None and abs(current - ratio) < 0.002:
+        node = _split_at(self.history.layout.root, path)
+        if node is None:
             return
+        mode = node.size.mode
+        if mode is SizeMode.RATIO:
+            updated = SplitSize.ratio(sizes[0] / total)
+            if abs(node.size.value - updated.value) < 0.002:
+                return
+        elif mode is SizeMode.FIXED_FIRST:
+            updated = SplitSize.fixed_first(float(sizes[0]))
+            if abs(node.size.value - updated.value) < 1.0:
+                return
+        elif mode is SizeMode.FIXED_SECOND:
+            updated = SplitSize.fixed_second(float(sizes[1]))
+            if abs(node.size.value - updated.value) < 1.0:
+                return
+        else:
+            assert_never(mode)
         try:
-            self.history.apply(ResizeSplit(path, SplitSize.ratio(ratio)))
+            self.history.apply(ResizeSplit(path, updated))
         except DockError:
             return
+
+    def _apply_split_geometry(self, splitter: object, path: tuple[bool, ...]) -> None:
+        key = id(splitter)
+        if key in self._applying_splits or bool(splitter.property("dragging")):  # type: ignore[attr-defined]
+            return
+        node = _split_at(self.history.layout.root, path)
+        if node is None or splitter.count() < 2:  # type: ignore[attr-defined]
+            return
+        self._applying_splits.add(key)
+        try:
+            self._apply_split_geometry_now(splitter, node)
+        finally:
+            self._applying_splits.discard(key)
+
+    def _apply_split_geometry_now(self, splitter: object, node: Split[str]) -> None:
+        vertical = node.axis is SplitAxis.VERTICAL
+        minimum = max(int(node.minimum), 0)
+        for index in (0, 1):
+            child = splitter.widget(index)  # type: ignore[attr-defined]
+            if child is None:
+                return
+            if vertical:
+                child.setMinimumHeight(minimum)
+            else:
+                child.setMinimumWidth(minimum)
+        span = splitter.height() if vertical else splitter.width()  # type: ignore[attr-defined]
+        available = int(span) - int(splitter.handleWidth())  # type: ignore[attr-defined]
+        if available <= minimum:
+            return
+        mode = node.size.mode
+        if mode is SizeMode.RATIO:
+            first = round(available * node.size.value)
+            splitter.setStretchFactor(0, 1)  # type: ignore[attr-defined]
+            splitter.setStretchFactor(1, 1)  # type: ignore[attr-defined]
+        elif mode is SizeMode.FIXED_FIRST:
+            first = round(node.size.value)
+            splitter.setStretchFactor(0, 0)  # type: ignore[attr-defined]
+            splitter.setStretchFactor(1, 1)  # type: ignore[attr-defined]
+        elif mode is SizeMode.FIXED_SECOND:
+            first = available - round(node.size.value)
+            splitter.setStretchFactor(0, 1)  # type: ignore[attr-defined]
+            splitter.setStretchFactor(1, 0)  # type: ignore[attr-defined]
+        else:
+            assert_never(mode)
+        high = available - minimum
+        low = 0 if high < minimum else minimum
+        limit = available if high < minimum else high
+        first = min(max(first, low), limit)
+        splitter.setSizes([first, available - first])  # type: ignore[attr-defined]
 
     def _palette_row(self, command_id: str, label: str, query: str, *, selected: bool) -> object:
         widgets = self._widgets
@@ -644,6 +713,7 @@ class ReferenceShell:
         _place_hairline(handle, line, vertical)
         watch = _split_watch(self, splitter, handle, line, vertical, path)
         handle.installEventFilter(watch)
+        splitter.installEventFilter(watch)  # type: ignore[attr-defined]
         self._watches.append(watch)
 
     def _set_dragging(self, splitter: object, dragging: bool) -> None:
@@ -661,6 +731,13 @@ class ReferenceShell:
         if line is None or bool(line.property("hot")) == hot:
             return
         line.setProperty("hot", hot)
+        thickness = 3 if hot else 1
+        vertical = splitter.orientation() == self._qt.Vertical  # type: ignore[attr-defined]
+        if vertical:
+            line.setFixedHeight(thickness)
+        else:
+            line.setFixedWidth(thickness)
+        _place_hairline(handle, line, vertical)
         _restyle(line)
 
     def _root_splitter(self) -> object:
@@ -688,11 +765,14 @@ class ReferenceShell:
             button.setIcon(icon)
             button.setIconSize(_qt_core().QSize(12, 12))
             button.setToolTip(tr("shell.tab.close"))
-            button.hide()
             button.clicked.connect(lambda _checked=False, name=panel: self._close_panel(name))
             side = self._widgets.QTabBar.ButtonPosition.RightSide
             bar.setTabButton(index, side, button)
+            button.setVisible(index == tabs.currentIndex())  # type: ignore[attr-defined]
             buttons[index] = button
+        tabs.currentChanged.connect(  # type: ignore[attr-defined]
+            lambda index, buttons=buttons: _set_close_visible(buttons, index, index)
+        )
         watch = _tab_watch(bar, buttons)
         bar.installEventFilter(watch)
         self._watches.append(watch)
@@ -724,12 +804,15 @@ class ReferenceShell:
         if panel == _CENTRE or not self.history.layout.contains(panel):
             self._status.setText(tr("shell.status.protected"))
             return
+        group = _tab_group(self.history.layout, panel)
         try:
             self.history.apply(Close(panel), _permissions)
         except DockError:
             self._status.setText(tr("shell.status.protected"))
             return
+        self.active = _successor(self.history.layout, group, panel)
         self.rebuild()
+        self._sync_shortcuts()
 
     def _float_active(self) -> None:
         panel = self.active
@@ -792,19 +875,80 @@ def _group_key(command_id: str) -> str:
     return "shell.group.panels"
 
 
-def _ratio_at(node: Split[str] | Tabs[str] | Stack[str], path: tuple[bool, ...]) -> float | None:
-    """Return the ratio stored on the split at ``path``.
+def _split_at(
+    node: Split[str] | Tabs[str] | Stack[str] | None, path: tuple[bool, ...]
+) -> Split[str] | None:
+    """Return the split at ``path``.
 
-    None means that node is missing or is not a ratio split.
+    None means the path does not end on a split.
     """
-    current: Split[str] | Tabs[str] | Stack[str] = node
+    current: Split[str] | Tabs[str] | Stack[str] | None = node
     for step in path:
         if not isinstance(current, Split):
             return None
         current = current.second if step else current.first
-    if isinstance(current, Split) and current.size.mode is SizeMode.RATIO:
-        return float(current.size.value)
+    if isinstance(current, Split):
+        return current
     return None
+
+
+def _tab_group(layout: Layout[str], panel: str) -> tuple[str, ...]:
+    """Return the tab ids that share a group with ``panel``."""
+    found = _tabs_containing(layout.root, panel)
+    if found is not None:
+        return found
+    for group in layout.floating:
+        if panel in group.panels:
+            return tuple(group.panels)
+    return ()
+
+
+def _tabs_containing(
+    node: Split[str] | Tabs[str] | Stack[str] | None, panel: str
+) -> tuple[str, ...] | None:
+    if node is None:
+        return None
+    if isinstance(node, Tabs):
+        if panel in node.panels:
+            return tuple(node.panels)
+        return None
+    if isinstance(node, Stack):
+        return None
+    if isinstance(node, Split):
+        return _tabs_containing(node.first, panel) or _tabs_containing(node.second, panel)
+    assert_never(node)
+
+
+def _successor(layout: Layout[str], group: tuple[str, ...], closed: str) -> str:
+    """Return the tab that should become active after ``closed`` is removed."""
+    for group_id in layout.floating:
+        if closed in group_id.panels:
+            continue
+        if any(name in group_id.panels for name in group):
+            return str(group_id.panels[group_id.active])
+    for name in group:
+        if name == closed:
+            continue
+        current = _active_panel(layout.root, name)
+        if current is not None:
+            return current
+    if layout.contains(_CENTRE):
+        return _CENTRE
+    return _CENTRE
+
+
+def _active_panel(node: Split[str] | Tabs[str] | Stack[str] | None, panel: str) -> str | None:
+    if node is None:
+        return None
+    if isinstance(node, Tabs):
+        if panel in node.panels:
+            return str(node.panels[node.active])
+        return None
+    if isinstance(node, Stack):
+        return None
+    if isinstance(node, Split):
+        return _active_panel(node.first, panel) or _active_panel(node.second, panel)
+    assert_never(node)
 
 
 def _restyle(widget: object) -> None:
@@ -823,11 +967,18 @@ def _restyle(widget: object) -> None:
 def _place_hairline(handle: object, line: object, vertical: bool) -> None:
     rect = handle.rect()  # type: ignore[attr-defined]
     if vertical:
-        top = max((rect.height() - 1) // 2, 0)
-        line.setGeometry(0, top, max(rect.width(), 1), 1)  # type: ignore[attr-defined]
+        thickness = max(int(line.height()), 1)  # type: ignore[attr-defined]
+        top = max((rect.height() - thickness) // 2, 0)
+        line.setGeometry(0, top, max(rect.width(), 1), thickness)  # type: ignore[attr-defined]
         return
-    left = max((rect.width() - 1) // 2, 0)
-    line.setGeometry(left, 0, 1, max(rect.height(), 1))  # type: ignore[attr-defined]
+    thickness = max(int(line.width()), 1)  # type: ignore[attr-defined]
+    left = max((rect.width() - thickness) // 2, 0)
+    line.setGeometry(left, 0, thickness, max(rect.height(), 1))  # type: ignore[attr-defined]
+
+
+def _set_close_visible(buttons: dict[int, object], current: int, hovered: int) -> None:
+    for tab_index, button in buttons.items():
+        button.setVisible(tab_index in {current, hovered})  # type: ignore[attr-defined]
 
 
 def _close_icon() -> object:
@@ -870,13 +1021,16 @@ def _split_watch(
         def eventFilter(self, watched: object, event: object) -> bool:
             kind = event.type()  # type: ignore[attr-defined]
             if kind in {core.QEvent.Type.Resize, core.QEvent.Type.Show}:
+                shell._apply_split_geometry(splitter, path)
                 _place_hairline(handle, line, vertical)
             elif kind == core.QEvent.Type.MouseButtonPress:
+                shell._press_sizes[path] = tuple(int(value) for value in splitter.sizes())  # type: ignore[attr-defined]
                 shell._set_dragging(splitter, True)
             elif kind == core.QEvent.Type.MouseButtonRelease:
+                shell._commit_split(path, splitter)
                 shell._set_dragging(splitter, False)
                 shell._set_hot(splitter, False)
-                shell._commit_split(path, splitter)
+                shell._apply_split_geometry(splitter, path)
             elif kind in {core.QEvent.Type.HoverEnter, core.QEvent.Type.HoverMove}:
                 shell._set_hot(splitter, True)
             elif kind == core.QEvent.Type.HoverLeave:
@@ -894,14 +1048,13 @@ def _tab_watch(bar: object, buttons: dict[int, object]) -> object:
             kind = event.type()  # type: ignore[attr-defined]
             if kind in {core.QEvent.Type.HoverMove, core.QEvent.Type.MouseMove}:
                 index = bar.tabAt(event.position().toPoint())  # type: ignore[attr-defined]
-                for tab_index, button in buttons.items():
-                    button.setVisible(tab_index == index)  # type: ignore[attr-defined]
+                _set_close_visible(buttons, bar.currentIndex(), index)  # type: ignore[attr-defined]
             elif kind == core.QEvent.Type.HoverLeave:
-                local = bar.mapFromGlobal(core.QCursor.pos())  # type: ignore[attr-defined]
+                local = bar.mapFromGlobal(_qt()[1].QCursor.pos())  # type: ignore[attr-defined]
                 if bar.rect().contains(local):  # type: ignore[attr-defined]
                     return False
-                for button in buttons.values():
-                    button.hide()  # type: ignore[attr-defined]
+                current = bar.currentIndex()  # type: ignore[attr-defined]
+                _set_close_visible(buttons, current, current)
             return False
 
     return _Watch(bar)
