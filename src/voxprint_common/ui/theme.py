@@ -638,12 +638,21 @@ QAbstractScrollArea QScrollBar::handle:vertical:hover {{
     background: {TEXT_FAINT};
 }}
 QAbstractScrollArea QScrollBar::add-line:vertical,
-QAbstractScrollArea QScrollBar::sub-line:vertical {{
+QAbstractScrollArea QScrollBar::sub-line:vertical,
+QAbstractScrollArea QScrollBar::add-line:vertical:hover,
+QAbstractScrollArea QScrollBar::sub-line:vertical:hover,
+QAbstractScrollArea QScrollBar::add-line:vertical:pressed,
+QAbstractScrollArea QScrollBar::sub-line:vertical:pressed {{
     height: 0; width: 0; background: {card_bg}; border: none;
+    image: none; subcontrol-origin: margin;
 }}
 QAbstractScrollArea QScrollBar::up-arrow:vertical,
-QAbstractScrollArea QScrollBar::down-arrow:vertical {{
-    width: 0; height: 0; background: {card_bg}; border: none;
+QAbstractScrollArea QScrollBar::down-arrow:vertical,
+QAbstractScrollArea QScrollBar::up-arrow:vertical:hover,
+QAbstractScrollArea QScrollBar::down-arrow:vertical:hover,
+QAbstractScrollArea QScrollBar::up-arrow:vertical:pressed,
+QAbstractScrollArea QScrollBar::down-arrow:vertical:pressed {{
+    width: 0; height: 0; background: {card_bg}; border: none; image: none;
 }}
 QAbstractScrollArea QScrollBar::add-page:vertical,
 QAbstractScrollArea QScrollBar::sub-page:vertical {{
@@ -662,12 +671,21 @@ QAbstractScrollArea QScrollBar::handle:horizontal:hover {{
     background: {TEXT_FAINT};
 }}
 QAbstractScrollArea QScrollBar::add-line:horizontal,
-QAbstractScrollArea QScrollBar::sub-line:horizontal {{
+QAbstractScrollArea QScrollBar::sub-line:horizontal,
+QAbstractScrollArea QScrollBar::add-line:horizontal:hover,
+QAbstractScrollArea QScrollBar::sub-line:horizontal:hover,
+QAbstractScrollArea QScrollBar::add-line:horizontal:pressed,
+QAbstractScrollArea QScrollBar::sub-line:horizontal:pressed {{
     height: 0; width: 0; background: {card_bg}; border: none;
+    image: none; subcontrol-origin: margin;
 }}
 QAbstractScrollArea QScrollBar::left-arrow:horizontal,
-QAbstractScrollArea QScrollBar::right-arrow:horizontal {{
-    width: 0; height: 0; background: {card_bg}; border: none;
+QAbstractScrollArea QScrollBar::right-arrow:horizontal,
+QAbstractScrollArea QScrollBar::left-arrow:horizontal:hover,
+QAbstractScrollArea QScrollBar::right-arrow:horizontal:hover,
+QAbstractScrollArea QScrollBar::left-arrow:horizontal:pressed,
+QAbstractScrollArea QScrollBar::right-arrow:horizontal:pressed {{
+    width: 0; height: 0; background: {card_bg}; border: none; image: none;
 }}
 QAbstractScrollArea QScrollBar::add-page:horizontal,
 QAbstractScrollArea QScrollBar::sub-page:horizontal {{

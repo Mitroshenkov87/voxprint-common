@@ -93,6 +93,7 @@ def main() -> None:
     _check_variants(app, out)
     _check_audiobook(app)
     _check_viewer(app)
+    _check_pre_yitro(app)
     grab_shell(out / "en-shell.png", language="en", full_layout=True)
     grab_shell(out / "ru-shell.png", language="ru", full_layout=True)
     grab_shell(out / "de-shell.png", language="de", full_layout=True, reveal_close=True)
@@ -354,15 +355,24 @@ def main() -> None:
     )
 
 
-def _overflow_labels() -> list[str]:
+def _overflow_labels(*, image: bool = True) -> list[str]:
     from voxprint_common.i18n import tr
 
-    return [
+    labels = [
         tr("simple.menu.open_folder"),
         tr("simple.menu.models"),
         tr("simple.menu.settings"),
         tr("command.view.toggle_expert_mode"),
     ]
+    if image:
+        labels.extend(
+            [
+                tr("simple.menu.open"),
+                tr("simple.menu.credits"),
+                tr("simple.menu.about"),
+            ]
+        )
+    return labels
 
 
 def _check_variants(app: object, out: Path) -> None:
@@ -379,7 +389,7 @@ def _check_variants(app: object, out: Path) -> None:
         ("lucent", "simple.generate", "promptBox", "result"),
         ("audiobook-builder", "simple.action.audiobook", "voicePicker", "audioPlay"),
         ("movie-dubber", "simple.action.dub", "fileDrop", "videoPoster"),
-        ("clarity", "simple.action.improve_video", "fileDrop", "compareSlider"),
+        ("clarity", "simple.action.improve_video", "fileDrop", "compareView"),
         ("plotweaver", "simple.action.write", "promptBox", "documentView"),
         ("model-forge", "simple.action.prepare", "modelPicker", "reportView"),
     )
@@ -409,11 +419,13 @@ def _check_variants(app: object, out: Path) -> None:
         assert found is not None, source_name
         overflow = shell.find("QPushButton", "overflow")
         labels = [action.text() for action in overflow.menu().actions()]  # type: ignore[attr-defined]
-        assert labels == _overflow_labels()
+        image = app_id in {"canvas", "enlarge", "lucent"}
+        assert labels == _overflow_labels(image=image)
         shell.show_result(prompts[app_id], pictures=1)
         app.processEvents()  # type: ignore[attr-defined]
         result = (
             shell.find("QLabel", result_name)
+            or shell.find("QWidget", result_name)
             or shell.find("QSlider", result_name)
             or shell.find("QPlainTextEdit", result_name)
             or shell.find("QPushButton", result_name)
@@ -2049,6 +2061,350 @@ def _check_audiobook(app: object) -> None:
     shell.close()
     app.processEvents()  # type: ignore[attr-defined]
     set_language("en")
+
+
+def _check_pre_yitro(app: object) -> None:
+    """Image commands, the wipe, an inline panel, and expert field widths."""
+    from PySide6.QtCore import QEvent, QMimeData, QPointF, Qt, QUrl
+    from PySide6.QtGui import (
+        QColor,
+        QDropEvent,
+        QFont,
+        QFontMetrics,
+        QImage,
+        QMouseEvent,
+        QPixmap,
+    )
+    from PySide6.QtWidgets import QApplication, QLabel, QWidget
+
+    from voxprint_common.i18n import set_language, tr
+    from voxprint_common.ui.shell import ReferenceShell
+    from voxprint_common.ui.simple_image import _chip_width
+    from voxprint_common.ui.tokens import load
+
+    set_language("en")
+    root = Path(sys.argv[1]) / "pre-yitro"
+    seen: list[tuple[str, tuple[str, ...]]] = []
+
+    def remember(command_id: str, paths: tuple[str, ...] = ()) -> None:
+        seen.append((command_id, tuple(paths)))
+
+    enlarge = ReferenceShell(app="enlarge", state_dir=root / "enlarge")
+    enlarge.resize(1200, 900)
+    enlarge.show()
+    app.processEvents()  # type: ignore[attr-defined]
+    strip = enlarge.find("QScrollArea", "historyStrip")
+    assert strip is not None and strip.isVisible() is False and strip.height() == 0  # type: ignore[attr-defined]
+    enlarge.simple._on_command = remember  # type: ignore[attr-defined]
+    drop = enlarge.find("QLabel", "fileDrop")
+    assert drop is not None
+    click = QMouseEvent(
+        QEvent.Type.MouseButtonRelease,
+        QPointF(8, 8),
+        QPointF(8, 8),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    assert enlarge.simple._drop_filter.eventFilter(drop, click) is True  # type: ignore[attr-defined]
+    assert seen[-1][0] == "file.open"
+    menu = {
+        action.text(): action
+        for action in enlarge.find("QPushButton", "overflow").menu().actions()  # type: ignore[attr-defined]
+    }
+    menu[tr("simple.menu.open")].trigger()
+    menu[tr("simple.menu.credits")].trigger()
+    menu[tr("simple.menu.about")].trigger()
+    assert [item[0] for item in seen[-3:]] == ["file.open", "credits", "about"]
+    one: list[str] = []
+
+    def one_arg(command_id: str) -> None:
+        one.append(command_id)
+
+    enlarge.simple._on_command = one_arg  # type: ignore[attr-defined]
+    folder = root / "batch"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "a.png").write_bytes(b"a")
+    (folder / "b.png").write_bytes(b"b")
+    mime = QMimeData()
+    mime.setUrls(
+        [
+            QUrl.fromLocalFile(str(folder / "a.png")),
+            QUrl.fromLocalFile(str(folder / "b.png")),
+        ]
+    )
+    dropped = QDropEvent(
+        drop.rect().center(),  # type: ignore[attr-defined]
+        Qt.DropAction.CopyAction,
+        mime,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    assert enlarge.simple._drop_filter.eventFilter(drop, dropped) is True  # type: ignore[attr-defined]
+    assert one[-1] == "batch"
+    paths = enlarge.simple.command_paths()
+    assert paths == tuple(
+        str(path.expanduser().resolve()) for path in (folder / "a.png", folder / "b.png")
+    )
+    folder_mime = QMimeData()
+    folder_mime.setUrls([QUrl.fromLocalFile(str(folder))])
+    folder_drop = QDropEvent(
+        drop.rect().center(),  # type: ignore[attr-defined]
+        Qt.DropAction.CopyAction,
+        folder_mime,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    assert enlarge.simple._drop_filter.eventFilter(drop, folder_drop) is True  # type: ignore[attr-defined]
+    assert enlarge.simple.command_paths() == (str(folder.expanduser().resolve()),)
+    single = QMimeData()
+    single.setUrls([QUrl.fromLocalFile(str(folder / "a.png"))])
+    single_drop = QDropEvent(
+        drop.rect().center(),  # type: ignore[attr-defined]
+        Qt.DropAction.CopyAction,
+        single,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    assert enlarge.simple._drop_filter.eventFilter(drop, single_drop) is True  # type: ignore[attr-defined]
+    assert enlarge.simple.input_path().endswith("a.png")
+    enlarge.close()
+
+    dub = ReferenceShell(app="movie-dubber", state_dir=root / "dub")
+    dub.resize(900, 700)
+    dub.show()
+    app.processEvents()  # type: ignore[attr-defined]
+    dub_drop = dub.find("QLabel", "fileDrop")
+    dubbed: list[str] = []
+    dub.simple._on_command = lambda command_id: dubbed.append(command_id)  # type: ignore[attr-defined]
+    assert dub.simple._drop_filter.eventFilter(dub_drop, click) is False  # type: ignore[attr-defined]
+    assert dubbed == []
+    assert dub.find("QWidget", "videoResult") is not None
+    dub.close()
+
+    viewer = ReferenceShell(app="viewer", state_dir=root / "viewer")
+    viewer.resize(800, 500)
+    viewer.show()
+    viewer.show_result("A quiet hill", pictures=1)
+    app.processEvents()  # type: ignore[attr-defined]
+    opened: list[str] = []
+    original = viewer.simple._on_command  # type: ignore[attr-defined]
+
+    def wrapped(command_id: str) -> None:
+        opened.append(command_id)
+        original(command_id)
+
+    viewer.simple._on_command = wrapped  # type: ignore[attr-defined]
+    viewer.find("QPushButton", "viewerOpen").click()  # type: ignore[attr-defined]
+    assert opened == ["file.open"]
+    viewer.close()
+
+    def solid(color: tuple[int, int, int]) -> QImage:
+        image = QImage(48, 32, QImage.Format.Format_RGB32)
+        image.fill(QColor(*color))
+        return image
+
+    canvas = ReferenceShell(app="canvas", state_dir=root / "canvas")
+    canvas.resize(1200, 900)
+    canvas.show()
+    canvas.show_result("A quiet hill", pictures=1)
+    app.processEvents()  # type: ignore[attr-defined]
+    history = canvas.find("QScrollArea", "historyStrip")
+    assert history is not None and history.height() == 104  # type: ignore[attr-defined]
+    canvas.simple.set_compare(QPixmap.fromImage(solid((10, 20, 30))), solid((200, 180, 40)))
+    app.processEvents()  # type: ignore[attr-defined]
+    result = canvas.find("QLabel", "result")
+    view = canvas.find("QWidget", "compareView")
+    assert result is not None and result.isVisible() is False  # type: ignore[attr-defined]
+    assert view is not None and view.isVisible() and view.width() > 40  # type: ignore[attr-defined]
+    fit = canvas.find("QPushButton", "compareFit")
+    actual = canvas.find("QPushButton", "compare100")
+    assert fit is not None and actual is not None
+    assert fit.isChecked() and actual.isChecked() is False  # type: ignore[attr-defined]
+    view.setFocus()  # type: ignore[attr-defined]
+    before_split = canvas.simple._compare_split  # type: ignore[attr-defined]
+    from PySide6.QtTest import QTest
+
+    QTest.keyClick(view, Qt.Key_Right)  # type: ignore[arg-type]
+    assert canvas.simple._compare_split > before_split  # type: ignore[attr-defined]
+    cut = canvas.simple._divider_x(view.rect())  # type: ignore[attr-defined]
+    moved = int(view.width() * 0.8)  # type: ignore[attr-defined]
+
+    def _mouse(kind: QEvent.Type, x: int) -> QMouseEvent:
+        local = QPointF(x, 8)
+        return QMouseEvent(
+            kind,
+            local,
+            local,
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+
+    QApplication.sendEvent(view, _mouse(QEvent.Type.MouseButtonPress, cut))  # type: ignore[arg-type]
+    QApplication.sendEvent(view, _mouse(QEvent.Type.MouseMove, moved))  # type: ignore[arg-type]
+    QApplication.sendEvent(view, _mouse(QEvent.Type.MouseButtonRelease, moved))  # type: ignore[arg-type]
+    assert canvas.simple._compare_split > before_split + 0.02  # type: ignore[attr-defined]
+    canvas.simple._compare_split = 0.5  # type: ignore[attr-defined]
+    canvas.simple._paint_wipe()  # type: ignore[attr-defined]
+    _check_wipe_colors(view, fitted=True)
+    actual.click()  # type: ignore[attr-defined]
+    app.processEvents()  # type: ignore[attr-defined]
+    assert actual.isChecked() and fit.isChecked() is False  # type: ignore[attr-defined]
+    assert canvas.simple._compare_fit is False  # type: ignore[attr-defined]
+    canvas.simple._compare_split = 0.5  # type: ignore[attr-defined]
+    canvas.simple._paint_wipe()  # type: ignore[attr-defined]
+    _check_wipe_colors(view, fitted=False)
+    panel = QLabel("cast")
+    canvas.simple.set_row_panel("style", "cinematic", panel)
+    host = canvas.find("QWidget", "rowPanel-style")
+    assert host is not None and host.isVisible() is False  # type: ignore[attr-defined]
+    canvas.simple.set_row_panel("style", "cinematic", panel)
+    assert len(canvas.widget.findChildren(QWidget, "rowPanel-style")) == 1  # type: ignore[attr-defined]
+    canvas.find("QPushButton", "chip-style-cinematic").click()  # type: ignore[attr-defined]
+    app.processEvents()  # type: ignore[attr-defined]
+    assert host.isVisible() is True  # type: ignore[attr-defined]
+    canvas.find("QPushButton", "chip-style-photo").click()  # type: ignore[attr-defined]
+    app.processEvents()  # type: ignore[attr-defined]
+    assert host.isVisible() is False  # type: ignore[attr-defined]
+    canvas.run("view.toggle_expert_mode")
+    app.processEvents()  # type: ignore[attr-defined]
+    spin = canvas.find("QSpinBox", "shell.seed")
+    edit = canvas.find("QLineEdit", "shell.addons")
+    assert spin is not None and edit is not None
+    density = load().density
+    sample = f"{spin.textFromValue(spin.maximum())}{spin.suffix()}"  # type: ignore[attr-defined]
+    advance = QFontMetrics(spin.font()).horizontalAdvance(sample)  # type: ignore[attr-defined]
+    assert spin.minimumWidth() >= density.field_min_px  # type: ignore[attr-defined]
+    assert spin.minimumWidth() >= advance  # type: ignore[attr-defined]
+    assert edit.minimumWidth() >= density.field_min_px  # type: ignore[attr-defined]
+    chip = canvas.find("QPushButton", "chip-style-photo")
+    assert chip is not None
+    chip.setText("Голоса актёров")  # type: ignore[attr-defined]
+    font = QFont(canvas.simple.root.font())  # type: ignore[attr-defined]
+    font.setPointSize(font.pointSize() + 2)
+    canvas.simple.root.setFont(font)  # type: ignore[attr-defined]
+    app.processEvents()  # type: ignore[attr-defined]
+    assert chip.minimumWidth() == _chip_width(chip)  # type: ignore[attr-defined]
+    canvas.close()
+
+    clarity = ReferenceShell(app="clarity", state_dir=root / "clarity")
+    clarity.resize(1200, 900)
+    clarity.show()
+    clarity.show_result("A quiet clip")
+    app.processEvents()  # type: ignore[attr-defined]
+    frame = clarity.find("QWidget", "compareView")
+    assert frame is not None and frame.isVisible()  # type: ignore[attr-defined]
+    assert clarity.find("QPushButton", "compareFit") is not None
+    before = root / "before.png"
+    assert solid((10, 20, 30)).save(str(before))
+    clarity.simple.set_compare(before, solid((200, 180, 40)))
+    app.processEvents()  # type: ignore[attr-defined]
+    _check_wipe_colors(frame, fitted=True)
+    clarity.close()
+    _check_table_panel(app)
+
+
+def _check_wipe_colors(view: object, *, fitted: bool) -> None:
+    grab = view.grab().toImage()  # type: ignore[attr-defined]
+    if fitted:
+        left = grab.pixelColor(grab.width() // 4, grab.height() // 2)
+        right = grab.pixelColor(grab.width() * 3 // 4, grab.height() // 2)
+    else:
+        center_x = grab.width() // 2
+        center_y = grab.height() // 2
+        left = grab.pixelColor(center_x - 10, center_y)
+        right = grab.pixelColor(center_x + 10, center_y)
+    assert left.red() < 40 and left.blue() > 15, (fitted, left.red(), left.green(), left.blue())
+    assert right.red() > 160, (fitted, right.red(), right.green(), right.blue())
+
+
+def _check_table_panel(app: object) -> None:
+    from PySide6.QtWidgets import QPushButton, QVBoxLayout, QWidget
+
+    from voxprint_common.ui.presets import reference_presets
+    from voxprint_common.ui.sections import (
+        BodyKind,
+        ColumnKind,
+        Section,
+        SectionSet,
+        TableColumn,
+        TableRow,
+    )
+    from voxprint_common.ui.settings import reference_settings
+    from voxprint_common.ui.simple_image import SimpleImageLayout, SimpleImageWidget
+    from voxprint_common.ui.variants import VariantId
+
+    class _Gate:
+        def review_prompt(self, prompt: str) -> str | None:
+            del prompt
+            return None
+
+        def review_result(self, prompt: str, item_id: str, output: object) -> str | None:
+            del prompt, item_id, output
+            return None
+
+    settings = reference_settings()
+    document = SectionSet(
+        sections=(
+            Section("home", "section.narration"),
+            Section(
+                "cast",
+                "section.roles",
+                body=BodyKind.TABLE,
+                panel_row="style",
+                panel_value="cinematic",
+                columns=(TableColumn("name", "section.column.name", ColumnKind.LABEL),),
+                rows=(TableRow("mira", "section.row.mira"),),
+            ),
+        ),
+        wizards=(),
+        settings=settings,
+    )
+    layout = SimpleImageLayout(
+        presets=reference_presets(settings),
+        settings=settings,
+        gate=_Gate(),
+        state_dir=Path(sys.argv[1]) / "pre-yitro" / "table",
+        section_set=document,
+        variant=VariantId.IMAGE,
+    )
+    screen = SimpleImageWidget(layout, settings)
+    window = QWidget()
+    box = QVBoxLayout(window)
+    box.addWidget(screen.root)  # type: ignore[attr-defined]
+    window.resize(1200, 900)
+    window.show()
+    app.processEvents()  # type: ignore[attr-defined]
+    cast = next(
+        button
+        for button in window.findChildren(QPushButton, "sectionTab")
+        if button.property("sectionId") == "cast"
+    )
+    cast.click()
+    app.processEvents()  # type: ignore[attr-defined]
+    grid = window.findChild(QWidget, "sectionGrid")
+    host = window.findChild(QWidget, "rowPanel-style")
+    table = window.findChild(QWidget, "sectionTable")
+    assert grid is not None and host is not None and table is not None
+    assert grid.parent() is host
+    assert host.isVisible() is False
+    assert table.isVisible() is False
+    photo = window.findChild(QPushButton, "chip-style-cinematic")
+    assert photo is not None
+    photo.click()
+    app.processEvents()  # type: ignore[attr-defined]
+    assert host.isVisible() is True and grid.isVisible() is True
+    assert table.isVisible() is False
+    home = next(
+        button
+        for button in window.findChildren(QPushButton, "sectionTab")
+        if button.property("sectionId") == "home"
+    )
+    home.click()
+    app.processEvents()  # type: ignore[attr-defined]
+    assert grid.parent() is table
+    window.close()
 
 
 if __name__ == "__main__":

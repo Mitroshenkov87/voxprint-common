@@ -1097,10 +1097,12 @@ class SimpleImageWidget:
     enters that busy state. A second Generate while busy is ignored because
     the button is disabled. The
     history strip shows a neutral placeholder for each finished item, not a
-    photograph. The overflow menu is Open folder, Manage models, Settings, and
-    Expert mode. Those commands, and an unavailable chip's action, call
-    ``on_command``. Canvas runs ``voxprint-mdl --gui --app canvas`` for Manage
-    models. This widget does not start that program.
+    photograph. An empty strip takes no height. The overflow menu is Open
+    folder, Manage models, Settings, and Expert mode. An image screen also
+    offers Open, Credits, and About. Those commands, a batch of dropped
+    paths, and an unavailable chip's action, call ``on_command``. Canvas runs
+    ``voxprint-mdl --gui --app canvas`` for Manage models. This widget does
+    not start that program.
     """
 
     def __init__(
@@ -1127,6 +1129,9 @@ class SimpleImageWidget:
                 busy. None means the screen only changes phase.
             on_command: Called with a command id from Save, Open folder, Expert
                 mode, Manage models, Settings, or an unavailable-chip action.
+                An image screen also sends ``file.open``, ``credits``, and
+                ``about``. A batch sends ``batch`` and the absolute paths when
+                the hook accepts a second argument.
             on_improve: Replaces the prompt text in the same field. None hides
                 Improve prompt and Revert. File inputs hide them too.
             on_history: Called with an action id and a history item id. The
@@ -1200,6 +1205,18 @@ class SimpleImageWidget:
         self._audio: object | None = None
         self._loaded_audio = ""
         self._audio_seeking = False
+        self._command_paths: tuple[str, ...] = ()
+        self._row_hosts: dict[str, object] = {}
+        self._row_panels: dict[str, tuple[str, object, object]] = {}
+        self._compare_host: object | None = None
+        self._compare_view: object | None = None
+        self._compare_before: object | None = None
+        self._compare_after: object | None = None
+        self._compare_split = 0.5
+        self._compare_fit = True
+        self._compare_drag = False
+        self._compare_set = False
+        self._fitting_metrics = False
         core = self._core
 
         class _Root(widgets.QWidget):
@@ -1270,6 +1287,7 @@ class SimpleImageWidget:
             self._expert_form.addStretch(1)  # type: ignore[attr-defined]
             self._refresh_resets()
             self._fit_expert_panel()
+            self._fit_expert_fields()
         if held is not None and window is not None:
             window.resize(held[0], held[1])
 
@@ -1312,6 +1330,86 @@ class SimpleImageWidget:
         if self._surface.video_result and self._layout.phase is Phase.EMPTY and stored:
             self._paint_video()
             self._stack.setCurrentIndex(2)  # type: ignore[attr-defined]
+
+    def command_paths(self) -> tuple[str, ...]:
+        """Return the absolute paths from the latest batch, or an empty tuple."""
+        return self._command_paths
+
+    def set_compare(self, before: object, after: object) -> None:
+        """Show ``before`` and ``after`` in one wipe.
+
+        Each side is a ``QPixmap``, a ``QImage``, or a path. The same fit or
+        100% zoom applies to both, and the divider can be dragged or nudged.
+
+        Args:
+            before: The picture on the left of the divider.
+            after: The picture on the right of the divider.
+
+        Raises:
+            TypeError: A side is not a pixmap, an image, or a path.
+            ValueError: A side does not load.
+        """
+        self._compare_before = _pixmap_of(self._gui, before)
+        self._compare_after = _pixmap_of(self._gui, after)
+        self._compare_set = True
+        picture = self._picture if self._surface.result_kind is ResultKind.PICTURE else None
+        host = self._compare_host
+        if picture is not None and host is not None:
+            picture.hide()  # type: ignore[attr-defined]
+            host.show()  # type: ignore[attr-defined]
+        view = self._compare_view
+        if view is not None:
+            view.update()  # type: ignore[attr-defined]
+
+    def set_row_panel(self, row_id: str, value: str, panel: object) -> None:
+        """Show ``panel`` under the chips of ``row_id`` while that value is selected.
+
+        Calling this again with the same widget only updates the value.
+
+        Args:
+            row_id: Preset row id.
+            value: Chip value that reveals the panel.
+            panel: An app widget, or the shared table body.
+
+        Raises:
+            ValueError: The row id or the value is empty.
+        """
+        if not row_id or not value:
+            raise ValueError("a row panel needs a row and a value")
+        existing = self._row_panels.get(row_id)
+        if existing is not None and existing[1] is panel:
+            self._row_panels[row_id] = (value, panel, existing[2])
+            self._sync_row_panels()
+            return
+        if existing is not None:
+            self._discard_panel_host(existing[2], existing[1])
+        widgets = self._widgets
+        host = widgets.QWidget()
+        host.setObjectName(f"rowPanel-{row_id}")
+        layout = widgets.QVBoxLayout(host)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(panel)
+        pill = self._row_hosts.get(row_id)
+        index = self._preset_rows.indexOf(pill) if pill is not None else -1  # type: ignore[attr-defined]
+        if index >= 0:
+            self._preset_rows.insertWidget(index + 1, host)  # type: ignore[attr-defined]
+        else:
+            self._preset_rows.addWidget(host)  # type: ignore[attr-defined]
+        self._row_panels[row_id] = (value, panel, host)
+        self._sync_row_panels()
+
+    def release_row_panel(self, panel: object) -> None:
+        """Detach ``panel`` from the chip row that holds it, when one does.
+
+        Args:
+            panel: The widget passed to :meth:`set_row_panel`.
+        """
+        for row_id, (_value, installed, host) in list(self._row_panels.items()):
+            if installed is panel:
+                self._discard_panel_host(host, panel)
+                del self._row_panels[row_id]
+                return
 
     def set_audio_output(self, path: str) -> None:
         """Point the player at a finished audio file.
@@ -1473,6 +1571,10 @@ class SimpleImageWidget:
             tr("command.view.toggle_expert_mode"),
             lambda: self._command("view.toggle_expert_mode"),
         )
+        if self._surface.variant is VariantId.IMAGE:
+            overflow.addAction(tr("simple.menu.open"), lambda: self._command("file.open"))
+            overflow.addAction(tr("simple.menu.credits"), lambda: self._command("credits"))
+            overflow.addAction(tr("simple.menu.about"), lambda: self._command("about"))
         self._overflow.setMenu(overflow)
         self._top.addWidget(self._overflow)
         self._expert_toggle = widgets.QPushButton(tr("command.view.toggle_expert_mode"))
@@ -1632,7 +1734,7 @@ class SimpleImageWidget:
         self._history_scroll.setFrameShape(widgets.QFrame.Shape.NoFrame)
         self._history_scroll.setHorizontalScrollBarPolicy(qt.ScrollBarAsNeeded)
         self._history_scroll.setVerticalScrollBarPolicy(qt.ScrollBarAlwaysOff)
-        self._history_scroll.setFixedHeight(104)
+        self._history_scroll.setFixedHeight(0)
         history = widgets.QWidget()
         history.setObjectName("historyRow")
         self._history = widgets.QHBoxLayout(history)
@@ -1657,14 +1759,19 @@ class SimpleImageWidget:
         self._note.hide()
         root.addWidget(self._note)
         self._install_keys()
+        self._install_metrics()
         self.refresh()
 
     def _apply_history(self) -> None:
+        strip = self._history_scroll
+        if not self._layout.history:
+            strip.hide()  # type: ignore[attr-defined]
+            strip.setFixedHeight(0)  # type: ignore[attr-defined]
+            return
         show = True
         state = self._layout.state
         if state is not None and state.has("viewer.show_history"):
             show = state.get("viewer.show_history") is True
-        strip = self._history_scroll
         if show:
             strip.setFixedHeight(104)  # type: ignore[attr-defined]
             strip.show()  # type: ignore[attr-defined]
@@ -1843,6 +1950,9 @@ class SimpleImageWidget:
             widgets.QSizePolicy.Policy.Ignored,
         )
         layout.addWidget(self._picture, 1)
+        host = self._make_compare()
+        host.hide()  # type: ignore[attr-defined]
+        layout.addWidget(host, 1)
         return page
 
     def _player_page(self) -> object:
@@ -1918,7 +2028,10 @@ class SimpleImageWidget:
         return page
 
     def _video_page(self) -> object:
-        """Build the optional video result: preview, then the dubbed file."""
+        """Build the optional video result: preview, then the dubbed file.
+
+        The page object name ``videoResult`` is stable. Movie Dubber looks it up.
+        """
         widgets = self._widgets
         page = widgets.QWidget()
         page.setObjectName("videoResult")
@@ -2020,31 +2133,88 @@ class SimpleImageWidget:
         player.errorOccurred.connect(self._on_video_error)
 
     def _compare_page(self) -> object:
+        return self._make_compare()
+
+    def _make_compare(self) -> object:
+        """Build the wipe: both frames, one divider, and Fit / 100%."""
         widgets = self._widgets
-        page = widgets.QWidget()
-        layout = widgets.QGridLayout(page)
+        qt = self._qt
+        widget = self
+        host = widgets.QWidget()
+        host.setObjectName("compareHost")
+        layout = widgets.QVBoxLayout(host)
         layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(0)
-        frame = widgets.QLabel()
-        frame.setObjectName("compareView")
-        frame.setAlignment(self._qt.AlignCenter)
-        frame.setMinimumHeight(0)
-        self._compare = frame
-        slider = widgets.QSlider(self._qt.Horizontal)
-        slider.setObjectName("compareSlider")
-        slider.setRange(0, 1000)
-        slider.setValue(500)
-        slider.valueChanged.connect(lambda _value: self._paint_wipe())
-        self._wipe = slider
-        layout.addWidget(frame, 0, 0)
-        layout.addWidget(slider, 0, 0)
+        layout.setSpacing(8)
 
-        def _resized(_event: object) -> None:
-            widgets.QLabel.resizeEvent(frame, _event)  # type: ignore[arg-type]
-            self._paint_wipe()
+        class _Wipe(widgets.QWidget):
+            def paintEvent(_self: object, _event: object) -> None:
+                widget._paint_compare(_self)
 
-        frame.resizeEvent = _resized  # type: ignore[method-assign]
-        return page
+            def mousePressEvent(_self: object, event: object) -> None:
+                left = event.button() == qt.MouseButton.LeftButton  # type: ignore[attr-defined]
+                if left and widget._near_divider(_self, event):
+                    widget._compare_drag = True
+                    widget._move_divider(_self, event)
+                    return
+                widgets.QWidget.mousePressEvent(_self, event)  # type: ignore[arg-type]
+
+            def mouseMoveEvent(_self: object, event: object) -> None:
+                if widget._compare_drag:
+                    widget._move_divider(_self, event)
+                    return
+                widgets.QWidget.mouseMoveEvent(_self, event)  # type: ignore[arg-type]
+
+            def mouseReleaseEvent(_self: object, event: object) -> None:
+                widget._compare_drag = False
+                widgets.QWidget.mouseReleaseEvent(_self, event)  # type: ignore[arg-type]
+
+            def keyPressEvent(_self: object, event: object) -> None:
+                key = event.key()  # type: ignore[attr-defined]
+                if key == qt.Key_Left:
+                    widget._nudge_compare(-0.02)
+                    return
+                if key == qt.Key_Right:
+                    widget._nudge_compare(0.02)
+                    return
+                widgets.QWidget.keyPressEvent(_self, event)  # type: ignore[arg-type]
+
+        view = _Wipe()
+        view.setObjectName("compareView")
+        view.setFocusPolicy(qt.StrongFocus)
+        view.setMouseTracking(True)
+        view.setMinimumHeight(0)
+        view.setSizePolicy(
+            widgets.QSizePolicy.Policy.Ignored,
+            widgets.QSizePolicy.Policy.Ignored,
+        )
+        self._compare_view = view
+        self._compare = view
+        layout.addWidget(view, 1)
+        row = widgets.QHBoxLayout()
+        row.setSpacing(8)
+        fit = widgets.QPushButton(tr("simple.compare.fit"))
+        fit.setObjectName("compareFit")
+        fit.setCheckable(True)
+        fit.setChecked(True)
+        fit.setAutoDefault(False)
+        _fit_plain(fit, pad=28)
+        actual = widgets.QPushButton(tr("simple.compare.actual"))
+        actual.setObjectName("compare100")
+        actual.setCheckable(True)
+        actual.setAutoDefault(False)
+        _fit_plain(actual, pad=28)
+        group = widgets.QButtonGroup(host)
+        group.setExclusive(True)
+        group.addButton(fit)
+        group.addButton(actual)
+        fit.clicked.connect(lambda _checked=False: self._set_compare_zoom(True))
+        actual.clicked.connect(lambda _checked=False: self._set_compare_zoom(False))
+        row.addWidget(fit)
+        row.addWidget(actual)
+        row.addStretch(1)
+        layout.addLayout(row)
+        self._compare_host = host
+        return host
 
     def _document_page(self) -> object:
         widgets = self._widgets
@@ -2187,6 +2357,8 @@ class SimpleImageWidget:
                     )
                     self._resets[row.row_id] = reset
                     line.addWidget(reset)
+                if index == 0:
+                    self._row_hosts[row.row_id] = host
                 if row.row_id == "output":
                     compact = line
                     compact_host = host
@@ -2234,6 +2406,7 @@ class SimpleImageWidget:
                 layout.invalidate()
             host.updateGeometry()  # type: ignore[attr-defined]
         self._apply_size_filter()
+        self._sync_row_panels()
         self._refresh_resets()
 
     def _apply_size_filter(self) -> None:
@@ -2549,6 +2722,9 @@ class SimpleImageWidget:
 
     def _install_drop(self, label: object) -> None:
         core = self._core
+        image = self._surface.variant is VariantId.IMAGE
+        if image:
+            label.setCursor(self._qt.PointingHandCursor)  # type: ignore[attr-defined]
 
         class _Drop(core.QObject):
             def eventFilter(_self: object, _watched: object, event: object) -> bool:
@@ -2559,18 +2735,36 @@ class SimpleImageWidget:
                         return True
                     return False
                 if kind == core.QEvent.Type.Drop:
-                    urls = event.mimeData().urls()  # type: ignore[attr-defined]
-                    if not urls:
+                    paths = self._dropped_paths(event)
+                    if not paths:
                         return False
-                    path = urls[0].toLocalFile() or urls[0].toString()
-                    self.set_input_path(path)
+                    if image and _batch_paths(paths):
+                        self._command("batch", tuple(paths))
+                    else:
+                        self.set_input_path(paths[0])
                     event.acceptProposedAction()  # type: ignore[attr-defined]
+                    return True
+                if (
+                    image
+                    and kind == core.QEvent.Type.MouseButtonRelease
+                    and event.button() == core.Qt.MouseButton.LeftButton  # type: ignore[attr-defined]
+                ):
+                    self._command("file.open")
                     return True
                 return False
 
         watcher = _Drop(label)
         label.installEventFilter(watcher)  # type: ignore[attr-defined]
         self._drop_filter = watcher
+
+    def _dropped_paths(self, event: object) -> list[str]:
+        urls = event.mimeData().urls()  # type: ignore[attr-defined]
+        paths: list[str] = []
+        for url in urls:
+            raw = url.toLocalFile() or url.toString()
+            if raw:
+                paths.append(str(Path(raw).expanduser().resolve()))
+        return paths
 
     def _show_input(self, text: str) -> None:
         if self._prompt is not None:
@@ -3066,6 +3260,14 @@ class SimpleImageWidget:
         if kind is ResultKind.PICTURE:
             self._scaled_to = None
             self._stack.setCurrentIndex(2)  # type: ignore[attr-defined]
+            if self._compare_set and self._compare_host is not None:
+                self._picture.hide()  # type: ignore[attr-defined]
+                self._compare_host.show()  # type: ignore[attr-defined]
+                self._paint_wipe()
+                return
+            self._picture.show()  # type: ignore[attr-defined]
+            if self._compare_host is not None:
+                self._compare_host.hide()  # type: ignore[attr-defined]
             self._rescale()
             return
         if kind is ResultKind.PLAYER:
@@ -3084,15 +3286,144 @@ class SimpleImageWidget:
         self._stack.setCurrentIndex(2)  # type: ignore[attr-defined]
 
     def _paint_wipe(self) -> None:
-        frame = self._compare
-        slider = self._wipe
-        if frame is None or slider is None:
+        view = self._compare_view
+        if view is not None:
+            view.update()  # type: ignore[attr-defined]
+
+    def _paint_compare(self, view: object) -> None:
+        before, after = self._compare_frames(view)
+        target = self._compare_target(view, before, after)
+        if int(target.width()) < 2 or int(target.height()) < 2:  # type: ignore[attr-defined]
             return
-        size = frame.size()  # type: ignore[attr-defined]
+        gui = self._gui
+        painter = gui.QPainter(view)  # type: ignore[attr-defined]
+        try:
+            painter.drawPixmap(target, after)  # type: ignore[attr-defined]
+            cut = self._divider_x(target)
+            clip = self._core.QRect(  # type: ignore[attr-defined]
+                int(target.x()),  # type: ignore[attr-defined]
+                int(target.y()),  # type: ignore[attr-defined]
+                max(0, cut - int(target.x())),  # type: ignore[attr-defined]
+                int(target.height()),  # type: ignore[attr-defined]
+            )
+            painter.setClipRect(clip)  # type: ignore[attr-defined]
+            painter.drawPixmap(target, before)  # type: ignore[attr-defined]
+            painter.setClipping(False)  # type: ignore[attr-defined]
+            pen = gui.QPen(gui.QColor(242, 242, 245), 2)  # type: ignore[attr-defined]
+            painter.setPen(pen)  # type: ignore[attr-defined]
+            painter.drawLine(cut, int(target.top()), cut, int(target.bottom()))  # type: ignore[attr-defined]
+        finally:
+            painter.end()  # type: ignore[attr-defined]
+
+    def _compare_frames(self, view: object) -> tuple[object, object]:
+        if (
+            self._compare_set
+            and self._compare_before is not None
+            and self._compare_after is not None
+        ):
+            return self._compare_before, self._compare_after
+        size = view.size()  # type: ignore[attr-defined]
         width = max(int(size.width()), 2)
         height = max(int(size.height()), 2)
-        split = int(slider.value()) / 1000  # type: ignore[attr-defined]
-        frame.setPixmap(_wipe(self._gui, width, height, split))  # type: ignore[attr-defined]
+        return (
+            _scene(self._gui, "before", width, height),
+            _scene(self._gui, "after", width, height),
+        )
+
+    def _compare_target(self, view: object, before: object, after: object) -> object:
+        rect = view.rect()  # type: ignore[attr-defined]
+        if self._compare_fit:
+            return rect
+        width = max(int(before.width()), int(after.width()), 1)  # type: ignore[attr-defined]
+        height = max(int(before.height()), int(after.height()), 1)  # type: ignore[attr-defined]
+        x = int(rect.x()) + max(0, (int(rect.width()) - width) // 2)
+        y = int(rect.y()) + max(0, (int(rect.height()) - height) // 2)
+        return self._core.QRect(x, y, width, height)  # type: ignore[attr-defined]
+
+    def _divider_x(self, target: object) -> int:
+        span = max(int(target.width()), 1)  # type: ignore[attr-defined]
+        return int(target.x()) + int(self._compare_split * span)  # type: ignore[attr-defined]
+
+    def _near_divider(self, view: object, event: object) -> bool:
+        before, after = self._compare_frames(view)
+        target = self._compare_target(view, before, after)
+        return abs(_event_x(event) - self._divider_x(target)) <= 14
+
+    def _move_divider(self, view: object, event: object) -> None:
+        before, after = self._compare_frames(view)
+        target = self._compare_target(view, before, after)
+        span = max(int(target.width()), 1)  # type: ignore[attr-defined]
+        fraction = (_event_x(event) - int(target.x())) / span  # type: ignore[attr-defined]
+        self._compare_split = min(0.95, max(0.05, fraction))
+        view.update()  # type: ignore[attr-defined]
+
+    def _nudge_compare(self, delta: float) -> None:
+        self._compare_split = min(0.95, max(0.05, self._compare_split + delta))
+        self._paint_wipe()
+
+    def _set_compare_zoom(self, fit: bool) -> None:
+        self._compare_fit = fit
+        self._paint_wipe()
+
+    def _sync_row_panels(self) -> None:
+        for row_id, (value, _panel, host) in self._row_panels.items():
+            host.setVisible(self._layout.presets.get(row_id) == value)  # type: ignore[attr-defined]
+
+    def _discard_panel_host(self, host: object, panel: object) -> None:
+        layout = host.layout()  # type: ignore[attr-defined]
+        if layout is not None:
+            layout.removeWidget(panel)  # type: ignore[attr-defined]
+        self._preset_rows.removeWidget(host)  # type: ignore[attr-defined]
+        host.hide()  # type: ignore[attr-defined]
+        host.setParent(None)  # type: ignore[attr-defined]
+        host.deleteLater()  # type: ignore[attr-defined]
+
+    def _install_metrics(self) -> None:
+        core = self._core
+        widget = self
+
+        class _Metrics(core.QObject):
+            def eventFilter(_self: object, _watched: object, event: object) -> bool:
+                kind = event.type()  # type: ignore[attr-defined]
+                watched = kind in {
+                    core.QEvent.Type.Polish,
+                    core.QEvent.Type.FontChange,
+                    core.QEvent.Type.StyleChange,
+                }
+                if not watched or widget._fitting_metrics:
+                    return False
+                widget._fitting_metrics = True
+                try:
+                    widget._refit_pills()
+                    widget._fit_expert_fields()
+                finally:
+                    widget._fitting_metrics = False
+                return False
+
+        watcher = _Metrics(self.root)
+        self.root.installEventFilter(watcher)  # type: ignore[attr-defined]
+        self._metrics = watcher
+
+    def _refit_pills(self) -> None:
+        buttons = self.root.findChildren(self._widgets.QPushButton)  # type: ignore[attr-defined]
+        for button in buttons:
+            chip = button.property("chip") == "true"  # type: ignore[attr-defined]
+            toggle = str(button.objectName()) == "expertToggle"  # type: ignore[attr-defined]
+            if chip or toggle:
+                _fit_chip(button)
+
+    def _fit_expert_fields(self) -> None:
+        form = self._expert_form
+        inner = form.parentWidget() if form is not None else None  # type: ignore[attr-defined]
+        if inner is None:
+            return
+        widgets = self._widgets
+        for control in inner.findChildren(widgets.QWidget):  # type: ignore[attr-defined]
+            name = str(control.objectName())
+            if not name or name.startswith("qt_"):
+                continue
+            if isinstance(control, widgets.QAbstractSpinBox | widgets.QLineEdit):
+                _fit_field(control)
 
     def _rescale(self) -> None:
         if self._surface.result_kind is not ResultKind.PICTURE:
@@ -3185,9 +3516,18 @@ class SimpleImageWidget:
         self.set_note("")
         self.refresh()
 
-    def _command(self, command_id: str) -> None:
-        if self._on_command is not None:
-            self._on_command(command_id)
+    def _command(self, command_id: str, paths: tuple[str, ...] = ()) -> None:
+        self._command_paths = tuple(paths)
+        hook = self._on_command
+        if hook is None:
+            return
+        if paths:
+            try:
+                hook(command_id, paths)  # type: ignore[call-arg]
+            except TypeError:
+                hook(command_id)
+            return
+        hook(command_id)
 
 
 def _fill_form(
@@ -3256,7 +3596,6 @@ def _control(widgets: object, spec: SettingSpec, value: object) -> object:
     elif kind is SettingType.INT:
         spin = widgets.QSpinBox()  # type: ignore[attr-defined]
         spin.setObjectName(spec.setting_id)
-        spin.setMinimumWidth(72)
         _expand(spin)
         spin.setRange(int(spec.minimum or 0), int(spec.maximum or 0))
         spin.setValue(int(value) if isinstance(value, int) and not isinstance(value, bool) else 0)
@@ -3265,7 +3604,6 @@ def _control(widgets: object, spec: SettingSpec, value: object) -> object:
     elif kind is SettingType.FLOAT:
         spin = widgets.QDoubleSpinBox()  # type: ignore[attr-defined]
         spin.setObjectName(spec.setting_id)
-        spin.setMinimumWidth(72)
         _expand(spin)
         spin.setDecimals(1)
         spin.setRange(float(spec.minimum or 0), float(spec.maximum or 0))
@@ -3297,6 +3635,8 @@ def _control(widgets: object, spec: SettingSpec, value: object) -> object:
         control.setToolTip(tip)  # type: ignore[attr-defined]
     if kind is SettingType.ENUM:
         _note_combo_fit(control)
+    if kind is SettingType.INT or kind is SettingType.FLOAT or kind is SettingType.PATH:
+        _fit_field(control)
     return control
 
 
@@ -3579,6 +3919,60 @@ def _paint_elided_combo(combo: object) -> None:
     painter.drawComplexControl(widgets.QStyle.ComplexControl.CC_ComboBox, option)  # type: ignore[attr-defined]
     painter.drawControl(widgets.QStyle.ControlElement.CE_ComboBoxLabel, option)  # type: ignore[attr-defined]
     painter.end()
+
+
+def _batch_paths(paths: list[str]) -> bool:
+    """Return whether a drop is a folder or more than one file."""
+    if len(paths) >= 2:
+        return True
+    return any(Path(path).is_dir() for path in paths)
+
+
+def _event_x(event: object) -> float:
+    """Return the horizontal position of a mouse event."""
+    if hasattr(event, "position"):
+        return float(event.position().x())  # type: ignore[attr-defined]
+    return float(event.pos().x())  # type: ignore[attr-defined]
+
+
+def _pixmap_of(gui: object, value: object) -> object:
+    """Return ``value`` as a pixmap.
+
+    Args:
+        gui: The Qt GUI module.
+        value: A pixmap, an image, or a path.
+
+    Raises:
+        TypeError: ``value`` is not one of those.
+        ValueError: The picture does not load.
+    """
+    if isinstance(value, gui.QPixmap):  # type: ignore[attr-defined]
+        pixmap = value
+    elif isinstance(value, gui.QImage):  # type: ignore[attr-defined]
+        pixmap = gui.QPixmap.fromImage(value)  # type: ignore[attr-defined]
+    elif isinstance(value, str | Path):
+        pixmap = gui.QPixmap(str(value))  # type: ignore[attr-defined]
+    else:
+        raise TypeError("a compare picture is a pixmap, an image, or a path")
+    if pixmap.isNull():  # type: ignore[attr-defined]
+        raise ValueError("compare picture is empty")
+    return pixmap
+
+
+def _fit_field(control: object) -> None:
+    """Size an expert field to its text, and never below ``field_min_px``."""
+    _core, gui, widgets = _qt()
+    density = load().density
+    control.ensurePolished()  # type: ignore[attr-defined]
+    if isinstance(control, widgets.QAbstractSpinBox):  # type: ignore[attr-defined]
+        text = f"{control.textFromValue(control.maximum())}{control.suffix()}"  # type: ignore[attr-defined]
+    elif isinstance(control, widgets.QLineEdit):  # type: ignore[attr-defined]
+        text = str(control.text())  # type: ignore[attr-defined]
+    else:
+        return
+    advance = int(gui.QFontMetrics(control.font()).horizontalAdvance(text))  # type: ignore[attr-defined]
+    chrome = (density.border_px + density.focus_ring_px) * 2
+    control.setMinimumWidth(max(density.field_min_px, advance + chrome))  # type: ignore[attr-defined]
 
 
 def _expand(control: object) -> None:
