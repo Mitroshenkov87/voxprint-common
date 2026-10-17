@@ -20,7 +20,7 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
     "Typing :: Typed",
 ]
-dependencies = ["jeepney>=0.8"]
+dependencies = ["cryptography>=44", "jeepney>=0.8"]
 
 [project.optional-dependencies]
 ui = ["PySide6>=6.8"]
