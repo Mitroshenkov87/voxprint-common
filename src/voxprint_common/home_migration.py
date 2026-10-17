@@ -390,9 +390,9 @@ def _rewrite_absolute(text: str, legacy: Path, destination: Path) -> str:
     if not _absolute_text(text):
         return text
     raw = text.replace("\\", "/")
-    old = os.path.normcase(str(legacy).replace("\\", "/")).rstrip("/")
-    current = os.path.normcase(raw).rstrip("/")
-    if current != old and not os.path.normcase(raw).startswith(old + "/"):
+    old = _slash_key(str(legacy))
+    current = _slash_key(raw)
+    if current != old and not current.startswith(old + "/"):
         return text
     rest = raw[len(old) :]
     slash = "\\" if "\\" in text and "/" not in text else "/"
@@ -401,6 +401,17 @@ def _rewrite_absolute(text: str, legacy: Path, destination: Path) -> str:
         root = str(destination).replace("/", "\\")
         rest = rest.replace("/", "\\")
     return root.rstrip("/\\") + rest
+
+
+def _slash_key(value: str) -> str:
+    """Return a case-folded forward-slash path for prefix checks.
+
+    ``os.path.normcase`` on Windows lowercases and turns ``/`` into ``\\``.
+    The second replace puts the slashes back so a stored POSIX path and a
+    Windows path share one prefix.
+    """
+    folded = os.path.normcase(value.replace("\\", "/"))
+    return folded.replace("\\", "/").rstrip("/")
 
 
 def _absolute_text(text: str) -> bool:

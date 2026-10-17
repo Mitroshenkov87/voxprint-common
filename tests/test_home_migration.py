@@ -26,8 +26,8 @@ def _roots(
     monkeypatch.delenv("VOXPRINT_HOME", raising=False)
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    monkeypatch.setattr(paths, "_windows", lambda: windows)
     if windows:
-        monkeypatch.setattr(paths, "_windows", lambda: True)
         base = tmp_path / "local"
         return base / "Voxprint", base / "VOXPrint AI Suite"
     base = tmp_path / "xdg"
@@ -341,6 +341,19 @@ def test_windows_manifest_strings_keep_their_slashes() -> None:
         )
         == r"C:\Users\alex\AppData\Local\Voxprint-extra\a.bin"
     )
+
+
+def test_rewrite_matches_after_windows_normcase(monkeypatch: pytest.MonkeyPatch) -> None:
+    def normcase(value: str) -> str:
+        return value.replace("/", "\\").lower()
+
+    monkeypatch.setattr(home_migration.os.path, "normcase", normcase)
+    legacy = Path(r"C:\Users\alex\AppData\Local\Voxprint")
+    new = Path(r"C:\Users\alex\AppData\Local\VOXPrint AI Suite")
+    rewritten = home_migration._rewrite_absolute(
+        "C:/Users/alex/AppData/Local/Voxprint/models/a.bin", legacy, new
+    )
+    assert rewritten == "C:/Users/alex/AppData/Local/VOXPrint AI Suite/models/a.bin"
 
 
 def test_env_override_is_not_migrated(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

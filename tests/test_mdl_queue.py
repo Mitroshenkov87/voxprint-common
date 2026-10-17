@@ -612,12 +612,14 @@ def test_worker_crash_resumes_the_partial(tmp_path: Path) -> None:
     partial = partial.with_name(partial.name + ".partial")
     deadline = time.monotonic() + 20
     try:
-        while time.monotonic() < deadline and not partial.is_file():
+        while time.monotonic() < deadline:
+            if partial.is_file() and partial.stat().st_size >= 16:
+                break
             if child.poll() is not None:
                 break
             time.sleep(0.05)
-        assert partial.is_file(), child.stderr.read() if child.poll() is not None else state.log
-        assert partial.stat().st_size >= 16
+        ready = partial.is_file() and partial.stat().st_size >= 16
+        assert ready, child.stderr.read() if child.poll() is not None else state.log
         child.kill()
         child.wait(timeout=10)
         state.release.set()
