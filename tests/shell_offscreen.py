@@ -88,6 +88,7 @@ def main() -> None:
     _check_expert(app)
     _check_simple(app, Qt, QTest)
     _check_variants(app, out)
+    _check_viewer(app)
     grab_shell(out / "en-shell.png", language="en", full_layout=True)
     grab_shell(out / "ru-shell.png", language="ru", full_layout=True)
     grab_shell(out / "de-shell.png", language="de", full_layout=True, reveal_close=True)
@@ -214,6 +215,21 @@ def main() -> None:
         app_id="audiobook-builder",
         prompt="Тихая глава",
     )
+    grab_shell(
+        out / "viewer-simple.png",
+        language="en",
+        result=True,
+        app_id="viewer",
+        prompt="A quiet hill at dusk",
+    )
+    grab_shell(
+        out / "viewer-expert.png",
+        language="en",
+        expert=True,
+        result=True,
+        app_id="viewer",
+        prompt="A quiet hill at dusk",
+    )
 
 
 def _overflow_labels() -> list[str]:
@@ -289,25 +305,103 @@ def _check_variants(app: object, out: Path) -> None:
     app.processEvents()  # type: ignore[attr-defined]
     audio.simple.set_prompt_text("A quiet chapter")
     assert audio.image.generate() is True
+    audio.image.progress(1, 4, tr("simple.progress"))
+    audio.simple.refresh()
+    app.processEvents()  # type: ignore[attr-defined]
+    quiet = audio.find("QLabel", "timeLeft")
+    eta = audio.find("QLabel", "progressEta")
+    assert quiet is not None and quiet.isVisible() is False  # type: ignore[attr-defined]
+    assert eta is not None and eta.isVisible() is False  # type: ignore[attr-defined]
+    status = audio.find("QLabel", "status")
+    assert status is not None and "45" not in status.text()  # type: ignore[attr-defined]
     audio.image.progress(1, 4, tr("simple.progress"), eta_seconds=45)
     audio.simple.refresh()
     app.processEvents()  # type: ignore[attr-defined]
     assert audio.image.phase is Phase.BUSY
     percent = audio.find("QLabel", "progressPercent")
-    eta = audio.find("QLabel", "progressEta")
     cancel = audio.find("QPushButton", "cancel")
     assert percent is not None and percent.text() == tr("simple.progress.percent", percent=25)  # type: ignore[attr-defined]
-    assert eta is not None and eta.text() == tr("simple.progress.eta_seconds", seconds=45)  # type: ignore[attr-defined]
+    assert eta.text() == tr("simple.progress.eta_seconds", seconds=45)  # type: ignore[attr-defined]
+    assert quiet.isVisible() is True and quiet.text() == eta.text()  # type: ignore[attr-defined]
+    assert status.text() == eta.text()  # type: ignore[attr-defined]
     assert cancel is not None and cancel.isVisible()  # type: ignore[attr-defined]
     cancel.click()  # type: ignore[attr-defined]
     app.processEvents()  # type: ignore[attr-defined]
     assert audio.image.phase is Phase.EMPTY
+    assert quiet.isVisible() is False  # type: ignore[attr-defined]
+    assert status.text() == tr("shell.status.ready")  # type: ignore[attr-defined]
     audio.run("view.toggle_expert_mode")
     app.processEvents()  # type: ignore[attr-defined]
     rate = audio.find("QComboBox", "audio.sample_rate")
     assert rate is not None and rate.isVisible()  # type: ignore[attr-defined]
     assert audio.find("QFrame", "expertPanel").isVisible()  # type: ignore[attr-defined]
     audio.close()
+    app.processEvents()  # type: ignore[attr-defined]
+
+
+def _check_viewer(app: object) -> None:
+    import json
+
+    from voxprint_common.suite_settings import file, read, set_expert_mode
+    from voxprint_common.ui.shell import ReferenceShell
+
+    set_expert_mode(False)
+
+    path = file()
+    if path.is_file():
+        data = read()
+        data.pop("ui.window", None)
+        path.write_text(json.dumps(data), encoding="utf-8")
+    shell = ReferenceShell(state_dir=path.parent / "viewer-geometry")
+    shell.show()
+    app.processEvents()  # type: ignore[attr-defined]
+    assert (shell.widget.width(), shell.widget.height()) == (1200, 900)  # type: ignore[attr-defined]
+    assert (shell.widget.minimumWidth(), shell.widget.minimumHeight()) == (960, 640)  # type: ignore[attr-defined]
+    shell.resize(1100, 760)
+    shell.close()
+    app.processEvents()  # type: ignore[attr-defined]
+    again = ReferenceShell(state_dir=path.parent / "viewer-geometry-2")
+    again.show()
+    app.processEvents()  # type: ignore[attr-defined]
+    assert (again.widget.width(), again.widget.height()) == (1100, 760)  # type: ignore[attr-defined]
+    again.close()
+    app.processEvents()  # type: ignore[attr-defined]
+
+    if path.is_file():
+        data = read()
+        data.pop("ui.window", None)
+        path.write_text(json.dumps(data), encoding="utf-8")
+    viewer = ReferenceShell(app="viewer", state_dir=path.parent / "viewer-screen")
+    viewer.show()
+    app.processEvents()  # type: ignore[attr-defined]
+    assert (viewer.widget.minimumWidth(), viewer.widget.minimumHeight()) == (640, 400)  # type: ignore[attr-defined]
+    assert viewer.find("QPushButton", "generate") is None
+    assert viewer.find("QPlainTextEdit", "promptBox") is None
+    assert viewer.find("QLabel", "fileDrop") is None
+    viewer.show_result("A quiet hill at dusk", pictures=1)
+    app.processEvents()  # type: ignore[attr-defined]
+    result = viewer.find("QLabel", "result")
+    assert result is not None and result.isVisible()  # type: ignore[attr-defined]
+    strip = viewer.find("QScrollArea", "historyStrip")
+    assert strip is not None and strip.isVisible() and strip.height() == 104  # type: ignore[attr-defined]
+    viewer.image.set_value("viewer.show_history", False)
+    viewer.simple.refresh()
+    app.processEvents()  # type: ignore[attr-defined]
+    assert strip.isVisible() is False and strip.height() == 0  # type: ignore[attr-defined]
+    viewer.run("view.toggle_expert_mode")
+    app.processEvents()  # type: ignore[attr-defined]
+    panel = viewer.find("QFrame", "expertPanel")
+    split = viewer.find("QSplitter", "expertSplit")
+    assert panel is not None and split is not None and panel.isVisible()  # type: ignore[attr-defined]
+    assert abs(panel.width() - 280) <= split.handleWidth()  # type: ignore[attr-defined]
+    viewer.resize(700, 450)
+    viewer.close()
+    app.processEvents()  # type: ignore[attr-defined]
+    restored = ReferenceShell(app="viewer", state_dir=path.parent / "viewer-screen-2")
+    restored.show()
+    app.processEvents()  # type: ignore[attr-defined]
+    assert (restored.widget.width(), restored.widget.height()) == (700, 450)  # type: ignore[attr-defined]
+    restored.close()
     app.processEvents()  # type: ignore[attr-defined]
 
 
@@ -547,8 +641,19 @@ def _check_simple(app: object, qt: object, test: object) -> None:
     assert result_after[2] < result_box[2]
     panel = shell.find("QFrame", "expertPanel")
     assert panel is not None and panel.isVisible() is True  # type: ignore[attr-defined]
+    assert panel.minimumWidth() == 220 and panel.maximumWidth() == 420  # type: ignore[attr-defined]
+    assert panel.width() == 280  # type: ignore[attr-defined]
     panel_box = _window_box(shell, panel)
     assert panel_box[0] >= stage_after[0] + stage_after[2]
+    split = shell.find("QSplitter", "expertSplit")
+    assert split is not None
+    split.setSizes([900, 420])  # type: ignore[attr-defined]
+    app.processEvents()  # type: ignore[attr-defined]
+    assert panel.width() == 420  # type: ignore[attr-defined]
+    split.setSizes([900, 220])  # type: ignore[attr-defined]
+    app.processEvents()  # type: ignore[attr-defined]
+    assert panel.width() == 220  # type: ignore[attr-defined]
+    split.setSizes([900, 280])  # type: ignore[attr-defined]
     assert shell.find("QDoubleSpinBox", "shell.guidance").isVisible() is True  # type: ignore[attr-defined]
     assert shell.find("QSpinBox", "shell.seed").isVisible() is True  # type: ignore[attr-defined]
     assert shell.find("QLineEdit", "shell.addons").isVisible() is True  # type: ignore[attr-defined]

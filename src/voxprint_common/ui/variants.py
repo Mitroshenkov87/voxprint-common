@@ -1,8 +1,12 @@
 """Thin configurations of the shared simple screen.
 
-Image, audio, video, text, and tool are not separate layouts. Each app names
-the input, the primary action, the result, and a ``voxprint-presets/1`` file.
+Image, audio, video, text, tool, and viewer are not separate layouts. Each
+app names the input, the primary action, the result, and a
+``voxprint-presets/1`` file. The viewer has no input and no primary action.
 The screen itself is :class:`~voxprint_common.ui.simple_image.SimpleLayout`.
+A window opens at :data:`WINDOW_WIDTH` by :data:`WINDOW_HEIGHT`. The minimum
+is :data:`WINDOW_MIN_WIDTH` by :data:`WINDOW_MIN_HEIGHT`, and a variant may
+lower that to :data:`LOWER_MIN_WIDTH` by :data:`LOWER_MIN_HEIGHT`.
 """
 
 from __future__ import annotations
@@ -22,6 +26,12 @@ from voxprint_common.ui.settings import (
 )
 
 __all__ = [
+    "LOWER_MIN_HEIGHT",
+    "LOWER_MIN_WIDTH",
+    "WINDOW_HEIGHT",
+    "WINDOW_MIN_HEIGHT",
+    "WINDOW_MIN_WIDTH",
+    "WINDOW_WIDTH",
     "AppSurface",
     "InputKind",
     "ResultKind",
@@ -35,14 +45,23 @@ __all__ = [
 ]
 
 
+WINDOW_WIDTH = 1200
+WINDOW_HEIGHT = 900
+WINDOW_MIN_WIDTH = 960
+WINDOW_MIN_HEIGHT = 640
+LOWER_MIN_WIDTH = 640
+LOWER_MIN_HEIGHT = 400
+
+
 class VariantId(StrEnum):
-    """The five shapes of the shared screen."""
+    """The shapes of the shared screen."""
 
     IMAGE = "image"
     AUDIO = "audio"
     VIDEO = "video"
     TEXT = "text"
     TOOL = "tool"
+    VIEWER = "viewer"
 
 
 class InputKind(StrEnum):
@@ -53,6 +72,7 @@ class InputKind(StrEnum):
     MEDIA_VOICE = "media_voice"
     OUTLINE = "outline"
     MODEL = "model"
+    NONE = "none"
 
 
 class ResultKind(StrEnum):
@@ -71,6 +91,8 @@ class AppSurface:
 
     ``preset_name`` is the file stem under ``presets/``. ``action_key``,
     ``empty_key``, ``placeholder_key``, and ``drop_key`` are catalog keys.
+    ``min_width`` and ``min_height`` are the window minimum. The default is
+    960 by 640. A variant may lower that to 640 by 400.
     """
 
     app_id: str
@@ -82,6 +104,8 @@ class AppSurface:
     placeholder_key: str
     preset_name: str
     drop_key: str = ""
+    min_width: int = WINDOW_MIN_WIDTH
+    min_height: int = WINDOW_MIN_HEIGHT
 
 
 def surfaces() -> tuple[AppSurface, ...]:
@@ -135,6 +159,8 @@ def settings_for(surface: AppSurface) -> Settings:
         return _text_settings()
     if variant is VariantId.TOOL:
         return _tool_settings()
+    if variant is VariantId.VIEWER:
+        return _viewer_settings()
     assert_never(variant)
 
 
@@ -154,6 +180,8 @@ def variant_presets(
         settings: Descriptors the values are checked against.
         enlarge_installed: True when Enlarge can make a larger result.
     """
+    if surface.variant is VariantId.VIEWER:
+        return PresetFile(())
     if surface.preset_name == "canvas":
         return reference_presets(settings, enlarge_installed=enlarge_installed)
     document = load_presets(preset_path(surface.preset_name), settings)
@@ -288,6 +316,22 @@ def _text_settings() -> Settings:
     )
 
 
+def _viewer_settings() -> Settings:
+    return Settings(
+        (
+            SettingSpec(
+                "viewer.show_history",
+                "setting.viewer.show_history",
+                "setting.viewer.show_history.help",
+                SettingType.BOOL,
+                True,
+                expert=True,
+                group="viewer",
+            ),
+        )
+    )
+
+
 def _tool_settings() -> Settings:
     return Settings(
         (
@@ -405,5 +449,17 @@ _SURFACES = (
         "simple.drop.model",
         "tool",
         "simple.drop.model",
+    ),
+    AppSurface(
+        "viewer",
+        VariantId.VIEWER,
+        InputKind.NONE,
+        ResultKind.PICTURE,
+        "simple.generate",
+        "simple.empty.viewer",
+        "shell.prompt.placeholder",
+        "viewer",
+        min_width=LOWER_MIN_WIDTH,
+        min_height=LOWER_MIN_HEIGHT,
     ),
 )

@@ -170,7 +170,7 @@ A component path that is the suite home, the models root, the shared runtime, vo
 
 ## Languages
 
-`voxprint_common.i18n` loads one JSON file per language from `locales/`. English is the source and the fallback. The package ships `en`, `de`, `ru`, `uk`, and `lv`. The active language is the `ui_language` key when that key is present in `suite.json`, then `VOXPRINT_LANG`, then the system UI locale, then English. `add_catalogs` lets an app point at its own `locales` directory. Later folders override the same key.
+`voxprint_common.i18n` loads one JSON file per language from `ui/locales/`, beside `tokens.json`. English is the source and the fallback. The package ships `en`, `de`, `ru`, `uk`, and `lv`. The active language is the `ui_language` key when that key is present in `suite.json`, then `VOXPRINT_LANG`, then the system UI locale, then English. `add_catalogs` lets an app point at its own `locales` directory. Later folders override the same key.
 
 Apps check their own UI in CI:
 

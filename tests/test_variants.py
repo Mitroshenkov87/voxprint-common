@@ -1,4 +1,4 @@
-"""Shared simple screen: one layout, five thin app configurations."""
+"""Shared simple screen: one layout, thin app configurations."""
 
 from __future__ import annotations
 
@@ -10,6 +10,13 @@ from voxprint_common.ui.presets import PresetMatch
 from voxprint_common.ui.safety import reject_reserved_key
 from voxprint_common.ui.simple_image import SimpleLayout
 from voxprint_common.ui.variants import (
+    LOWER_MIN_HEIGHT,
+    LOWER_MIN_WIDTH,
+    WINDOW_HEIGHT,
+    WINDOW_MIN_HEIGHT,
+    WINDOW_MIN_WIDTH,
+    WINDOW_WIDTH,
+    InputKind,
     VariantId,
     settings_for,
     state_names,
@@ -30,12 +37,16 @@ def test_every_surface_loads_plain_presets() -> None:
         "clarity",
         "plotweaver",
         "model-forge",
+        "viewer",
     )
     seen: set[str] = set()
     for surface in surfaces():
         settings = settings_for(surface)
         document = variant_presets(surface, settings)
-        assert document.groups
+        if surface.variant is VariantId.VIEWER:
+            assert document.groups == ()
+        else:
+            assert document.groups
         for group in document.groups:
             for option in group.options:
                 for key, _value in option.values:
@@ -60,6 +71,15 @@ def test_variants_are_configurations_not_separate_layouts() -> None:
     assert surface_for("clarity").result_kind.value == "compare"
     assert surface_for("plotweaver").action_key == "simple.action.write"
     assert surface_for("model-forge").action_key == "simple.action.prepare"
+    viewer = surface_for("viewer")
+    assert viewer.variant is VariantId.VIEWER
+    assert viewer.input_kind is InputKind.NONE
+    assert (viewer.min_width, viewer.min_height) == (LOWER_MIN_WIDTH, LOWER_MIN_HEIGHT)
+    assert (WINDOW_WIDTH, WINDOW_HEIGHT) == (1200, 900)
+    assert (surface_for("canvas").min_width, surface_for("canvas").min_height) == (
+        WINDOW_MIN_WIDTH,
+        WINDOW_MIN_HEIGHT,
+    )
     with pytest.raises(ValueError, match="unknown app"):
         surface_for("missing")
 
@@ -109,6 +129,24 @@ def test_audio_state_file_and_progress_eta(tmp_path: Path) -> None:
     layout.choose("pace", "calm")
     assert (tmp_path / "audio-settings.json").is_file()
     assert (tmp_path / "audio-history.json").is_file()
+
+
+def test_viewer_history_setting_defaults_on(tmp_path: Path) -> None:
+    surface = surface_for("viewer")
+    settings = settings_for(surface)
+    assert settings.get("viewer.show_history") is not None
+    layout = SimpleLayout(
+        presets=variant_presets(surface, settings),
+        settings=settings,
+        state_dir=tmp_path,
+        gate=_Allow(),
+        state_name="viewer-settings.json",
+        history_name="viewer-history.json",
+    )
+    assert layout.get("viewer.show_history") is True
+    layout.set_value("viewer.show_history", False)
+    assert layout.get("viewer.show_history") is False
+    assert state_names(surface) == ("viewer-settings.json", "viewer-history.json")
 
 
 def test_missing_gate_blocks_every_variant(tmp_path: Path) -> None:

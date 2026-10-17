@@ -10,7 +10,7 @@ from voxprint_common.i18n.check import check_tree, main
 from voxprint_common.ui import splash
 
 _ROOT = Path("src/voxprint_common")
-_LOCALES = _ROOT / "i18n" / "locales"
+_LOCALES = _ROOT / "ui" / "locales"
 
 
 def _catalogs(folder: Path, payloads: dict[str, dict[str, object]]) -> Path:

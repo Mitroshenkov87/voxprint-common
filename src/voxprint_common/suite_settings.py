@@ -14,6 +14,14 @@ key is preserved, so one app does not wipe another's settings.
   are dropped by :mod:`voxprint_common.ui.keymap`. Other keys are preserved.
 * ``ui.expert_mode``: true or false. False, the default, is simple mode.
   :class:`voxprint_common.ui.expert.ExpertMode` notifies listeners.
+* ``ui.window``: ``width``, ``height``, ``x``, and ``y`` for the last window.
+  Missing means the app uses its first-launch size.
+
+Writers take ``suite.json.lock`` beside the file, read the latest object, and
+replace only the keys they changed. The publish is a temporary file in the
+same directory, an fsync, and ``os.replace``. A reader reloads when the file
+changes. A partial or invalid file is ignored and the last good object for
+that path is kept. A missing file is an empty object.
 
 ``VOXPRINT_MODELS_DIR`` is applied by :func:`voxprint_common.paths.models_dir`,
 not by the getters here.
@@ -54,9 +62,11 @@ __all__ = [
     "set_theme",
     "set_ui_language",
     "set_value",
+    "set_window_geometry",
     "theme",
     "ui_language",
     "values",
+    "window_geometry",
 ]
 
 SCHEMA = 1
@@ -68,6 +78,7 @@ KEYS = (
     "keep_awake_during_jobs",
     "mdl_parallel_files",
     "ui.expert_mode",
+    "ui.window",
 )
 DEFAULT_PARALLEL_FILES = 2
 DEFAULT_THEME = "glass-dark"
@@ -76,6 +87,10 @@ DEFAULT_GPU = "auto"
 _GPU_RE = re.compile(r"^cuda:(\d{1,2})$")
 _LANG_RE = re.compile(r"^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$")
 _LOCK_TIMEOUT = 30.0
+_WINDOW_KEYS = ("width", "height", "x", "y")
+_good_path: str | None = None
+_good_token: tuple[str, int, int] | None = None
+_good: dict[str, Any] = {}
 
 
 def file() -> Path:
@@ -86,19 +101,34 @@ def file() -> Path:
 def read() -> dict[str, Any]:
     """Return the suite file as a dict.
 
-    A missing file, a non-object, or unreadable text yields an empty dict.
-    A leading BOM is accepted.
+    A missing file yields an empty dict. A leading BOM is accepted. When the
+    file's size or modification time changes, it is read again. Unreadable
+    text, a partial document, or a value that is not an object is ignored, and
+    the last good object for this path is returned instead.
 
     Returns:
         The raw object. Keys this package does not interpret are included.
     """
+    global _good, _good_path, _good_token
+    path = file()
+    key = str(path)
     try:
-        payload = json.loads(file().read_text(encoding="utf-8-sig"))
+        stat = path.stat()
+    except OSError:
+        return {}
+    token = (key, stat.st_mtime_ns, stat.st_size)
+    if token == _good_token:
+        return dict(_good)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
     except OSError, UnicodeError, ValueError:
-        return {}
+        return dict(_good) if _good_path == key else {}
     if not isinstance(payload, dict):
-        return {}
-    return payload
+        return dict(_good) if _good_path == key else {}
+    _good_path = key
+    _good_token = token
+    _good = payload
+    return dict(payload)
 
 
 def ui_language() -> str:
@@ -273,6 +303,37 @@ def set_keep_awake_during_jobs(enabled: bool) -> bool:
         ValueError: ``enabled`` is not a bool.
     """
     return bool(set_value("keep_awake_during_jobs", enabled))
+
+
+def window_geometry() -> dict[str, int] | None:
+    """Return the stored window rectangle, or None when it has not been saved.
+
+    Returns:
+        ``width``, ``height``, ``x``, and ``y``. An incomplete or invalid
+        object is None. The file is not created.
+    """
+    return _normalize_window(read().get("ui.window"))
+
+
+def set_window_geometry(width: int, height: int, x: int, y: int) -> dict[str, int]:
+    """Store the window rectangle. Other suite keys stay as they are.
+
+    Args:
+        width: Width in pixels, at least 1.
+        height: Height in pixels, at least 1.
+        x: Left edge. Negative values are kept.
+        y: Top edge. Negative values are kept.
+
+    Returns:
+        The stored rectangle.
+
+    Raises:
+        ValueError: A size is not a positive integer, or a position is not an integer.
+    """
+    stored = set_value("ui.window", {"width": width, "height": height, "x": x, "y": y})
+    if not isinstance(stored, dict):
+        raise ValueError("ui.window was not stored")
+    return {name: int(stored[name]) for name in _WINDOW_KEYS}
 
 
 def set_gpu(value: str) -> str:
@@ -453,7 +514,26 @@ def _validate(key: str, value: object) -> object:
         if not isinstance(value, bool):
             raise ValueError(f"ui.expert_mode must be true or false, got {value!r}")
         return value
+    if key == "ui.window":
+        stored = _normalize_window(value)
+        if stored is None:
+            raise ValueError(f"ui.window must be width, height, x, and y, got {value!r}")
+        return stored
     raise ValueError(f"not a shared setting: {key!r}")
+
+
+def _normalize_window(value: object) -> dict[str, int] | None:
+    if not isinstance(value, dict):
+        return None
+    parsed: dict[str, int] = {}
+    for name in _WINDOW_KEYS:
+        item = value.get(name)
+        if isinstance(item, bool) or not isinstance(item, int):
+            return None
+        if name in {"width", "height"} and item < 1:
+            return None
+        parsed[name] = item
+    return parsed
 
 
 def _ordered(data: dict[str, Any]) -> dict[str, Any]:

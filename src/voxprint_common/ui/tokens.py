@@ -64,7 +64,14 @@ TOKEN_NAMES = (
     "RED",
 )
 
-_DENSITY = ("body_px", "icon_px", "panel_header_px", "control_radius_px", "border_px")
+_DENSITY = (
+    "body_px",
+    "icon_px",
+    "panel_header_px",
+    "control_radius_px",
+    "border_px",
+    "focus_ring_px",
+)
 _IDENTITY = ("audiobook-builder", "movie-dubber", "enlarge", "clarity")
 
 
@@ -77,6 +84,7 @@ class Density:
     panel_header_px: int
     control_radius_px: int
     border_px: int
+    focus_ring_px: int
 
 
 @dataclass(frozen=True)

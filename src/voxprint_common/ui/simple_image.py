@@ -2,8 +2,9 @@
 
 :class:`SimpleLayout` is the headless description: an input, one primary
 action, a result, and a history strip. :class:`SimpleWidget` is the Qt view.
-Image, audio, video, text, and tool are thin configurations
-(:mod:`voxprint_common.ui.variants`), not separate layouts.
+Image, audio, video, text, tool, and viewer are thin configurations
+(:mod:`voxprint_common.ui.variants`), not separate layouts. The viewer has
+no input and no primary action, so the result fills that space.
 :class:`SimpleImageLayout` and :class:`SimpleImageWidget` are the same classes.
 Importing this module does not import PySide6. Expert mode adds a side panel
 and does not move the rest. The dock stays a separate API.
@@ -799,6 +800,7 @@ class SimpleImageWidget:
         on_improve: Callable[[str], str] | None = None,
         on_history: Callable[[str, str], None] | None = None,
         on_seed: Callable[[int], None] | None = None,
+        on_refresh: Callable[[], None] | None = None,
         surface: AppSurface | None = None,
     ) -> None:
         """Build the screen.
@@ -814,6 +816,7 @@ class SimpleImageWidget:
             on_history: Called with an action id and a history item id. The
                 actions are ``open``, ``show_folder``, ``copy``, and ``use_input``.
             on_seed: Called with the restored seed after Use prompt again.
+            on_refresh: Called after the screen paints, including a time-left change.
             surface: Which app this screen is. None is Canvas.
         """
         core, gui, widgets = _qt()
@@ -828,6 +831,7 @@ class SimpleImageWidget:
         self._on_improve = on_improve
         self._on_history = on_history
         self._on_seed = on_seed
+        self._on_refresh = on_refresh
         self._surface = surface if surface is not None else surface_for("canvas")
         self._drop: object | None = None
         self._voice: object | None = None
@@ -880,6 +884,7 @@ class SimpleImageWidget:
                 on_change=self._on_expert_edit,
             )
             self._expert_form.addStretch(1)  # type: ignore[attr-defined]
+            self._fit_expert_panel()
 
     def set_note(self, text: str) -> None:
         """Show a short line under the history, or hide it when ``text`` is empty.
@@ -910,8 +915,13 @@ class SimpleImageWidget:
         self._sync_presets()
         self._paint_expert()
         self._fill_history()
+        self._apply_history()
+        self._paint_time_left()
+        if self._on_refresh is not None:
+            self._on_refresh()
         busy = self._layout.phase is Phase.BUSY
-        self._generate_button.setEnabled(not busy)  # type: ignore[attr-defined]
+        if self._generate_button is not None:
+            self._generate_button.setEnabled(not busy)  # type: ignore[attr-defined]
         phase = self._layout.phase
         if phase is Phase.EMPTY:
             self._stack.setCurrentIndex(0)  # type: ignore[attr-defined]
@@ -1001,9 +1011,11 @@ class SimpleImageWidget:
         self._expert_toggle.clicked.connect(lambda: self._command("view.toggle_expert_mode"))
         self._top.addWidget(self._expert_toggle)
         root.addLayout(self._top)
-        prompt_row = widgets.QHBoxLayout()
-        prompt_row.setSpacing(12)
         self._prompt = None
+        self._generate_button = None
+        if self._surface.input_kind is not InputKind.NONE:
+            prompt_row = widgets.QHBoxLayout()
+            prompt_row.setSpacing(12)
         if self._surface.input_kind in {InputKind.PROMPT, InputKind.OUTLINE}:
             self._prompt = widgets.QPlainTextEdit()
             self._prompt.setObjectName("promptBox")
@@ -1031,23 +1043,25 @@ class SimpleImageWidget:
                 self._improve.hide()
                 self._revert.hide()
             prompt_row.addLayout(prompt_col, 1)
-        else:
+        elif self._surface.input_kind is not InputKind.NONE:
             prompt_row.addLayout(self._source_column(), 1)
-        self._generate_button = widgets.QPushButton(tr(self._surface.action_key))
-        self._generate_button.setObjectName("generate")
-        self._generate_button.setAutoDefault(False)
-        self._generate_button.setMinimumSize(168, 96)
-        self._generate_button.clicked.connect(self._generate)
-        prompt_row.addWidget(self._generate_button)
-        root.addLayout(prompt_row)
+        if self._surface.input_kind is not InputKind.NONE:
+            self._generate_button = widgets.QPushButton(tr(self._surface.action_key))
+            self._generate_button.setObjectName("generate")
+            self._generate_button.setAutoDefault(False)
+            self._generate_button.setMinimumSize(168, 96)
+            self._generate_button.clicked.connect(self._generate)
+            prompt_row.addWidget(self._generate_button)
+            root.addLayout(prompt_row)
         self._preset_host = widgets.QWidget()
         self._preset_rows = widgets.QVBoxLayout(self._preset_host)
         self._preset_rows.setContentsMargins(0, 0, 0, 0)
         self._preset_rows.setSpacing(8)
         root.addWidget(self._preset_host)
         self._fill_presets()
-        centre = widgets.QHBoxLayout()
-        centre.setSpacing(12)
+        if not self._layout.rows:
+            self._preset_host.hide()
+            self._preset_host.setFixedHeight(0)
         self._stage = widgets.QFrame()
         self._stage.setObjectName("stage")
         self._stage.setAttribute(qt.WA_StyledBackground, True)
@@ -1062,14 +1076,21 @@ class SimpleImageWidget:
         self._feature = self._reason_page("featureText")
         stage_layout.addWidget(self._stack, 1)
         stage_layout.addWidget(self._action_bar())
-        centre.addWidget(self._stage, 1)
-        self._expert_panel = widgets.QFrame()
+        core = self._core
+
+        class _Panel(widgets.QFrame):
+            def sizeHint(_self: object) -> object:
+                hint = widgets.QFrame.sizeHint(_self)  # type: ignore[arg-type]
+                return core.QSize(280, hint.height())
+
+        self._expert_panel = _Panel()
         self._expert_panel.setObjectName("expertPanel")
         self._expert_panel.setAttribute(qt.WA_StyledBackground, True)
-        self._expert_panel.setFixedWidth(280)
+        self._expert_panel.setMinimumWidth(220)
+        self._expert_panel.setMaximumWidth(420)
         self._expert_panel.setMinimumHeight(0)
         panel_policy = widgets.QSizePolicy(
-            widgets.QSizePolicy.Policy.Fixed,
+            widgets.QSizePolicy.Policy.Preferred,
             widgets.QSizePolicy.Policy.Expanding,
         )
         self._expert_panel.setSizePolicy(panel_policy)
@@ -1091,8 +1112,16 @@ class SimpleImageWidget:
         scroll.setWidget(inner)
         self._panel_layout.addWidget(scroll, 1)
         self._expert_panel.hide()
-        centre.addWidget(self._expert_panel)
-        root.addLayout(centre, 1)
+        self._centre_split = widgets.QSplitter(qt.Horizontal)
+        self._centre_split.setObjectName("expertSplit")
+        self._centre_split.setChildrenCollapsible(False)
+        self._centre_split.addWidget(self._stage)
+        self._centre_split.addWidget(self._expert_panel)
+        self._centre_split.setStretchFactor(0, 1)
+        self._centre_split.setStretchFactor(1, 0)
+        self._fitting_panel = False
+        self._install_panel_fit()
+        root.addWidget(self._centre_split, 1)
         self._history_scroll = widgets.QScrollArea()
         self._history_scroll.setObjectName("historyStrip")
         self._history_scroll.setWidgetResizable(True)
@@ -1106,12 +1135,89 @@ class SimpleImageWidget:
         self._history.setSpacing(8)
         self._history_scroll.setWidget(history)
         root.addWidget(self._history_scroll)
+        self._status_row = widgets.QWidget()
+        self._status_row.setObjectName("statusRow")
+        status_layout = widgets.QHBoxLayout(self._status_row)
+        status_layout.setContentsMargins(0, 0, 0, 0)
+        status_layout.setSpacing(8)
+        self._time_left = widgets.QLabel()
+        self._time_left.setObjectName("timeLeft")
+        status_layout.addWidget(self._time_left)
+        status_layout.addStretch(1)
+        self._status_row.hide()
+        root.addWidget(self._status_row)
         self._note = widgets.QLabel()
         self._note.setObjectName("simpleNote")
         self._note.hide()
         root.addWidget(self._note)
         self._install_keys()
         self.refresh()
+
+    def _apply_history(self) -> None:
+        show = True
+        state = self._layout.state
+        if state is not None and state.has("viewer.show_history"):
+            show = state.get("viewer.show_history") is True
+        strip = self._history_scroll
+        if show:
+            strip.setFixedHeight(104)  # type: ignore[attr-defined]
+            strip.show()  # type: ignore[attr-defined]
+            return
+        strip.hide()  # type: ignore[attr-defined]
+        strip.setFixedHeight(0)  # type: ignore[attr-defined]
+
+    def _paint_time_left(self) -> None:
+        seconds = self._layout.eta_seconds if self._layout.phase is Phase.BUSY else None
+        label = self._time_left
+        if seconds is None:
+            label.clear()  # type: ignore[attr-defined]
+            label.hide()  # type: ignore[attr-defined]
+            self._status_row.hide()  # type: ignore[attr-defined]
+            return
+        if seconds >= 60:
+            minutes = max(1, round(seconds / 60))
+            label.setText(tr("simple.progress.eta_minutes", minutes=minutes))  # type: ignore[attr-defined]
+        else:
+            label.setText(tr("simple.progress.eta_seconds", seconds=seconds))  # type: ignore[attr-defined]
+        label.show()  # type: ignore[attr-defined]
+        self._status_row.show()  # type: ignore[attr-defined]
+
+    def _install_panel_fit(self) -> None:
+        core = self._core
+        widget = self
+
+        class _Fit(core.QObject):
+            def eventFilter(_self: object, _watched: object, event: object) -> bool:
+                if event.type() != core.QEvent.Type.Resize:  # type: ignore[attr-defined]
+                    return False
+                if widget._fitting_panel or not widget._expert_panel.isVisible():  # type: ignore[attr-defined]
+                    return False
+                sizes = widget._centre_split.sizes()  # type: ignore[attr-defined]
+                if not sizes or sizes[-1] != 0:
+                    return False
+                widget._fitting_panel = True
+                try:
+                    widget._fit_expert_panel()
+                finally:
+                    widget._fitting_panel = False
+                return False
+
+        watcher = _Fit(self._centre_split)
+        self._centre_split.installEventFilter(watcher)  # type: ignore[attr-defined]
+        self._panel_fit = watcher
+
+    def _fit_expert_panel(self) -> None:
+        split = self._centre_split
+        total = split.width()  # type: ignore[attr-defined]
+        handle = split.handleWidth()  # type: ignore[attr-defined]
+        panel = 280
+        available = max(panel, total - handle)
+        # A short control list stays at the minimum until that minimum has
+        # been the requested width once.
+        frame = self._expert_panel
+        frame.setMinimumWidth(panel)  # type: ignore[attr-defined]
+        split.setSizes([max(1, available - panel), panel])  # type: ignore[attr-defined]
+        frame.setMinimumWidth(220)  # type: ignore[attr-defined]
 
     def _empty_page(self) -> object:
         widgets = self._widgets
@@ -1594,6 +1700,8 @@ class SimpleImageWidget:
             if kind is InputKind.MEDIA_VOICE and text and self._voice is not None:
                 return f"{text} · {self._voice.currentText()}"  # type: ignore[attr-defined]
             return text
+        if kind is InputKind.NONE:
+            return self._layout.prompt
         assert_never(kind)
 
     def _generate(self) -> None:

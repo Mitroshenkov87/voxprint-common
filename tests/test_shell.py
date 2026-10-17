@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from voxprint_common.ui.shell import ADOPTION, reference_layout
+from voxprint_common.ui.theme import build_shell_style
 from voxprint_common.ui.tokens import SCHEMA, load
 
 
@@ -38,6 +39,10 @@ def test_headless_layout_and_adoption() -> None:
     assert tokens.density.icon_px == 22
     assert tokens.density.panel_header_px == 28
     assert tokens.density.control_radius_px == 4
+    assert tokens.density.border_px == 1
+    assert tokens.density.focus_ring_px == 2
+    style = build_shell_style(False)
+    assert f"QPushButton:focus {{\n    border: {tokens.density.focus_ring_px}px solid" in style
     assert tokens.identity["audiobook-builder"] == "#f5d76e"
     assert tokens.identity["movie-dubber"] == "#b98cff"
     assert tokens.identity["enlarge"] == "#ff6b8a"
@@ -87,6 +92,8 @@ def test_offscreen_shell_screenshots(tmp_path: Path) -> None:
             "ru-image-expert.png",
             "ru-audio-simple.png",
             "ru-audio-expert.png",
+            "viewer-simple.png",
+            "viewer-expert.png",
         )
     }
     pictures = (

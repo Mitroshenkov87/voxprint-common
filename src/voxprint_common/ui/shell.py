@@ -19,7 +19,7 @@ from typing import assert_never
 
 from voxprint_common.i18n import set_language, tr
 from voxprint_common.paths import state_dir as suite_state_dir
-from voxprint_common.suite_settings import set_expert_mode
+from voxprint_common.suite_settings import set_expert_mode, set_window_geometry, window_geometry
 from voxprint_common.ui.commands import CommandSpec, Registry, reference_commands
 from voxprint_common.ui.dock import (
     Activate,
@@ -57,7 +57,14 @@ from voxprint_common.ui.simple_image import (
     SimpleImageWidget,
 )
 from voxprint_common.ui.theme import PRIMARY, TEXT, TEXT_MUTED, TEXT_ON_ACCENT, build_shell_style
-from voxprint_common.ui.variants import settings_for, state_names, surface_for, variant_presets
+from voxprint_common.ui.variants import (
+    WINDOW_HEIGHT,
+    WINDOW_WIDTH,
+    settings_for,
+    state_names,
+    surface_for,
+    variant_presets,
+)
 
 __all__ = [
     "ADOPTION",
@@ -270,6 +277,9 @@ class ReferenceShell:
         self._toolbar_available: int | None = None
         self._palette_query = ""
         self._chrome_ready = False
+        self._geometry_ready = False
+        self._fitting_geometry = False
+        self._status_time = False
         self.widget = widgets.QWidget()
         self.widget.setObjectName("shell")
         self.widget.setFocusPolicy(qt.StrongFocus)
@@ -310,6 +320,49 @@ class ReferenceShell:
             self._apply_surface()
         self._chrome_ready = True
         self.rebuild()
+        self._apply_geometry()
+
+    def _apply_geometry(self) -> None:
+        """Use 1200 by 900 the first time, then the saved rectangle.
+
+        The minimum is the variant's. A saved edge that is smaller is raised
+        to that minimum. The saved file is left unchanged until the window
+        moves or is resized.
+        """
+        minimum_width = self.surface.min_width
+        minimum_height = self.surface.min_height
+        self._fitting_geometry = True
+        self.widget.setMinimumSize(minimum_width, minimum_height)
+        stored = window_geometry()
+        if stored is None:
+            self.widget.resize(WINDOW_WIDTH, WINDOW_HEIGHT)
+        else:
+            self.widget.resize(
+                max(minimum_width, stored["width"]),
+                max(minimum_height, stored["height"]),
+            )
+            self.widget.move(stored["x"], stored["y"])
+        self._fitting_geometry = False
+        self._geometry_ready = True
+
+    def _save_geometry(self) -> None:
+        widget = self.widget
+        set_window_geometry(widget.width(), widget.height(), widget.x(), widget.y())
+
+    def _sync_time_left(self) -> None:
+        """Show remaining time on the status row only when a job supplied it."""
+        seconds = self.image.eta_seconds if self.image.phase is Phase.BUSY else None
+        if seconds is None:
+            if self._status_time:
+                self._status.setText(tr("shell.status.ready"))
+                self._status_time = False
+            return
+        self._status_time = True
+        if seconds >= 60:
+            minutes = max(1, round(seconds / 60))
+            self._status.setText(tr("simple.progress.eta_minutes", minutes=minutes))
+            return
+        self._status.setText(tr("simple.progress.eta_seconds", seconds=seconds))
 
     def resize(self, width: int, height: int) -> None:
         """Resize the window.
@@ -564,6 +617,7 @@ class ReferenceShell:
             on_improve=self._improve_prompt,
             on_history=self._on_history,
             on_seed=self._apply_seed,
+            on_refresh=self._sync_time_left,
             surface=self.surface,
         )
         root.addWidget(self.simple.root, 1)
@@ -1346,6 +1400,12 @@ def _resize_watch(shell: ReferenceShell) -> object:
             kind = event.type()  # type: ignore[attr-defined]
             if kind == core.QEvent.Type.Resize and not shell._building:
                 shell._fill_toolbar()
+            if (
+                kind in {core.QEvent.Type.Resize, core.QEvent.Type.Move}
+                and shell._geometry_ready
+                and not shell._fitting_geometry
+            ):
+                shell._save_geometry()
             return False
 
     return _Watch(shell.widget)

@@ -235,7 +235,7 @@ def build_shell_style(glass: bool, *, more: bool = False) -> str:
     """Return the editor-shell stylesheet.
 
     Colours are the shared tokens. Sizes come from the density block: body
-    text, panel headers, and the control radius. Qt is not imported.
+    text, panel headers, the control radius, and the focus ring. Qt is not imported.
 
     Args:
         glass: Use the translucent Acrylic backgrounds. False uses the solid
@@ -356,6 +356,13 @@ QPushButton#generate {{
 }}
 QPushButton#generate:disabled {{
     background: {CONTROL_BG}; color: {TEXT_MUTED}; border-color: {CONTROL_BORDER};
+}}
+QLineEdit:focus, QPlainTextEdit:focus, QComboBox:focus, QSpinBox:focus,
+QDoubleSpinBox:focus, QListWidget:focus, QPushButton:focus {{
+    border: {density.focus_ring_px}px solid {ACCENT};
+}}
+QPushButton#primary:focus, QPushButton#generate:focus {{
+    border: {density.focus_ring_px}px solid {TEXT_ON_PRIMARY};
 }}
 QPushButton#overflow, QPushButton#expertToggle {{
     background: transparent; color: {TEXT_MUTED}; border: none; padding: 2px 10px;

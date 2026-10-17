@@ -18,7 +18,7 @@ python -m ruff check src tests
 python -m ruff format --check src tests
 python -m interrogate -c pyproject.toml src/voxprint_common
 python -m pytest
-python -m voxprint_common.i18n.check --src src/voxprint_common --locales src/voxprint_common/i18n/locales --langs en,ru,de,uk,lv
+python -m voxprint_common.i18n.check --src src/voxprint_common --locales src/voxprint_common/ui/locales --langs en,ru,de,uk,lv
 python -m mkdocs build --strict
 python -m build
 ```

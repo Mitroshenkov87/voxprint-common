@@ -46,6 +46,7 @@ from voxprint_common.ui.theme import (
     TEXT_MUTED,
     build_style,
 )
+from voxprint_common.ui.tokens import load
 
 __all__ = [
     "WindowResult",
@@ -1194,9 +1195,10 @@ def _builder(shot: bool) -> object:
             '"Noto Sans", "DejaVu Sans", "Segoe UI Variable Text"',
             1,
         )
+        ring = load().density.focus_ring_px
         extra = f"""
-        QPushButton:focus {{ border: 2px solid {ACCENT}; }}
-        QPushButton#primary:focus {{ border: 2px solid #1c1604; }}
+        QPushButton:focus {{ border: {ring}px solid {ACCENT}; }}
+        QPushButton#primary:focus {{ border: {ring}px solid #1c1604; }}
         QPushButton#disclosure {{
             background: transparent; border: none; padding: 4px 2px;
             font-weight: 400; font-size: 13px; text-align: left; color: {TEXT_MUTED};

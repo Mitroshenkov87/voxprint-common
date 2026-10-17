@@ -85,7 +85,7 @@ Shared command ids are `file.save`, `edit.undo`, `edit.redo`, and `view.palette`
 
 ## Tokens
 
-`tokens.json` is schema 1: a colour map, editor density, and the splash colours for Audiobook Builder, Movie Dubber, Enlarge, and Clarity. `voxprint_common.ui.theme.TOKENS` is that colour map. `build_style` remains the wizard and download-window stylesheet. `build_shell_style` uses the density block (13 px body, 28 px panel headers, 4 px control radius) with the same colours. A file whose schema is not 1 is refused.
+`tokens.json` is schema 1: a colour map, editor density, and the splash colours for Audiobook Builder, Movie Dubber, Enlarge, and Clarity. `voxprint_common.ui.theme.TOKENS` is that colour map. `build_style` remains the wizard and download-window stylesheet. `build_shell_style` uses the density block (13 px body, 28 px panel headers, 4 px control radius, 2 px focus ring) with the same colours. A file whose schema is not 1 is refused. The language catalogs are the JSON files in `ui/locales`, beside `tokens.json`. English is the fallback.
 
 ## Image-app pattern
 
@@ -137,7 +137,7 @@ layout = SimpleImageLayout(
 
 ## Variants
 
-`SimpleLayout` is the same screen for every app. A variant is a short configuration: the input, the primary action, the result, and a preset file. It does not add a second layout. Expert mode still only adds the side panel. The overflow menu stays Open folder, Manage models, Settings, and Expert mode.
+`SimpleLayout` is the same screen for every app. A variant is a short configuration: the input, the primary action, the result, and a preset file. It does not add a second layout. Expert mode still only adds the side panel. That panel is 280 px and can be resized from 220 to 420. The overflow menu stays Open folder, Manage models, Settings, and Expert mode. A job shows time left on the status row only when the app supplies a duration.
 
 The code name is `SimpleLayout` / `SimpleWidget` in `voxprint_common.ui.simple_image`. `SimpleImageLayout` and `SimpleImageWidget` are the same classes. `surface_for(app_id)` in `voxprint_common.ui.variants` picks the configuration. `ReferenceShell(app="clarity")` draws that app.
 
@@ -188,6 +188,14 @@ Model Forge. The input is a model. The action is Prepare model. The result is a 
 ![English tool screen](img/shell/tool-simple.png)
 
 ![English tool screen, Expert mode](img/shell/tool-expert.png)
+
+### Viewer
+
+The viewer has no input and no primary action. The result fills that space. History can be hidden with `viewer.show_history`. The window minimum for this variant is 640 by 400. Other variants stay at 960 by 640. The first launch is 1200 by 900. Later launches restore the saved rectangle from `suite.json`.
+
+![English viewer](img/shell/viewer-simple.png)
+
+![English viewer, Expert mode](img/shell/viewer-expert.png)
 
 ## Reference window
 

@@ -6,6 +6,8 @@ Pin `voxprint-common==0.2.4`. The import package is `voxprint_common`. `voxprint
 
 ## Changes in the next release
 
+Catalog files shipped with this package are `voxprint_common/ui/locales/<lang>.json`, beside `tokens.json`. `suite.json` stays at `<data home>/state/suite.json`. Writers lock `suite.json.lock` and replace one key at a time. The viewer configuration of `SimpleLayout` has no input and no primary action. Its window minimum is 640 by 400. Other shells stay at a 960 by 640 minimum and open at 1200 by 900 until a rectangle is saved in `ui.window`.
+
 `paths.home()` is `%LOCALAPPDATA%\VOXPrint AI Suite` on Windows and `$XDG_DATA_HOME/voxprint-ai-suite` (or `~/.local/share/voxprint-ai-suite`) on Linux. The first call moves an existing `%LOCALAPPDATA%\Voxprint` or `~/.local/share/voxprint` directory. A same-volume move is a rename. A copy is checked, and the old directory is renamed to `.migrated-<date>` instead of being deleted. If both directories exist, the new one is used and the old one is left alone. `VOXPRINT_HOME` still wins and is not moved. `read_home()` opens the new directory, or the old one through version 0.3, without moving it. Absolute paths in `shared/manifest.json` are rewritten to the new directory. Relative paths stay as they are. `trt_cache_dir()` does not follow this move.
 
 ## Changes in 0.2.4

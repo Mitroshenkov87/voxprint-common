@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -18,8 +20,10 @@ from voxprint_common.suite_settings import (
     set_models_dir,
     set_theme,
     set_ui_language,
+    set_window_geometry,
     theme,
     ui_language,
+    window_geometry,
 )
 
 
@@ -206,3 +210,54 @@ def test_suite_settings_preserve_unknown_keys(
     assert models_dir() is None
     with pytest.raises(ValueError):
         set_gpu("cpu")
+
+
+def test_reader_keeps_the_last_good_suite_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    assert window_geometry() is None
+    set_ui_language("ru")
+    set_window_geometry(1100, 800, -4, 12)
+    assert file() == tmp_path / "state" / "suite.json"
+    assert window_geometry() == {"width": 1100, "height": 800, "x": -4, "y": 12}
+    target = file()
+    target.write_text("{", encoding="utf-8")
+    assert read()["ui_language"] == "ru"
+    assert window_geometry() == {"width": 1100, "height": 800, "x": -4, "y": 12}
+    target.write_text(json.dumps({"schema": 1, "gpu": "cuda:2"}) + "\n", encoding="utf-8")
+    assert read()["gpu"] == "cuda:2"
+    assert "ui_language" not in read()
+
+
+def test_two_processes_keep_both_suite_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    env = os.environ.copy()
+    env["VOXPRINT_HOME"] = str(tmp_path)
+    root = Path(__file__).resolve().parents[1] / "src"
+    env["PYTHONPATH"] = str(root) + os.pathsep + env.get("PYTHONPATH", "")
+    child = Path(__file__).with_name("suite_settings_child.py")
+    first = subprocess.Popen(
+        [sys.executable, str(child), "ui.expert_mode", "true"],
+        env=env,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    second = subprocess.Popen(
+        [sys.executable, str(child), "keep_awake_during_jobs", "false"],
+        env=env,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    first_code = first.wait(timeout=30)
+    second_code = second.wait(timeout=30)
+    first_err = first.stderr.read() if first.stderr is not None else ""
+    second_err = second.stderr.read() if second.stderr is not None else ""
+    assert first_code == 0, first_err
+    assert second_code == 0, second_err
+    saved = json.loads(file().read_text(encoding="utf-8"))
+    assert saved["ui.expert_mode"] is True
+    assert saved["keep_awake_during_jobs"] is False
+    assert not list(file().parent.glob(".suite.json.*.tmp"))
