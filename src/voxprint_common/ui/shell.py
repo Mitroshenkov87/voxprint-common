@@ -13,12 +13,15 @@ and the palette scorer.
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Callable, Mapping
 from html import escape
 from pathlib import Path
 from typing import assert_never
 
 from voxprint_common.i18n import set_language, tr
-from voxprint_common.ui.commands import Registry, reference_commands
+from voxprint_common.paths import state_dir as suite_state_dir
+from voxprint_common.suite_settings import set_expert_mode, set_window_geometry, ui_geometry
+from voxprint_common.ui.commands import CommandSpec, Registry, reference_commands
 from voxprint_common.ui.dock import (
     Activate,
     Close,
@@ -26,6 +29,7 @@ from voxprint_common.ui.dock import (
     DockHistory,
     Float,
     Layout,
+    PanelSpec,
     Permissions,
     ResizeSplit,
     SetStackOpen,
@@ -36,7 +40,9 @@ from voxprint_common.ui.dock import (
     Stack,
     Tabs,
     fit_toolbar,
+    visible_layout,
 )
+from voxprint_common.ui.expert import ExpertMode, active_contexts
 from voxprint_common.ui.keymap import (
     KeyMap,
     display_chord,
@@ -45,13 +51,39 @@ from voxprint_common.ui.keymap import (
     load_overrides,
 )
 from voxprint_common.ui.palette import score_text
-from voxprint_common.ui.theme import PRIMARY, TEXT, TEXT_MUTED, TEXT_ON_ACCENT, build_shell_style
+from voxprint_common.ui.safety import ReviewedOutput
+from voxprint_common.ui.sections import audiobook_sections
+from voxprint_common.ui.settings import SettingSpec, SettingType, reference_settings, spin_suffix
+from voxprint_common.ui.simple_image import (
+    Phase,
+    SimpleImageLayout,
+    SimpleImageWidget,
+)
+from voxprint_common.ui.theme import (
+    PRIMARY,
+    TEXT,
+    TEXT_MUTED,
+    TEXT_ON_ACCENT,
+    apply_shell_palette,
+    build_shell_style,
+    resolved_shell_light,
+)
+from voxprint_common.ui.variants import (
+    WINDOW_HEIGHT,
+    WINDOW_WIDTH,
+    ResultKind,
+    settings_for,
+    state_names,
+    surface_for,
+    variant_presets,
+)
 
 __all__ = [
     "ADOPTION",
     "ReferenceShell",
     "grab_shell",
     "reference_layout",
+    "reference_panels",
 ]
 
 ADOPTION = (
@@ -76,14 +108,41 @@ _TOOLBAR = (
 def reference_layout() -> Layout[str]:
     """Return the factory layout: prompt and layers, the centre, and history.
 
-    The centre panel is protected. Side splits around it are allowed.
+    Settings sits beside history. Advanced is an expert panel in that same
+    group. The centre panel is protected. Side splits around it are allowed.
+    Hiding Advanced does not remove it from the stored layout.
     """
     left = Tabs(["prompt", "layers"], 0)
     centre = Tabs([_CENTRE], 0)
-    history = Tabs(["history"], 0)
-    inner = Split(SplitAxis.HORIZONTAL, SplitSize.fixed_second(260.0), centre, history, 140.0)
+    right = Tabs(["history", "settings", "advanced"], 0)
+    inner = Split(SplitAxis.HORIZONTAL, SplitSize.fixed_second(260.0), centre, right, 140.0)
     root = Split(SplitAxis.HORIZONTAL, SplitSize.ratio(0.24), left, inner, 160.0)
     return Layout(root)
+
+
+def reference_panels() -> tuple[PanelSpec, ...]:
+    """Return the panels the reference shell knows, including expert ones."""
+    return (
+        PanelSpec("prompt", "shell.panel.prompt"),
+        PanelSpec("layers", "shell.panel.layers"),
+        PanelSpec("canvas", "shell.panel.canvas"),
+        PanelSpec("history", "shell.panel.history"),
+        PanelSpec("settings", "shell.panel.settings"),
+        PanelSpec("advanced", "shell.panel.advanced", expert=True),
+    )
+
+
+_MODIFIED: dict[str, tuple[str, object]] = {
+    "canvas": ("shell.steps", 24),
+    "lucent": ("shell.steps", 24),
+    "enlarge": ("shell.steps", 24),
+    "audiobook-builder": ("audio.loudness", -14.0),
+    "movie-dubber": ("audio.loudness", -14.0),
+    "clarity": ("video.crf", 20),
+    "plotweaver": ("text.temperature", 0.9),
+    "model-forge": ("tool.quant", "int4"),
+    "viewer": ("viewer.background", "grey"),
+}
 
 
 def grab_shell(
@@ -95,6 +154,18 @@ def grab_shell(
     palette_query: str = "",
     hot_split: bool = False,
     reveal_close: bool = False,
+    show_settings: bool = False,
+    expert: bool = False,
+    full_layout: bool = False,
+    result: bool = False,
+    modified: bool = False,
+    prompt: str = "A quiet hill at dusk",
+    app_id: str = "canvas",
+    sections: bool = False,
+    section_id: str = "",
+    wizard_id: str = "",
+    wizard_running: bool = False,
+    light: bool | None = None,
 ) -> None:
     """Paint the reference shell and save a PNG.
 
@@ -107,14 +178,47 @@ def grab_shell(
         palette_query: Filter typed into the palette after it opens.
         hot_split: Paint the root divider in the drag colour.
         reveal_close: Show the close control on the first closable tab.
+        show_settings: Select the Settings panel before the grab.
+        expert: Turn Expert mode on before the grab.
+        full_layout: Show the dock. This also turns Expert mode on.
+        result: Show four neutral gradients as finished pictures.
+        modified: Hand-edit steps so Quality shows a changed chip and Reset.
+        prompt: Words placed in the input when ``result`` is true.
+        app_id: Which app surface to draw. ``canvas`` is the image screen.
+        sections: Draw the Audiobook Builder section demo.
+        section_id: Section to select when ``sections`` is true.
+        wizard_id: Wizard to open when ``sections`` is true.
+        wizard_running: Advance that wizard to its running step and show progress.
+        light: Force the light theme. None follows ``ui.theme``.
     """
     set_language(language)
+    set_expert_mode(expert or full_layout)
     _qt()
     widgets = _widgets()
     app = widgets.QApplication.instance() or widgets.QApplication([])
-    shell = ReferenceShell(glass=glass)
-    shell.resize(1100, 700)
+    shell = ReferenceShell(
+        glass=glass,
+        full_layout=full_layout,
+        state_dir=path.parent / "state" / path.stem,
+        app=app_id,
+        sections=sections,
+        light=light,
+    )
+    shell.resize(1200, 900)
     shell.show()
+    app.processEvents()
+    if show_settings:
+        if shell.full_layout:
+            shell.show_panel("settings")
+        else:
+            shell.run("view.settings")
+    if result and not shell.full_layout:
+        shell.show_result(prompt, pictures=4)
+    if modified and not shell.full_layout:
+        key, value = _MODIFIED.get(app_id, ("shell.steps", 24))
+        shell.image.set_value(key, value)
+        shell.simple.refresh()
+    shell.resize(1200, 900)
     app.processEvents()
     if show_palette:
         shell.open_palette()
@@ -127,21 +231,134 @@ def grab_shell(
     if reveal_close:
         shell._reveal_one_close()
         app.processEvents()
+    if sections and shell.image.sections is not None:
+        if prompt:
+            shell.simple.set_prompt_text(prompt)
+        deck = shell.image.sections
+        if wizard_id:
+            deck.open_wizard(wizard_id)
+            if wizard_running:
+                shell.image.set_value("train.sample", "sample.wav")
+                deck.advance()
+                shell.image.set_value("train.name", "Anya")
+                deck.advance()
+                deck.note_progress(2, 5, tr("wizard.train.running"))
+        elif section_id:
+            deck.select(section_id)
+        shell.simple.refresh()
+        app.processEvents()
     path.parent.mkdir(parents=True, exist_ok=True)
     shell.grab().save(str(path))
     shell.close()
     app.processEvents()
 
 
+class _ReferenceReview:
+    """Review hook for the reference shell's placeholder pictures."""
+
+    def review_prompt(self, prompt: str) -> str | None:
+        """Allow the placeholder prompt.
+
+        Args:
+            prompt: The words in the prompt box.
+        """
+        return None
+
+    def review_result(self, prompt: str, item_id: str, output: ReviewedOutput) -> str | None:
+        """Allow the placeholder picture.
+
+        Args:
+            prompt: The words that produced the picture.
+            item_id: The id assigned to the picture.
+            output: The picture, as a path or as bytes and a mime type.
+        """
+        del output
+        return None
+
+
+def _checkpoint_blob(wizard_id: str, step_id: str) -> dict[str, str]:
+    """Return the app blob for this step.
+
+    The shell writes the blob into the checkpoint and does not look inside it.
+
+    Args:
+        wizard_id: Open wizard.
+        step_id: Open step.
+    """
+    return {"wizard": wizard_id, "step": step_id}
+
+
+def _restore_checkpoint(wizard_id: str, step_id: str, blob: Mapping[str, object]) -> None:
+    """Hand a stored blob back to the app.
+
+    There is no training step here. The app owns whatever the blob means.
+
+    Args:
+        wizard_id: Wizard that was open.
+        step_id: Step that was open.
+        blob: The object ``capture`` returned.
+    """
+    del wizard_id, step_id, blob
+
+
 class ReferenceShell:
     """The reference window. Construction imports PySide6."""
 
-    def __init__(self, *, glass: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        glass: bool = False,
+        full_layout: bool = False,
+        state_dir: Path | None = None,
+        app: str = "canvas",
+        sections: bool = False,
+        light: bool | None = None,
+        on_pause: Callable[[], None] | None = None,
+        on_resume: Callable[[], None] | None = None,
+    ) -> None:
+        """Build the reference window.
+
+        Args:
+            glass: Use the translucent window background.
+            full_layout: Show the dock. This also turns Expert mode on.
+            state_dir: Directory for the history. None uses the app directory
+                under the suite State dir.
+            app: Which simple screen to show. ``canvas`` is the image screen.
+            sections: Use the Audiobook Builder section demo on that audio screen.
+            light: Force the light theme. None follows ``ui.theme``.
+            on_pause: Busy-screen Pause. None hides that button.
+            on_resume: Busy-screen Resume. None hides that button.
+        """
+        if sections and app != "audiobook-builder":
+            raise ValueError("sections are the Audiobook Builder demo")
         qt, gui, widgets = _qt()
         self._qt = qt
         self._gui = gui
         self._widgets = widgets
         self.history = DockHistory(reference_layout())
+        self.expert = ExpertMode()
+        self.surface = surface_for(app)
+        history_dir = suite_state_dir() / self.surface.app_id if state_dir is None else state_dir
+        self._section_set = audiobook_sections() if sections else None
+        self.settings = settings_for(self.surface)
+        if self._section_set is not None:
+            self.settings = self._section_set.settings
+        settings_file, history_file = state_names(self.surface)
+        self.image = SimpleImageLayout(
+            presets=variant_presets(self.surface, self.settings),
+            settings=self.settings,
+            state_dir=history_dir,
+            gate=_ReferenceReview(),
+            state_name=settings_file,
+            history_name=history_file,
+            section_set=self._section_set,
+            capture=_checkpoint_blob,
+            restore=_restore_checkpoint,
+            variant=self.surface.variant,
+        )
+        self.prompt_policy = self.image.prompt_policy()
+        self._picture_count = 0
+        self._stop_expert = lambda: None
         self.registry = Registry(reference_commands())
         overrides = load_overrides()
         self.keymap = KeyMap()
@@ -158,14 +375,24 @@ class ReferenceShell:
         self._press_sizes: dict[tuple[bool, ...], tuple[int, ...]] = {}
         self._toolbar_available: int | None = None
         self._palette_query = ""
+        self._chrome_ready = False
+        self._geometry_ready = False
+        self._fitting_geometry = False
+        self._status_time = False
         self.widget = widgets.QWidget()
         self.widget.setObjectName("shell")
         self.widget.setFocusPolicy(qt.StrongFocus)
         self.widget.setAttribute(qt.WA_StyledBackground, True)
-        self.widget.setStyleSheet(build_shell_style(glass))
+        use_light = resolved_shell_light() if light is None else light
+        self.widget.setStyleSheet(build_shell_style(glass, light=use_light))
+        apply_shell_palette(widgets.QApplication.instance() or self.widget, light=use_light)
+        apply_shell_palette(self.widget, light=use_light)
         self.widget.setWindowTitle(tr("shell.window.title"))
         self._status = widgets.QLabel(tr("shell.status.ready"))
         self._status.setObjectName("status")
+        self._expert_chip = widgets.QLabel(tr("shell.status.expert"))
+        self._expert_chip.setObjectName("expertChip")
+        self._expert_chip.setVisible(self.expert.enabled())
         self._toolbar = widgets.QWidget()
         self._dock = widgets.QWidget()
         self._palette = widgets.QFrame(self.widget)
@@ -182,11 +409,76 @@ class ReferenceShell:
         self._hits.currentRowChanged.connect(self._sync_palette_selection)
         self._empty = widgets.QLabel(tr("shell.palette.empty"))
         self._empty.setObjectName("panel")
+        self._on_pause = on_pause
+        self._on_resume = on_resume
         self._build_chrome()
         self._build_palette()
         self._install_shortcuts()
         self._install_resize_watch()
+        self._stop_expert = self.expert.subscribe(self._on_expert)
+        if full_layout:
+            self.expert.set_enabled(True)
+            self.image.request_full_layout(True, expert=self.expert.enabled())
+            self._fill_menus()
+            self._sync_shortcuts()
+            self._apply_surface()
+        self._chrome_ready = True
         self.rebuild()
+        self._apply_geometry()
+
+    def _apply_geometry(self) -> None:
+        """Use 1200 by 900 the first time, then the saved geometry.
+
+        The minimum is the variant's. A saved edge that is smaller is raised
+        to that minimum. Maximized and fullscreen are restored. The saved file
+        is left unchanged until the window moves or is resized.
+        """
+        minimum_width = self.surface.min_width
+        minimum_height = self.surface.min_height
+        self._fitting_geometry = True
+        self.widget.setMinimumSize(minimum_width, minimum_height)
+        stored = ui_geometry()
+        if stored is None:
+            self.widget.resize(WINDOW_WIDTH, WINDOW_HEIGHT)
+        else:
+            self.widget.resize(
+                max(minimum_width, int(stored["w"])),
+                max(minimum_height, int(stored["h"])),
+            )
+            self.widget.move(int(stored["x"]), int(stored["y"]))
+            if stored["fullscreen"]:
+                self.widget.showFullScreen()
+            elif stored["maximized"]:
+                self.widget.showMaximized()
+        self._fitting_geometry = False
+        self._geometry_ready = True
+
+    def _save_geometry(self) -> None:
+        widget = self.widget
+        state = widget.windowState()
+        set_window_geometry(
+            widget.width(),
+            widget.height(),
+            widget.x(),
+            widget.y(),
+            maximized=bool(state & self._qt.WindowMaximized),
+            fullscreen=bool(state & self._qt.WindowFullScreen),
+        )
+
+    def _sync_time_left(self) -> None:
+        """Show remaining time on the status row only when a job supplied it."""
+        seconds = self.image.eta_seconds if self.image.phase is Phase.BUSY else None
+        if seconds is None:
+            if self._status_time:
+                self._status.setText(tr("shell.status.ready"))
+                self._status_time = False
+            return
+        self._status_time = True
+        if seconds >= 60:
+            minutes = max(1, round(seconds / 60))
+            self._status.setText(tr("simple.progress.eta_minutes", minutes=minutes))
+            return
+        self._status.setText(tr("simple.progress.eta_seconds", seconds=seconds))
 
     def resize(self, width: int, height: int) -> None:
         """Resize the window.
@@ -204,6 +496,7 @@ class ReferenceShell:
 
     def close(self) -> None:
         """Hide and close the window."""
+        self._stop_expert()
         app = self._widgets.QApplication.instance()
         if app is not None:
             with contextlib.suppress(RuntimeError):
@@ -249,6 +542,7 @@ class ReferenceShell:
             return
         if command_id == "file.save":
             self._status.setText(tr("shell.status.saved"))
+            self.simple.set_note(tr("shell.status.saved"))
             return
         if command_id == "edit.undo":
             self._history_step(self.history.undo)
@@ -265,6 +559,167 @@ class ReferenceShell:
         if command_id == "view.focus_canvas":
             self._activate(_CENTRE)
             return
+        if command_id == "view.toggle_expert_mode":
+            self.expert.toggle()
+            return
+        if command_id == "file.open_folder":
+            self._status.setText(tr("simple.menu.open_folder"))
+            self.simple.set_note(tr("simple.menu.open_folder"))
+            return
+        if command_id == "models.manage":
+            self._status.setText(tr("simple.menu.models"))
+            self.simple.set_note(tr("simple.menu.models"))
+            return
+        if command_id == "install.enlarge":
+            self._status.setText(tr("simple.output.install"))
+            self.simple.set_note(tr("simple.output.install"))
+            return
+        if command_id == "view.settings":
+            if self.full_layout:
+                self.show_panel("settings")
+                return
+            self._status.setText(tr("simple.menu.settings"))
+            self.simple.set_note(tr("simple.menu.settings"))
+            return
+
+    def show_panel(self, panel: str) -> None:
+        """Select ``panel`` and paint the dock again.
+
+        Args:
+            panel: Panel id in the stored layout.
+        """
+        self.active = panel
+        try:
+            self.history.layout.apply(Activate(panel))
+        except DockError:
+            return
+        self.rebuild()
+        self._sync_shortcuts()
+
+    @property
+    def full_layout(self) -> bool:
+        """Return whether the dock is on screen. It stays off in simple mode."""
+        return self.image.dock_visible(expert=self.expert.enabled())
+
+    def set_full_layout(self, enabled: bool) -> None:
+        """Show the dock, or return to the simple screen.
+
+        The dock is ignored unless Expert mode is on. Turning Expert mode off
+        clears this choice.
+
+        Args:
+            enabled: True asks for the dock.
+        """
+        self.image.request_full_layout(enabled, expert=self.expert.enabled())
+        self._fill_menus()
+        self._apply_surface()
+        if self.full_layout:
+            self.rebuild()
+
+    def show_result(self, prompt: str, *, pictures: int | None = None) -> None:
+        """Finish pictures and show a neutral gradient for each one.
+
+        Args:
+            prompt: Words placed in the prompt box.
+            pictures: How many to finish. None uses the count preset.
+        """
+        if pictures is not None and "count" in self.image.presets:
+            self.image.choose("count", str(pictures))
+        self.prompt_policy = self.image.prompt_policy()
+        self.simple.set_prompt_text(prompt)
+        if self.image.phase is Phase.BUSY:
+            self.image.cancel()
+        if not self.image.generate():
+            return
+        extra = pictures if pictures is not None and "count" not in self.image.presets else None
+        self._finish_batch("preview", total=extra)
+
+    def _complete_picture(self, _settings: Mapping[str, object]) -> None:
+        self.prompt_policy = self.image.prompt_policy()
+        core = _qt_core()
+        core.QTimer.singleShot(0, lambda: self._finish_batch("picture"))
+
+    def _improve_prompt(self, text: str) -> str:
+        """Collapse repeated spaces in the same prompt field.
+
+        Args:
+            text: The words currently in the prompt box.
+        """
+        return " ".join(text.split())
+
+    def _on_history(self, action: str, _item_id: str) -> None:
+        """Record a history action on the status line.
+
+        Args:
+            action: ``open``, ``show_folder``, ``copy``, or ``use_input``.
+            _item_id: History item id. The widget already applied the action.
+        """
+        notes = {
+            "open": "simple.history.opened",
+            "show_folder": "simple.history.shown",
+            "copy": "simple.copied",
+            "use_input": "simple.history.using",
+        }
+        key = notes.get(action)
+        if key is None:
+            return
+        self._status.setText(tr(key))
+
+    def _apply_seed(self, seed: int) -> None:
+        """Put a restored seed into the expert field.
+
+        Args:
+            seed: The number copied from a history item.
+        """
+        self.image.seed = seed
+        self._write_seed()
+
+    def _read_seed(self) -> None:
+        spin = self.find("QSpinBox", "shell.seed")
+        if spin is not None and spin.isVisible():  # type: ignore[attr-defined]
+            self.image.seed = int(spin.value())  # type: ignore[attr-defined]
+
+    def _write_seed(self) -> None:
+        spin = self.find("QSpinBox", "shell.seed")
+        if spin is not None:
+            spin.setValue(int(self.image.seed))  # type: ignore[attr-defined]
+
+    def _finish_batch(self, prefix: str, *, total: int | None = None) -> None:
+        if self.image.phase is not Phase.BUSY:
+            return
+        self._read_seed()
+        count = self.image.batch_size() if total is None else total
+        total = count
+        for index in range(total):
+            if index > 0 and not self.image.generate():
+                break
+            self._picture_count += 1
+            if (
+                self.image.finish(
+                    f"{prefix}-{self._picture_count}",
+                    ReviewedOutput(data=b"placeholder", mime="image/png"),
+                )
+                is None
+            ):
+                break
+        if self.surface.video_result and self.image.phase is Phase.READY:
+            source = self.image.video_source.strip() or self.image.prompt.strip()
+            stem = Path(source).stem or "film"
+            self.image.set_video_output(f"/films/{stem}/dubbed.mp4")
+        if (
+            self.surface.result_kind is ResultKind.PLAYER
+            and not self.surface.video_result
+            and self.image.phase is Phase.READY
+        ):
+            stem = Path(self.image.prompt.strip()).stem or "book"
+            self.image.set_audio_output(f"/books/{stem}/audiobook.wav")
+            self.image.set_chapters(
+                (
+                    (tr("simple.chapter.1"), 0),
+                    (tr("simple.chapter.2"), 75_000),
+                )
+            )
+        self.simple.refresh(prompt=True)
 
     def rebuild(self) -> None:
         """Paint the current dock tree again."""
@@ -279,10 +734,11 @@ class ReferenceShell:
             if widget is not None:
                 widget.hide()
                 widget.deleteLater()
-        root = self.history.layout.root
+        view = self._view()
+        root = view.root
         if root is not None:
             layout.addWidget(self._mount(root, ()))
-        self._mount_floats()
+        self._mount_floats(view)
         self._fill_toolbar()
         if self._palette.isVisible():
             self._palette.raise_()
@@ -291,33 +747,85 @@ class ReferenceShell:
     def _build_chrome(self) -> None:
         widgets = self._widgets
         root = widgets.QVBoxLayout(self.widget)
-        root.setContentsMargins(12, 10, 12, 8)
-        root.setSpacing(8)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+        self.simple = SimpleImageWidget(
+            self.image,
+            self.settings,
+            on_generate=self._complete_picture,
+            on_command=self.run,
+            on_improve=self._improve_prompt,
+            on_history=self._on_history,
+            on_seed=self._apply_seed,
+            on_refresh=self._sync_time_left,
+            on_pause=self._on_pause,
+            on_resume=self._on_resume,
+            surface=self.surface,
+        )
+        root.addWidget(self.simple.root, 1)
+        self._dock_host = widgets.QWidget()
+        self._dock_host.setObjectName("dockHost")
+        host = widgets.QVBoxLayout(self._dock_host)
+        host.setContentsMargins(12, 10, 12, 8)
+        host.setSpacing(8)
         title = widgets.QLabel(tr("shell.window.title"))
         title.setObjectName("titlebar")
-        root.addWidget(title)
+        host.addWidget(title)
         menu_bar = widgets.QMenuBar()
         file_menu = menu_bar.addMenu(tr("shell.menu.file"))
         edit_menu = menu_bar.addMenu(tr("shell.menu.edit"))
         view_menu = menu_bar.addMenu(tr("shell.menu.view"))
-        self._add_action(file_menu, "file.save", "command.file.save")
-        self._add_action(edit_menu, "edit.undo", "command.edit.undo")
-        self._add_action(edit_menu, "edit.redo", "command.edit.redo")
-        self._add_action(view_menu, "view.palette", "command.view.palette")
-        self._add_action(view_menu, "view.close_panel", "command.view.close_panel")
-        self._add_action(view_menu, "view.float_panel", "command.view.float_panel")
-        self._add_action(view_menu, "view.focus_canvas", "command.view.focus_canvas")
-        root.addWidget(menu_bar)
-        root.addWidget(self._toolbar)
-        root.addWidget(self._dock, 1)
-        root.addWidget(self._status)
+        host.addWidget(menu_bar)
+        host.addWidget(self._toolbar)
+        host.addWidget(self._dock, 1)
+        status_row = widgets.QWidget()
+        self._status_layout = widgets.QHBoxLayout(status_row)
+        self._status_layout.setContentsMargins(0, 0, 0, 0)
+        self._status_layout.setSpacing(8)
+        self._status_layout.addWidget(self._status, 1)
+        host.addWidget(status_row)
+        root.addWidget(self._dock_host, 1)
+        self._file_menu = file_menu
+        self._edit_menu = edit_menu
+        self._view_menu = view_menu
+        self._fill_menus()
+        self._apply_surface()
 
-    def _add_action(self, menu: object, command_id: str, title_key: str) -> None:
-        spec = self.registry.get(command_id)
-        label = tr(title_key)
-        if spec is not None and spec.chord:
+    def _apply_surface(self) -> None:
+        dock = self.full_layout
+        self._dock_host.setVisible(dock)
+        self.simple.root.setVisible(not dock)
+        self.simple.set_expert(self.expert.enabled() and not dock)
+        if dock:
+            chip = self._expert_chip
+            chip.setMinimumSize(0, 0)
+            chip.setMaximumSize(16777215, 16777215)
+            if self._status_layout.indexOf(chip) < 0:
+                self._status_layout.addWidget(chip)
+        else:
+            self.simple.place_chip(self._expert_chip)
+        self._expert_chip.setText(tr("shell.status.expert"))
+        self._expert_chip.setVisible(self.expert.enabled())
+        self._write_seed()
+
+    def _fill_menus(self) -> None:
+        self._file_menu.clear()
+        self._edit_menu.clear()
+        self._view_menu.clear()
+        for spec in self.registry.visible(expert=self.expert.enabled()):
+            if spec.command_id.startswith("file."):
+                self._add_action(self._file_menu, spec)
+            elif spec.command_id.startswith("edit."):
+                self._add_action(self._edit_menu, spec)
+            elif spec.command_id.startswith("view."):
+                self._add_action(self._view_menu, spec)
+
+    def _add_action(self, menu: object, spec: CommandSpec) -> None:
+        label = tr(spec.title_key)
+        if spec.chord:
             label = f"{label}\t{display_chord(spec.chord)}"
         action = menu.addAction(label)  # type: ignore[attr-defined]
+        command_id = spec.command_id
         action.triggered.connect(lambda _checked=False, command=command_id: self.run(command))
 
     def _build_palette(self) -> None:
@@ -358,12 +866,34 @@ class ReferenceShell:
         self._palette.hide()
         self.run(command_id)
 
+    def _contexts(self) -> tuple[str, ...]:
+        focused = ("canvas",) if self.active == _CENTRE else ()
+        return active_contexts(*focused, expert=self.expert.enabled())
+
+    def _on_expert(self, enabled: bool) -> None:
+        if not enabled:
+            self.image.request_full_layout(False, expert=False)
+        if not self._chrome_ready:
+            return
+        self._fill_menus()
+        if self.palette_open():
+            self._refill_palette(self._palette_query)
+        self._sync_shortcuts()
+        self.rebuild()
+        self._apply_surface()
+
+    def _view(self) -> Layout[str]:
+        return visible_layout(self.history.layout, reference_panels(), expert=self.expert.enabled())
+
     def _sync_shortcuts(self, *_widgets: object) -> None:
         text = self._text_focus()
-        active = ("global", "canvas") if self.active == _CENTRE else ("global",)
+        active = self._contexts()
+        expert_on = self.expert.enabled()
         for shortcut, command_id, when in self._shortcuts:
             spec = self.registry.get(command_id)
             allowed = spec is not None and self.registry.enabled(spec)
+            if spec is not None and spec.expert and not expert_on:
+                allowed = False
             if not allowed:
                 shortcut.setEnabled(False)  # type: ignore[attr-defined]
                 continue
@@ -374,9 +904,18 @@ class ReferenceShell:
 
     def _refill_palette(self, query: str) -> None:
         self._palette_query = query
+        for index in range(self._hits.count()):
+            item = self._hits.item(index)
+            widget = self._hits.itemWidget(item)
+            if widget is None:
+                continue
+            self._hits.removeItemWidget(item)
+            widget.hide()
+            widget.setParent(None)
+            widget.deleteLater()
         self._hits.clear()
         scored: list[tuple[int, str, str]] = []
-        for spec in self.registry:
+        for spec in self.registry.visible(expert=self.expert.enabled()):
             if not self.registry.enabled(spec):
                 continue
             label = tr(spec.title_key)
@@ -460,6 +999,7 @@ class ReferenceShell:
                 button.deleteLater()  # type: ignore[attr-defined]
                 continue
             button.clicked.connect(lambda _checked=False, command=command_id: self.run(command))  # type: ignore[attr-defined]
+            button.show()  # type: ignore[attr-defined]
             layout.addWidget(button)
         if overflow:
             for index in overflow:
@@ -468,6 +1008,7 @@ class ReferenceShell:
                 action.triggered.connect(
                     lambda _checked=False, command=command_id: self.run(command)
                 )
+            more.show()
             layout.addWidget(more)
         else:
             more.hide()
@@ -521,9 +1062,9 @@ class ReferenceShell:
             return
         self._activate(panels[index])
 
-    def _mount_floats(self) -> None:
+    def _mount_floats(self, view: Layout[str]) -> None:
         self._clear_floats()
-        for group in self.history.layout.floating:
+        for group in view.floating:
             card = self._widgets.QFrame(self.widget)
             card.setObjectName("float")
             card.setGeometry(*(int(value) for value in group.rect))
@@ -867,6 +1408,8 @@ def _match_indexes(text: str, query: str) -> set[int]:
 
 def _group_key(command_id: str) -> str:
     """Return the palette category key for a command id."""
+    if command_id in {"view.toggle_expert_mode", "view.settings"}:
+        return "shell.group.view"
     prefix = command_id.split(".", 1)[0]
     if prefix == "file":
         return "shell.group.file"
@@ -1002,6 +1545,12 @@ def _resize_watch(shell: ReferenceShell) -> object:
             kind = event.type()  # type: ignore[attr-defined]
             if kind == core.QEvent.Type.Resize and not shell._building:
                 shell._fill_toolbar()
+            if (
+                kind in {core.QEvent.Type.Resize, core.QEvent.Type.Move}
+                and shell._geometry_ready
+                and not shell._fitting_geometry
+            ):
+                shell._save_geometry()
             return False
 
     return _Watch(shell.widget)
@@ -1061,6 +1610,8 @@ def _tab_watch(bar: object, buttons: dict[int, object]) -> object:
 
 
 def _page(shell: ReferenceShell, panel: str) -> object:
+    if panel == "settings":
+        return _settings_page(shell)
     widgets = shell._widgets
     page = widgets.QWidget()
     layout = widgets.QVBoxLayout(page)
@@ -1078,6 +1629,86 @@ def _page(shell: ReferenceShell, panel: str) -> object:
     return page
 
 
+def _settings_page(shell: ReferenceShell) -> object:
+    """Build the Settings panel from the descriptors the current mode shows."""
+    widgets = shell._widgets
+    page = widgets.QWidget()
+    page.setObjectName("settings")
+    column = widgets.QVBoxLayout(page)
+    column.setContentsMargins(12, 8, 12, 8)
+    column.setSpacing(6)
+    group = ""
+    for spec in reference_settings().visible(expert=shell.expert.enabled()):
+        if spec.group != group:
+            group = spec.group
+            heading = widgets.QLabel(tr(f"setting.group.{group}"))
+            heading.setObjectName("settingGroup")
+            column.addWidget(heading)
+        control = _setting_control(shell, spec)
+        if spec.type is not SettingType.BOOL:
+            label = widgets.QLabel(tr(spec.label_key))
+            label.setObjectName("panel")
+            column.addWidget(label)
+        column.addWidget(control)
+    column.addStretch(1)
+    return page
+
+
+def _setting_control(shell: ReferenceShell, spec: SettingSpec) -> object:
+    widgets = shell._widgets
+    kind = spec.type
+    if kind is SettingType.BOOL:
+        box = widgets.QCheckBox(tr(spec.label_key))
+        box.setObjectName(spec.setting_id)
+        box.setChecked(spec.default is True)
+        control = box
+    elif kind is SettingType.ENUM:
+        combo = widgets.QComboBox()
+        combo.setObjectName(spec.setting_id)
+        selected = 0
+        for index, choice in enumerate(spec.choices):
+            combo.addItem(tr(choice.label_key), choice.value)
+            if choice.value == spec.default:
+                selected = index
+        combo.setCurrentIndex(selected)
+        control = combo
+    elif kind is SettingType.INT:
+        spin = widgets.QSpinBox()
+        spin.setObjectName(spec.setting_id)
+        spin.setRange(int(spec.minimum or 0), int(spec.maximum or 0))
+        spin.setValue(int(spec.default) if isinstance(spec.default, int) else 0)
+        suffix = spin_suffix(spec)
+        if suffix:
+            spin.setSuffix(suffix)
+        control = spin
+    elif kind is SettingType.FLOAT:
+        spin = widgets.QDoubleSpinBox()
+        spin.setObjectName(spec.setting_id)
+        spin.setRange(float(spec.minimum or 0), float(spec.maximum or 0))
+        spin.setSingleStep(0.1)
+        spin.setValue(float(spec.default) if isinstance(spec.default, int | float) else 0.0)
+        suffix = spin_suffix(spec)
+        if suffix:
+            spin.setSuffix(suffix)
+        control = spin
+    elif kind is SettingType.PATH:
+        edit = widgets.QLineEdit()
+        edit.setObjectName(spec.setting_id)
+        edit.setText(spec.default if isinstance(spec.default, str) else "")
+        control = edit
+    elif kind is SettingType.TEXT:
+        edit = widgets.QPlainTextEdit()
+        edit.setObjectName(spec.setting_id)
+        edit.setPlainText(spec.default if isinstance(spec.default, str) else "")
+        edit.setFixedHeight(64)
+        control = edit
+    else:
+        assert_never(kind)
+    if spec.expert:
+        control.setToolTip(tr(spec.help_key))  # type: ignore[attr-defined]
+    return control
+
+
 def _panel_title(panel: str) -> str:
     if panel == "prompt":
         return tr("shell.panel.prompt")
@@ -1087,6 +1718,10 @@ def _panel_title(panel: str) -> str:
         return tr("shell.panel.canvas")
     if panel == "history":
         return tr("shell.panel.history")
+    if panel == "settings":
+        return tr("shell.panel.settings")
+    if panel == "advanced":
+        return tr("shell.panel.advanced")
     return panel
 
 
@@ -1099,6 +1734,8 @@ def _panel_body(panel: str) -> str:
         return tr("shell.panel.canvas.body")
     if panel == "history":
         return tr("shell.panel.history.body")
+    if panel == "advanced":
+        return tr("shell.panel.advanced.body")
     return panel
 
 
@@ -1117,6 +1754,8 @@ def _command_label(command_id: str) -> str:
         return tr("command.view.float_panel")
     if command_id == "view.focus_canvas":
         return tr("command.view.focus_canvas")
+    if command_id == "view.toggle_expert_mode":
+        return tr("command.view.toggle_expert_mode")
     return command_id
 
 

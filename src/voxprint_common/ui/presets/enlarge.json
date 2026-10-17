@@ -1,0 +1,30 @@
+{
+  "schema": "voxprint-presets/1",
+  "groups": [
+    {
+      "id": "scale",
+      "label_key": "simple.preset.scale",
+      "default": "2x",
+      "options": [
+        {
+          "id": "2x",
+          "label_key": "simple.preset.scale.2x",
+          "values": {
+            "image.scale": 2
+          }
+        },
+        {
+          "id": "4x",
+          "label_key": "simple.preset.scale.4x",
+          "values": {
+            "image.scale": 4
+          },
+          "available": false,
+          "reason_key": "simple.output.4k.reason",
+          "action_label_key": "simple.output.install",
+          "action_id": "install.enlarge"
+        }
+      ]
+    }
+  ]
+}

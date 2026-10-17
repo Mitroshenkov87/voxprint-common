@@ -23,6 +23,8 @@ from voxprint_common.i18n import (
     tr_lang,
 )
 from voxprint_common.suite_settings import set_ui_language
+from voxprint_common.ui.tokens import tokens_path
+from voxprint_common.ui.variants import settings_for, surfaces
 
 _PLACEHOLDER = re.compile(r"\{[a-z_]+\}")
 _REQUIRED = {
@@ -124,6 +126,38 @@ def test_added_catalog_overrides_and_nested_keys(tmp_path: Path) -> None:
     assert "fr" in available_languages()
     assert available_languages()[:5] == LANGS
     reset()
+
+
+def test_catalogs_live_beside_tokens_and_fall_back_to_english(tmp_path: Path) -> None:
+    assert catalog_dir().parent == tokens_path().parent
+    assert catalog_dir().name == "locales"
+    folder = tmp_path / "locales"
+    folder.mkdir()
+    (folder / "en.json").write_text(json.dumps({"only.english": "Hill"}), encoding="utf-8")
+    add_catalogs(folder)
+    assert tr_lang("only.english", "ru") == "Hill"
+    assert tr_lang("missing.entirely", "de") == "missing.entirely"
+    reset()
+
+
+def test_preset_and_descriptor_label_keys_exist_in_english_and_russian() -> None:
+    english = _flat("en")
+    russian = _flat("ru")
+    keys: set[str] = set()
+    preset_dir = tokens_path().parent / "presets"
+    for path in preset_dir.glob("*.json"):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        for group in payload["groups"]:
+            keys.add(group["label_key"])
+            for option in group["options"]:
+                keys.add(option["label_key"])
+    for surface in surfaces():
+        for spec in settings_for(surface).visible(expert=True):
+            keys.add(spec.label_key)
+            for choice in spec.choices:
+                keys.add(choice.label_key)
+    missing = sorted(key for key in keys if key not in english or key not in russian)
+    assert keys and missing == []
 
 
 def test_catalogs_share_keys_and_placeholders() -> None:

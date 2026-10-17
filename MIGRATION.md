@@ -4,6 +4,12 @@ voxprint-common is a library. Each app bundles the wheel in its installer, or in
 
 Pin `voxprint-common==0.2.4`. The import package is `voxprint_common`. `voxprint_common.API` is `1`.
 
+## Changes in the next release
+
+Catalog files shipped with this package are `voxprint_common/ui/locales/<lang>.json`, beside `tokens.json`. `suite.json` stays at `<data home>/state/suite.json`. Writers lock `suite.json.lock` and replace one key at a time. The viewer configuration of `SimpleLayout` has no input and no primary action. Its window minimum is 640 by 400. Other shells stay at a 960 by 640 minimum and open at 1200 by 900 until a rectangle is saved in `ui.window`.
+
+`paths.home()` is `%LOCALAPPDATA%\VOXPrint AI Suite` on Windows and `$XDG_DATA_HOME/voxprint-ai-suite` (or `~/.local/share/voxprint-ai-suite`) on Linux. The first call moves an existing `%LOCALAPPDATA%\Voxprint` or `~/.local/share/voxprint` directory. A same-volume move is a rename. A copy is checked, and the old directory is renamed to `.migrated-<date>` instead of being deleted. If both directories exist, the new one is used and the old one is left alone. `VOXPRINT_HOME` still wins and is not moved. `read_home()` opens the new directory, or the old one through version 0.3, without moving it. Absolute paths in `shared/manifest.json` are rewritten to the new directory. Relative paths stay as they are. `trt_cache_dir()` does not follow this move.
+
 ## Changes in 0.2.4
 
 Call `release_component` to drop a shared ref. It will not delete the models root, the runtime, or any directory another app still lists in `models/.users.json`. `ready(app)` checks file sizes and does not trust `mdl-status.json` alone. `voxprint-mdl verify --repair` clears a bad manifest path without deleting files.
@@ -49,7 +55,7 @@ Call the functions below instead of the private copies. Leave app-specific behav
 
 ## paths
 
-`voxprint_common.paths` replaces the suite-directory helpers. `home()` is the old `voxprint_home()`. Nothing in this module creates directories.
+`voxprint_common.paths` replaces the suite-directory helpers. `home()` is the old `voxprint_home()`. It moves a legacy suite directory when one exists and does not create an empty directory. `read_home()` does not move or create directories.
 
 | App | Old module | What moves |
 |---|---|---|
@@ -307,6 +313,18 @@ The old 480-pixel square layout is retired. Lucent's C++ splash stays in Lucent.
 ## provenance
 
 `voxprint_common.provenance` is a documented stub. `embed_image`, `finalize`, and `detect` raise `ProvenanceUnavailable`. There was no per-app module to replace. Do not add watermark keys to `suite.json` in this version. `Report.NO_MARK_NOTE` is `no mark found does not prove the file is human-made`.
+
+## Expert mode
+
+Apps open in simple mode. `state/suite.json` key `ui.expert_mode` is false until the user turns it on. `voxprint_common.ui.expert.ExpertMode` reads and writes that bool and notifies listeners. Commands, panels, and settings take `expert: bool = False`. `Registry.visible`, `visible_layout`, and `Settings.visible` omit expert items while the mode is off. A hidden expert panel stays in the app's layout JSON.
+
+`view.toggle_expert_mode` has no default chord. Put it in the View menu and the command palette. A keymap `when` of `expert` runs only while the mode is on.
+
+Every app opens on `SimpleLayout` (`voxprint_common.ui.simple_image`). `SimpleImageLayout` is the same class. `surface_for(app_id)` in `voxprint_common.ui.variants` names the input, the action, the result, and the preset file. Pass that preset file (`voxprint-presets/1`) so the chips and the expert panel share one settings state. `reference_presets` loads the Canvas example: Quality, Style, Size, Output size, Detail, and Number of pictures. Example files for Enlarge, audio, video, text, and tool live beside it. Groups merge in file order. A later group owns a shared key. An image app's State directory keeps `image-settings.json` (values, the chosen preset, and overrides) and `image-history.json` (the last 50 results). Other variants use `audio-settings.json`, `video-settings.json`, `text-settings.json`, or `tool-settings.json`, and a matching history file. Expert mode adds a side panel and does not move the rest of that screen. The dock remains an API (`ReferenceShell(full_layout=True)`). The simple screen has no control that opens it. `progress(step, total, stage_label, eta_seconds=...)` is the shared progress block: stage, percent, estimate, and Cancel.
+
+Adult content (18+) is `image.adult_content` in the expert panel, default off. On allows adult content and leaves the prompt neutral. Off adds a general-audience template and negatives. The minors gate is not that setting. Implement `voxprint_common.ui.safety.SafetyGate` and pass it to `SimpleImageLayout`. The layout calls it before generating and after each result. A refusal, a raised error, or a missing gate blocks the picture. A setting id or preset key under `safety`, or one whose segment is minor, age, or guard, raises `ValueError`. There is no function that reads or writes a gate switch.
+
+Canvas adopts the shell, including this rule, before the other apps.
 
 ## Not in 0.1
 

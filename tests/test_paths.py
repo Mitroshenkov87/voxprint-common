@@ -16,9 +16,10 @@ from voxprint_common import paths
 def test_xdg_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("VOXPRINT_HOME", raising=False)
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
-    assert paths.home() == tmp_path / "voxprint"
-    assert paths.shared_dir() == tmp_path / "voxprint" / "shared"
-    assert paths.state_dir() == tmp_path / "voxprint" / "state"
+    assert paths.home() == tmp_path / "voxprint-ai-suite"
+    assert paths.shared_dir() == tmp_path / "voxprint-ai-suite" / "shared"
+    assert paths.state_dir() == tmp_path / "voxprint-ai-suite" / "state"
+    assert not paths.home().exists()
 
 
 @pytest.mark.posix
@@ -26,7 +27,10 @@ def test_xdg_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 def test_default_linux_home(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("VOXPRINT_HOME", raising=False)
     monkeypatch.delenv("XDG_DATA_HOME", raising=False)
-    assert paths.home() == Path.home() / ".local" / "share" / "voxprint"
+    assert paths.final_home() == Path.home() / ".local" / "share" / "voxprint-ai-suite"
+    assert paths.legacy_home() == Path.home() / ".local" / "share" / "voxprint"
+    monkeypatch.setenv("XDG_DATA_HOME", "relative")
+    assert paths.final_home() == Path.home() / ".local" / "share" / "voxprint-ai-suite"
 
 
 @pytest.mark.windows
@@ -34,7 +38,7 @@ def test_default_linux_home(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_localappdata_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("VOXPRINT_HOME", raising=False)
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
-    assert paths.home() == tmp_path / "Voxprint"
+    assert paths.home() == tmp_path / "VOXPrint AI Suite"
     assert paths.trt_cache_dir() == tmp_path / "Voxprint" / "trt-cache"
 
 

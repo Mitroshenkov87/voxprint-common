@@ -1,9 +1,10 @@
-"""Dark suite palette: yellow primary actions, soft blue menus and accents.
+"""Suite palette: yellow primary actions, soft blue menus and accents.
 
 Colours live in ``tokens.json`` (schema 1), loaded by
-:mod:`voxprint_common.ui.tokens`. Text colours are opaque. Panels and controls
-are nearly solid. Only the window background is translucent in the Acrylic
-stylesheet.
+:mod:`voxprint_common.ui.tokens`. ``voxprint-dark`` is the default map.
+``voxprint-light`` is the same roles for the light theme. Text colours are
+opaque. Panels and controls are nearly solid. Only the window background is
+translucent in the Acrylic stylesheet.
 
 :func:`build_style` is the wizard and download-window stylesheet. The editor
 shell uses :func:`build_shell_style` and the density block in the same file
@@ -13,13 +14,19 @@ map.
 The splash bar is not one of these tokens. Each app passes its own identity
 colour to :class:`voxprint_common.ui.splash.Splash`. Identity colours for the
 apps that have one are ``identity`` in ``tokens.json``.
+
+Qt fills a scroll area's viewport from ``QPalette.Base``, and a stylesheet
+background does not paint that viewport. :func:`apply_shell_palette` sets the
+application or shell palette from these tokens for the dark theme and the
+light theme, so every viewport an app creates is covered.
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
-from voxprint_common.ui.tokens import color_map, load
+from voxprint_common.ui.tokens import PALETTE_ROLES, color_map, load, role_map
 
 __all__ = [
     "ACCENT",
@@ -57,9 +64,13 @@ __all__ = [
     "TEXT_ON_ACCENT",
     "TEXT_ON_PRIMARY",
     "TOKENS",
+    "apply_shell_palette",
     "build_shell_style",
     "build_style",
     "contrast_ratio",
+    "light_contrast_pairs",
+    "palette_colors",
+    "resolved_shell_light",
     "tokens_path",
 ]
 
@@ -231,27 +242,184 @@ CONTRAST_PAIRS: list[tuple[str, str]] = [
 ]
 
 
-def build_shell_style(glass: bool, *, more: bool = False) -> str:
+def palette_colors(*, light: bool = False) -> dict[str, str]:
+    """Return ``QPalette`` role names and colours for one theme.
+
+    ``Base`` is the colour Qt uses to fill a scroll-area viewport. Dark and
+    light use :func:`voxprint_common.ui.tokens.role_map` on their colour map.
+    Neither base is Qt's ``#efefef``.
+
+    Args:
+        light: True selects ``voxprint-light``. False selects ``voxprint-dark``.
+
+    Returns:
+        Role name to ``#rrggbb``. ``DisabledText`` is included for the
+        disabled colour group and is not itself a palette role.
+    """
+    tokens = load()
+    colors = tokens.light_colors if light else tokens.colors
+    roles = role_map(colors)
+    roles["DisabledText"] = colors["TEXT_DISABLED"]
+    return roles
+
+
+def resolved_shell_light() -> bool:
+    """Return whether the shell should paint the light theme.
+
+    ``ui.theme`` is ``dark``, ``light``, or ``system``. Missing means dark.
+    ``system`` follows ``VOXPRINT_COLOR_SCHEME`` when that is ``dark`` or
+    ``light``, then the Qt colour scheme when an application exists, then dark.
+    """
+    from voxprint_common.suite_settings import ui_theme
+
+    choice = ui_theme()
+    if choice == "light":
+        return True
+    if choice == "dark":
+        return False
+    forced = os.environ.get("VOXPRINT_COLOR_SCHEME", "").strip().lower()
+    if forced == "light":
+        return True
+    if forced == "dark":
+        return False
+    return _system_scheme_is_light()
+
+
+def light_contrast_pairs() -> list[tuple[str, str]]:
+    """Return opaque pairs that must stay at or above WCAG AA on the light map."""
+    colors = load().light_colors
+    text = colors["TEXT"]
+    muted = colors["TEXT_MUTED"]
+    faint = colors["TEXT_FAINT"]
+    on_accent = colors["TEXT_ON_ACCENT"]
+    on_primary = colors["TEXT_ON_PRIMARY"]
+    return [
+        (text, colors["ROOT_PLAIN"]),
+        (text, colors["CARD_PLAIN"]),
+        (text, colors["CONTROL_BG"]),
+        (text, colors["CONTROL_HOVER"]),
+        (text, colors["MENU_BG"]),
+        (text, colors["MENU_SELECTION"]),
+        (text, colors["NOTE_BG"]),
+        (muted, colors["ROOT_PLAIN"]),
+        (muted, colors["CARD_PLAIN"]),
+        (faint, colors["ROOT_PLAIN"]),
+        (faint, colors["CARD_PLAIN"]),
+        (on_accent, colors["ACCENT"]),
+        (on_accent, colors["ACCENT_HOVER"]),
+        (on_accent, colors["ACCENT_SOFT"]),
+        (on_accent, colors["ACCENT_STRONG"]),
+        (on_primary, colors["PRIMARY"]),
+        (on_primary, colors["PRIMARY_HOVER"]),
+        (colors["PRIMARY_DISABLED_TEXT"], colors["PRIMARY_DISABLED_BG"]),
+        (colors["GREEN"], colors["CARD_PLAIN"]),
+        (colors["BADGE_GREEN_TEXT"], colors["GREEN"]),
+        (colors["AMBER"], colors["CARD_PLAIN"]),
+        (colors["AMBER"], colors["NOTE_BG"]),
+        (colors["AMBER"], colors["ROOT_PLAIN"]),
+        (colors["BADGE_AMBER_TEXT"], colors["AMBER"]),
+        (colors["RED"], colors["CARD_PLAIN"]),
+    ]
+
+
+def _system_scheme_is_light() -> bool:
+    """Return Qt's light colour scheme, or false when Qt is not running.
+
+    The import stays inside this function so a headless caller can import the
+    theme module without the ``ui`` extra.
+    """
+    try:
+        from PySide6 import QtCore, QtGui
+    except ImportError:
+        return False
+    app = QtGui.QGuiApplication.instance()
+    if app is None:
+        return False
+    scheme = app.styleHints().colorScheme()
+    return scheme == QtCore.Qt.ColorScheme.Light
+
+
+def apply_shell_palette(target: object, *, light: bool = False) -> None:
+    """Set ``target``'s palette from the suite tokens.
+
+    ``target`` is the ``QApplication`` or the shell window. Call this when the
+    shell applies its theme. A scroll area created afterwards, including one
+    an app creates itself, fills its viewport from this palette.
+
+    Args:
+        target: ``QApplication`` or ``QWidget``.
+        light: True selects the light theme. False selects the dark tokens.
+
+    The Qt import stays inside this function so importing the theme module
+    does not load PySide6.
+    """
+    gui = _theme_gui()
+    palette = gui.QPalette()
+    role = gui.QPalette.ColorRole
+    group = gui.QPalette.ColorGroup
+    colors = palette_colors(light=light)
+    for name in PALETTE_ROLES:
+        palette.setColor(getattr(role, name), gui.QColor(colors[name]))
+    muted = gui.QColor(colors["DisabledText"])
+    for name in ("WindowText", "Text", "ButtonText"):
+        palette.setColor(group.Disabled, getattr(role, name), muted)
+    target.setPalette(palette)  # type: ignore[attr-defined]
+
+
+def _theme_gui() -> object:
+    """Import ``PySide6.QtGui``.
+
+    The import stays inside this function so a headless caller can import the
+    theme module without the ``ui`` extra.
+    """
+    from PySide6 import QtGui
+
+    return QtGui
+
+
+def build_shell_style(glass: bool, *, more: bool = False, light: bool = False) -> str:
     """Return the editor-shell stylesheet.
 
-    Colours are the shared tokens. Sizes come from the density block: body
-    text, panel headers, and the control radius. Qt is not imported.
+    Colours are the shared tokens. ``light`` selects ``voxprint-light`` and
+    fills the same stylesheet slots the dark map fills. Sizes come from the
+    density block: body text, panel headers, the control radius, and the focus
+    ring. Text views, lists, trees, tables, and scroll-area viewports use
+    those tokens too. Qt is not imported.
 
     Args:
         glass: Use the translucent Acrylic backgrounds. False uses the solid
             fallback.
         more: Use the more-transparent Acrylic backgrounds. Ignored when
             ``glass`` is false.
+        light: Use ``voxprint-light``. False uses ``voxprint-dark``.
 
     Returns:
         A stylesheet string.
     """
+    chosen = dict(load().light_colors if light else load().colors)
+    TEXT = chosen["TEXT"]
+    TEXT_MUTED = chosen["TEXT_MUTED"]
+    TEXT_FAINT = chosen["TEXT_FAINT"]
+    TEXT_ON_PRIMARY = chosen["TEXT_ON_PRIMARY"]
+    PRIMARY = chosen["PRIMARY"]
+    PRIMARY_BORDER = chosen["PRIMARY_BORDER"]
+    ACCENT = chosen["ACCENT"]
+    CONTROL_BG = chosen["CONTROL_BG"]
+    CONTROL_HOVER = chosen["CONTROL_HOVER"]
+    CONTROL_BORDER = chosen["CONTROL_BORDER"]
     if glass and more:
-        root_bg, card_bg = ROOT_GLASS_MORE, CARD_GLASS_MORE
+        root_bg = chosen["ROOT_GLASS_MORE"]
+        card_bg = chosen["CARD_GLASS_MORE"]
     elif glass:
-        root_bg, card_bg = ROOT_GLASS, CARD_GLASS
+        root_bg = chosen["ROOT_GLASS"]
+        card_bg = chosen["CARD_GLASS"]
     else:
-        root_bg, card_bg = ROOT_PLAIN, CARD_PLAIN
+        root_bg = chosen["ROOT_PLAIN"]
+        card_bg = chosen["CARD_PLAIN"]
+    view_bg = CONTROL_BG
+    view_text = TEXT
+    view_alt = chosen["CARD_PLAIN"]
+    scroll_bg = card_bg
     density = load().density
     radius = density.control_radius_px
     return f"""
@@ -259,7 +427,31 @@ def build_shell_style(glass: bool, *, more: bool = False) -> str:
 QWidget#shell {{ background: {root_bg}; }}
 QLabel#titlebar {{ font-size: 15px; font-weight: 600; background: transparent; }}
 QLabel#status {{ color: {TEXT_MUTED}; background: transparent; }}
-QLabel#panel {{ background: transparent; }}
+QLabel#expertChip {{
+    color: {TEXT}; background: {CONTROL_BG};
+    border: {density.border_px}px solid {ACCENT};
+    border-radius: {radius}px; padding: 1px 8px; font-size: 11px;
+}}
+QLabel#expertTitle {{
+    color: {TEXT}; font-size: 15px; font-weight: 600; background: transparent;
+}}
+QLabel#settingGroup {{
+    color: {TEXT}; font-size: 15px; font-weight: 600; background: transparent;
+    padding: 10px 0 2px 0;
+}}
+QLabel#panel {{ color: {TEXT}; background: transparent; }}
+QCheckBox {{ background: transparent; spacing: 8px; color: {TEXT}; }}
+QCheckBox::indicator {{
+    width: 16px; height: 16px; border-radius: 3px;
+    border: {density.border_px}px solid {CONTROL_BORDER}; background: {CONTROL_BG};
+}}
+QCheckBox::indicator:checked {{
+    background: {PRIMARY}; border-color: {PRIMARY_BORDER};
+}}
+QSpinBox, QDoubleSpinBox, QComboBox {{
+    background: {CONTROL_BG}; border: {density.border_px}px solid {CONTROL_BORDER};
+    border-radius: {radius}px; padding: 2px 6px; min-height: {density.panel_header_px}px;
+}}
 QFrame#dock {{
     background: {card_bg}; border: {density.border_px}px solid {CONTROL_BORDER};
     border-radius: {radius}px;
@@ -329,6 +521,221 @@ QToolButton#tabClose {{
     min-height: 14px; max-height: 14px;
 }}
 QToolButton#tabClose:hover {{ background: {CONTROL_HOVER}; }}
+QPlainTextEdit {{
+    background: {CONTROL_BG}; color: {TEXT};
+    border: {density.border_px}px solid {CONTROL_BORDER};
+    border-radius: {radius}px; padding: 8px;
+    selection-background-color: {ACCENT};
+}}
+QPlainTextEdit#promptBox {{ font-size: 16px; padding: 10px 12px; }}
+QPushButton#generate {{
+    background: {PRIMARY}; color: {TEXT_ON_PRIMARY};
+    border: {density.border_px}px solid {PRIMARY_BORDER};
+    border-radius: 8px; font-size: 16px; font-weight: 600; padding: 8px 18px;
+}}
+QPushButton#generate:disabled {{
+    background: {CONTROL_BG}; color: {TEXT_MUTED}; border-color: {CONTROL_BORDER};
+}}
+QLineEdit:focus, QPlainTextEdit:focus, QComboBox:focus, QSpinBox:focus,
+QDoubleSpinBox:focus, QListWidget:focus, QPushButton:focus {{
+    border: {density.focus_ring_px}px solid {ACCENT};
+}}
+QPushButton#primary:focus, QPushButton#generate:focus {{
+    border: {density.focus_ring_px}px solid {TEXT_ON_PRIMARY};
+}}
+QPushButton#overflow {{
+    background: {CONTROL_BG}; color: {TEXT};
+    border: {density.border_px}px solid {CONTROL_BORDER};
+    border-radius: {radius}px; padding: 2px 12px; min-height: 28px;
+}}
+QPushButton#overflow::menu-indicator {{ image: none; width: 0; }}
+QPushButton#expertToggle {{
+    background: {CONTROL_BG}; color: {TEXT_MUTED};
+    border: {density.border_px}px solid {CONTROL_BORDER};
+    border-radius: 14px; padding: 2px {density.chip_pad_px}px; min-height: 28px;
+}}
+QPushButton#expertToggle:checked {{
+    background: {PRIMARY}; color: {TEXT_ON_PRIMARY}; border-color: {PRIMARY_BORDER};
+    font-weight: 600;
+}}
+QWidget#actionBar QPushButton {{ min-height: 34px; padding: 4px 14px; }}
+QPushButton[chip="true"] {{
+    min-height: 30px; padding: 2px {density.chip_pad_px}px; border-radius: 15px;
+}}
+QPushButton[chip="true"]:checked {{
+    background: {PRIMARY}; color: {TEXT_ON_PRIMARY};
+    border-color: {PRIMARY_BORDER}; font-weight: 600;
+}}
+QPushButton[chip="true"]:disabled {{
+    background: {CONTROL_BG}; color: {TEXT_MUTED}; border-color: {CONTROL_BORDER};
+}}
+QPushButton[thumb="true"] {{ padding: 2px; border-radius: 8px; }}
+QPushButton[thumb="true"]:checked {{
+    border: 2px solid {PRIMARY}; background: {CONTROL_BG};
+}}
+QLabel#presetLabel, QLabel[presetLabel="true"], QLabel#emptyHint, QLabel#simpleNote {{
+    color: {TEXT_MUTED}; background: transparent;
+}}
+QLabel#emptyHint {{ font-size: 16px; }}
+QLabel#progressText, QLabel#blockedText, QLabel#featureText,
+QLabel#progressPercent, QLabel#progressEta, QLabel#chapters, QLabel#reportView {{
+    color: {TEXT}; font-size: 15px; background: transparent;
+}}
+QLabel#fileDrop, QLabel#sourceDrop {{
+    color: {TEXT_MUTED}; background: {CONTROL_BG};
+    border: {density.border_px}px dashed {CONTROL_BORDER};
+    border-radius: {radius}px; padding: 16px; font-size: 15px;
+}}
+QLabel#player, QLabel#compareBefore, QLabel#compareAfter {{ background: transparent; }}
+QPlainTextEdit#documentView {{ font-size: 16px; padding: 16px 18px; }}
+QLabel#result {{ background: transparent; }}
+QFrame#stage, QFrame#expertPanel, QFrame#settingsSheet {{
+    background: {card_bg}; border: {density.border_px}px solid {CONTROL_BORDER};
+    border-radius: 8px;
+}}
+QAbstractScrollArea > QWidget {{
+    background: {scroll_bg}; color: {view_text};
+}}
+QScrollArea {{
+    background: {scroll_bg}; border: none;
+}}
+QScrollArea > QWidget > QWidget {{
+    background: {scroll_bg}; color: {view_text};
+}}
+QTextEdit, QPlainTextEdit, QTextBrowser,
+QListView, QListWidget, QTreeView, QTreeWidget,
+QTableView, QTableWidget, QHeaderView {{
+    background: {view_bg}; color: {view_text};
+    alternate-background-color: {view_alt};
+}}
+QTextEdit > QWidget, QPlainTextEdit > QWidget, QTextBrowser > QWidget,
+QListView > QWidget, QListWidget > QWidget,
+QTreeView > QWidget, QTreeWidget > QWidget,
+QTableView > QWidget, QTableWidget > QWidget {{
+    background: {view_bg}; color: {view_text};
+}}
+QListWidget#paletteHits, QListWidget#paletteHits > QWidget {{
+    background: {card_bg}; color: {TEXT};
+}}
+QScrollArea#historyStrip, QScrollArea#expertScroll {{
+    background: {card_bg}; border: none;
+}}
+QScrollArea#historyStrip > QWidget > QWidget,
+QScrollArea#expertScroll > QWidget > QWidget,
+QWidget#historyRow, QWidget#expertForm {{
+    background: {card_bg}; color: {TEXT};
+}}
+QAbstractScrollArea QScrollBar:vertical {{
+    background: {card_bg}; width: 8px; margin: 0; border: none;
+}}
+QAbstractScrollArea QScrollBar::groove:vertical {{
+    background: {card_bg}; border: none; width: 8px;
+}}
+QAbstractScrollArea QScrollBar::handle:vertical {{
+    background: {CONTROL_BORDER}; min-height: 24px; border: none; border-radius: 4px;
+}}
+QAbstractScrollArea QScrollBar::handle:vertical:hover {{
+    background: {TEXT_FAINT};
+}}
+QAbstractScrollArea QScrollBar::add-line:vertical,
+QAbstractScrollArea QScrollBar::sub-line:vertical {{
+    height: 0; width: 0; background: {card_bg}; border: none;
+}}
+QAbstractScrollArea QScrollBar::up-arrow:vertical,
+QAbstractScrollArea QScrollBar::down-arrow:vertical {{
+    width: 0; height: 0; background: {card_bg}; border: none;
+}}
+QAbstractScrollArea QScrollBar::add-page:vertical,
+QAbstractScrollArea QScrollBar::sub-page:vertical {{
+    background: {card_bg}; border: none;
+}}
+QAbstractScrollArea QScrollBar:horizontal {{
+    background: {card_bg}; height: 8px; margin: 0; border: none;
+}}
+QAbstractScrollArea QScrollBar::groove:horizontal {{
+    background: {card_bg}; border: none; height: 8px;
+}}
+QAbstractScrollArea QScrollBar::handle:horizontal {{
+    background: {CONTROL_BORDER}; min-width: 24px; border: none; border-radius: 4px;
+}}
+QAbstractScrollArea QScrollBar::handle:horizontal:hover {{
+    background: {TEXT_FAINT};
+}}
+QAbstractScrollArea QScrollBar::add-line:horizontal,
+QAbstractScrollArea QScrollBar::sub-line:horizontal {{
+    height: 0; width: 0; background: {card_bg}; border: none;
+}}
+QAbstractScrollArea QScrollBar::left-arrow:horizontal,
+QAbstractScrollArea QScrollBar::right-arrow:horizontal {{
+    width: 0; height: 0; background: {card_bg}; border: none;
+}}
+QAbstractScrollArea QScrollBar::add-page:horizontal,
+QAbstractScrollArea QScrollBar::sub-page:horizontal {{
+    background: {card_bg}; border: none;
+}}
+QScrollArea#expertScroll QScrollBar:horizontal {{
+    height: 0; background: {card_bg}; border: none;
+}}
+QWidget#sectionBar {{ background: transparent; }}
+QPushButton#sectionTab {{
+    background: transparent; color: {TEXT_MUTED}; border: none; border-radius: 0;
+    border-bottom: 2px solid transparent; padding: 4px 12px; min-height: 28px;
+}}
+QPushButton#sectionTab:checked {{
+    color: {TEXT}; font-weight: 600; background: transparent;
+    border-bottom: 2px solid {ACCENT};
+}}
+QPushButton#sectionMore, QPushButton#sectionAction, QPushButton#sectionPreview {{
+    background: {CONTROL_BG}; color: {TEXT};
+    border: {density.border_px}px solid {CONTROL_BORDER};
+    border-radius: {radius}px; padding: 2px 12px; min-height: 28px;
+}}
+QPushButton#sectionMore::menu-indicator {{ image: none; width: 0; }}
+QPushButton#expertReset {{
+    background: transparent; color: {TEXT}; text-align: left;
+    border: {density.border_px}px solid {CONTROL_BORDER}; padding: 4px 10px;
+}}
+QSlider#compareSlider {{ background: transparent; }}
+QSlider#compareSlider::groove:horizontal {{
+    height: 0px; background: transparent; border: none;
+}}
+QSlider#compareSlider::add-page:horizontal, QSlider#compareSlider::sub-page:horizontal {{
+    background: transparent; border: none;
+}}
+QSlider#compareSlider::handle:horizontal {{
+    width: 4px; margin: -220px 0; background: {TEXT}; border: none; border-radius: 1px;
+}}
+QWidget#videoResult {{ background: transparent; }}
+QLabel#videoPoster {{
+    background: {CONTROL_BG}; color: {TEXT};
+    border: {density.border_px}px solid {CONTROL_BORDER}; border-radius: 8px;
+}}
+QLabel#videoPath {{ color: {TEXT}; background: transparent; }}
+QPushButton#videoPlay, QPushButton#videoOpen,
+QPushButton#audioPlay, QPushButton#audioOpen {{ padding: 4px 14px; min-height: 34px; }}
+QWidget#audioResult, QWidget#audioDeck {{ background: transparent; }}
+QLabel#audioPath {{ color: {TEXT}; background: transparent; }}
+QListWidget#audioChapters {{
+    background: {CONTROL_BG}; color: {TEXT};
+    border: {density.border_px}px solid {CONTROL_BORDER}; border-radius: {radius}px;
+}}
+QSlider#audioSeek::groove:horizontal {{
+    height: 6px; background: {CONTROL_BG}; border-radius: 3px;
+}}
+QSlider#audioSeek::handle:horizontal {{
+    background: {ACCENT}; width: 16px; margin: -6px 0; border-radius: 8px;
+}}
+QSlider#videoSeek::groove:horizontal {{
+    height: 6px; background: {CONTROL_BG}; border-radius: 3px;
+}}
+QSlider#videoSeek::handle:horizontal {{
+    background: {ACCENT}; width: 16px; margin: -6px 0; border-radius: 8px;
+}}
+QProgressBar#progress {{
+    border: none; background: {CONTROL_BG}; border-radius: 4px;
+    min-height: 8px; max-height: 8px;
+}}
+QProgressBar#progress::chunk {{ background: {PRIMARY}; border-radius: 4px; }}
 """
 
 

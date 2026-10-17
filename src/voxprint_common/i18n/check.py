@@ -18,7 +18,9 @@ The first language in ``--langs`` is the source catalog. Plural objects use
 one and other in English and German, one, few, many, and other in Russian and
 Ukrainian, and zero, one, and other in Latvian. Any other language is checked
 like English. A dynamic key such as ``f"mdl.source.{code}"`` counts as a use
-of every key under that prefix.
+of every key under that prefix. A JSON file in the source tree counts
+``label_key``, ``reason_key``, ``action_label_key``, and ``group_key`` as uses.
+Catalog files under a ``locales`` directory are not scanned that way.
 """
 
 from __future__ import annotations
@@ -112,6 +114,7 @@ _TEXT_KEYWORDS = frozenset(
         "windowTitle",
     }
 )
+_JSON_MESSAGE_KEYS = frozenset({"label_key", "reason_key", "action_label_key", "group_key"})
 _BRANDS = frozenset(
     {
         "Google Drive",
@@ -172,8 +175,10 @@ def check_tree(
     brands = _BRANDS | {item.strip() for item in allow if item.strip()}
     catalogs, load_errors = _load_locales(locales, codes)
     hardcoded, referenced, constants, prefixes = _scan_python(src, brands)
+    json_errors, json_keys = _scan_json_keys(src)
+    referenced.update(json_keys)
     catalog_errors, warnings = _catalog_issues(catalogs, referenced, constants, prefixes, codes)
-    errors = tuple(hardcoded + load_errors + catalog_errors)
+    errors = tuple(hardcoded + load_errors + json_errors + catalog_errors)
     return CheckResult(errors, tuple(warnings))
 
 
@@ -280,6 +285,39 @@ def _scan_python(
                 if _is_ui_call(node):
                     errors.extend(_hardcoded(path, root, lines, node, name, brands))
     return errors, referenced, constants, prefixes
+
+
+def _scan_json_keys(src: Path) -> tuple[list[str], set[str]]:
+    root = src if src.is_dir() else src.parent
+    if src.is_file():
+        files = [src] if src.suffix == ".json" else []
+    else:
+        files = sorted(path for path in src.rglob("*.json") if path.is_file())
+    errors: list[str] = []
+    found: set[str] = set()
+    for path in files:
+        if "locales" in path.parts:
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            errors.append(f"{_rel(path, root)}: {exc}")
+            continue
+        _collect_json_keys(payload, found)
+    return errors, found
+
+
+def _collect_json_keys(payload: object, found: set[str]) -> None:
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            if key in _JSON_MESSAGE_KEYS and isinstance(value, str) and value:
+                found.add(value)
+                continue
+            _collect_json_keys(value, found)
+        return
+    if isinstance(payload, list):
+        for item in payload:
+            _collect_json_keys(item, found)
 
 
 def _record_key(node: ast.Call, exact: set[str], prefixes: set[str]) -> None:

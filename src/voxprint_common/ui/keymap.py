@@ -5,7 +5,9 @@ macOS. The stored spelling is ``Mod+Shift+S``. On Windows and Linux,
 ``Ctrl`` is the same key as ``Mod`` and folds into it, so the two conflict.
 On macOS they stay distinct. A context binding beats a global binding while
 that context is active. A text field keeps the keys: only a ``when`` of
-``text`` runs there.
+``text`` runs there. ``when`` of ``expert`` runs only while that context is
+active, which is while Expert mode is on. A command tagged expert does not
+run while the mode is off.
 
 Invalid saved entries are dropped. Overrides live in the suite settings
 file under ``keymap``.
@@ -33,6 +35,7 @@ from voxprint_common.ui.commands import CommandSpec, Registry
 
 __all__ = [
     "MAX_ENTRIES",
+    "WHEN_EXPERT",
     "Assignment",
     "Conflict",
     "KeyMap",
@@ -44,6 +47,8 @@ __all__ = [
     "normalize",
     "save_overrides",
 ]
+
+WHEN_EXPERT = "expert"
 
 MAX_ENTRIES = 2000
 _MAX_KEY_LEN = 48
@@ -248,11 +253,14 @@ class KeyMap:
         active: Sequence[str] = ("global",),
         platform: str | None = None,
         text: bool = False,
+        expert: bool = False,
     ) -> CommandSpec | None:
         """Return the command ``chord`` runs, or None.
 
         A non-global context in ``active`` beats ``global``. While ``text``
-        is true, only a ``text`` binding runs.
+        is true, only a ``text`` binding runs. A command with ``expert`` set
+        runs only when ``expert`` is true. Include :data:`WHEN_EXPERT` in
+        ``active`` while Expert mode is on.
 
         Args:
             registry: Known commands.
@@ -260,6 +268,7 @@ class KeyMap:
             active: Contexts that are currently active, most general first.
             platform: Host used to fold ``Ctrl``.
             text: True when a text field has focus.
+            expert: True when Expert mode is on.
         """
         host = platform or host_platform()
         stored = _stored(chord, host)
@@ -278,13 +287,18 @@ class KeyMap:
             if specific:
                 for context in reversed(tuple(active)):
                     match = next((row for row in specific if row.when == context), None)
-                    if match is not None:
-                        spec = registry.get(match.command_id)
-                        if spec is not None and registry.enabled(spec):
-                            return spec
-                        return None
+                    if match is None:
+                        continue
+                    spec = registry.get(match.command_id)
+                    if _expert_hidden(spec, expert):
+                        continue
+                    if spec is not None and registry.enabled(spec):
+                        return spec
+                    return None
         for row in rows:
             spec = registry.get(row.command_id)
+            if _expert_hidden(spec, expert):
+                continue
             if spec is not None and registry.enabled(spec):
                 return spec
         return None
@@ -514,6 +528,10 @@ def _spec_chord(spec: CommandSpec, platform: str) -> str | None:
     if raw is None:
         return None
     return _stored(raw, platform)
+
+
+def _expert_hidden(spec: CommandSpec | None, expert: bool) -> bool:
+    return spec is not None and spec.expert and not expert
 
 
 def _builtin(registry: Registry, chord: str, when: str, platform: str) -> str | None:

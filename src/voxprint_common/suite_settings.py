@@ -12,6 +12,19 @@ key is preserved, so one app does not wipe another's settings.
   Missing or invalid values mean 2. The accepted range is 1 through 8.
 * ``keymap``: schema 1 overrides for the shared command chords. Bad entries
   are dropped by :mod:`voxprint_common.ui.keymap`. Other keys are preserved.
+* ``ui.expert_mode``: true or false. False, the default, is simple mode.
+  :class:`voxprint_common.ui.expert.ExpertMode` notifies listeners.
+* ``ui.theme``: ``dark``, ``light``, or ``system``. Missing means dark.
+  This is separate from ``theme``, which stays ``glass-dark``.
+* ``ui.geometry``: ``x``, ``y``, ``w``, ``h``, ``maximized``, and ``fullscreen``
+  for the last window. An older ``ui.window`` rectangle is copied here on read.
+  Missing means the app uses its first-launch size.
+
+Writers take ``suite.json.lock`` beside the file, read the latest object, and
+replace only the keys they changed. The publish is a temporary file in the
+same directory, an fsync, and ``os.replace``. A reader reloads when the file
+changes. A partial or invalid file is ignored and the last good object for
+that path is kept. A missing file is an empty object.
 
 ``VOXPRINT_MODELS_DIR`` is applied by :func:`voxprint_common.paths.models_dir`,
 not by the getters here.
@@ -34,6 +47,7 @@ __all__ = [
     "DEFAULT_THEME",
     "KEYS",
     "SCHEMA",
+    "expert_mode",
     "file",
     "gpu",
     "keep_awake_during_jobs",
@@ -42,6 +56,7 @@ __all__ = [
     "models_dir",
     "normalize_gpu",
     "read",
+    "set_expert_mode",
     "set_gpu",
     "set_keep_awake_during_jobs",
     "set_keymap",
@@ -49,21 +64,44 @@ __all__ = [
     "set_models_dir",
     "set_theme",
     "set_ui_language",
+    "set_ui_theme",
     "set_value",
+    "set_window_geometry",
     "theme",
+    "ui_geometry",
     "ui_language",
+    "ui_theme",
     "values",
+    "window_geometry",
 ]
 
 SCHEMA = 1
-KEYS = ("ui_language", "theme", "models_dir", "gpu", "keep_awake_during_jobs", "mdl_parallel_files")
+KEYS = (
+    "ui_language",
+    "theme",
+    "models_dir",
+    "gpu",
+    "keep_awake_during_jobs",
+    "mdl_parallel_files",
+    "ui.expert_mode",
+    "ui.theme",
+    "ui.window",
+    "ui.geometry",
+)
 DEFAULT_PARALLEL_FILES = 2
 DEFAULT_THEME = "glass-dark"
 THEMES = frozenset({DEFAULT_THEME})
+UI_THEMES = frozenset({"dark", "light", "system"})
+DEFAULT_UI_THEME = "dark"
 DEFAULT_GPU = "auto"
 _GPU_RE = re.compile(r"^cuda:(\d{1,2})$")
 _LANG_RE = re.compile(r"^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$")
 _LOCK_TIMEOUT = 30.0
+_WINDOW_KEYS = ("width", "height", "x", "y")
+_GEOMETRY_INTS = ("x", "y", "w", "h")
+_good_path: str | None = None
+_good_token: tuple[str, int, int] | None = None
+_good: dict[str, Any] = {}
 
 
 def file() -> Path:
@@ -74,19 +112,34 @@ def file() -> Path:
 def read() -> dict[str, Any]:
     """Return the suite file as a dict.
 
-    A missing file, a non-object, or unreadable text yields an empty dict.
-    A leading BOM is accepted.
+    A missing file yields an empty dict. A leading BOM is accepted. When the
+    file's size or modification time changes, it is read again. Unreadable
+    text, a partial document, or a value that is not an object is ignored, and
+    the last good object for this path is returned instead.
 
     Returns:
         The raw object. Keys this package does not interpret are included.
     """
+    global _good, _good_path, _good_token
+    path = file()
+    key = str(path)
     try:
-        payload = json.loads(file().read_text(encoding="utf-8-sig"))
+        stat = path.stat()
+    except OSError:
+        return {}
+    token = (key, stat.st_mtime_ns, stat.st_size)
+    if token == _good_token:
+        return dict(_good)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
     except OSError, UnicodeError, ValueError:
-        return {}
+        return dict(_good) if _good_path == key else {}
     if not isinstance(payload, dict):
-        return {}
-    return payload
+        return dict(_good) if _good_path == key else {}
+    _good_path = key
+    _good_token = token
+    _good = payload
+    return dict(payload)
 
 
 def ui_language() -> str:
@@ -134,6 +187,35 @@ def keep_awake_during_jobs() -> bool:
     return True
 
 
+def expert_mode() -> bool:
+    """Return whether Expert mode is on.
+
+    A missing or invalid stored value is false. The file is not created.
+    """
+    stored = read().get("ui.expert_mode")
+    if isinstance(stored, bool):
+        return stored
+    return False
+
+
+def set_expert_mode(enabled: bool) -> bool:
+    """Store Expert mode. False is simple mode.
+
+    Listeners live on :class:`voxprint_common.ui.expert.ExpertMode`. This
+    function only writes the file.
+
+    Args:
+        enabled: True shows expert commands, panels, and settings.
+
+    Returns:
+        The stored value.
+
+    Raises:
+        ValueError: ``enabled`` is not a bool.
+    """
+    return bool(set_value("ui.expert_mode", enabled))
+
+
 def mdl_parallel_files() -> int:
     """Return how many model files to fetch at once.
 
@@ -175,6 +257,7 @@ def values() -> dict[str, Any]:
         "gpu": gpu(),
         "keep_awake_during_jobs": keep_awake_during_jobs(),
         "mdl_parallel_files": mdl_parallel_files(),
+        "ui.expert_mode": expert_mode(),
     }
 
 
@@ -191,6 +274,33 @@ def set_ui_language(value: str) -> str:
         ValueError: The tag is not a short language code.
     """
     return str(set_value("ui_language", value))
+
+
+def ui_theme() -> str:
+    """Return ``dark``, ``light``, or ``system``.
+
+    A missing or unknown value is ``dark``. The file is unchanged. This is not
+    :func:`theme`, which stays the glass theme id.
+    """
+    stored = read().get("ui.theme")
+    if isinstance(stored, str) and stored in UI_THEMES:
+        return stored
+    return DEFAULT_UI_THEME
+
+
+def set_ui_theme(value: str) -> str:
+    """Store ``dark``, ``light``, or ``system``.
+
+    Args:
+        value: One of those three words.
+
+    Returns:
+        The stored value.
+
+    Raises:
+        ValueError: ``value`` is not one of those words.
+    """
+    return str(set_value("ui.theme", value))
 
 
 def set_theme(value: str) -> str:
@@ -231,6 +341,88 @@ def set_keep_awake_during_jobs(enabled: bool) -> bool:
         ValueError: ``enabled`` is not a bool.
     """
     return bool(set_value("keep_awake_during_jobs", enabled))
+
+
+def ui_geometry() -> dict[str, int | bool] | None:
+    """Return the stored window geometry, or None when it has not been saved.
+
+    The object is ``x``, ``y``, ``w``, ``h``, ``maximized``, and ``fullscreen``.
+    When ``ui.geometry`` is missing and ``ui.window`` is present, that older
+    rectangle is copied into ``ui.geometry`` with both flags false, and
+    ``ui.window`` is removed.
+
+    Returns:
+        The geometry, or None when neither key is usable. An incomplete object
+        is None.
+    """
+    data = read()
+    stored = _normalize_geometry(data.get("ui.geometry"))
+    if stored is not None:
+        return stored
+    legacy = _normalize_window(data.get("ui.window"))
+    if legacy is None:
+        return None
+    migrated = {
+        "x": legacy["x"],
+        "y": legacy["y"],
+        "w": legacy["width"],
+        "h": legacy["height"],
+        "maximized": False,
+        "fullscreen": False,
+    }
+    _store_geometry(migrated)
+    return migrated
+
+
+def window_geometry() -> dict[str, int] | None:
+    """Return the stored window rectangle, or None when it has not been saved.
+
+    Returns:
+        ``width``, ``height``, ``x``, and ``y`` taken from :func:`ui_geometry`.
+        An incomplete or invalid object is None.
+    """
+    stored = ui_geometry()
+    if stored is None:
+        return None
+    return {
+        "width": int(stored["w"]),
+        "height": int(stored["h"]),
+        "x": int(stored["x"]),
+        "y": int(stored["y"]),
+    }
+
+
+def set_window_geometry(
+    width: int,
+    height: int,
+    x: int,
+    y: int,
+    *,
+    maximized: bool = False,
+    fullscreen: bool = False,
+) -> dict[str, int]:
+    """Store the window geometry. Other suite keys stay as they are.
+
+    The file key is ``ui.geometry``. An older ``ui.window`` entry is removed.
+
+    Args:
+        width: Width in pixels, at least 1.
+        height: Height in pixels, at least 1.
+        x: Left edge. Negative values are kept.
+        y: Top edge. Negative values are kept.
+        maximized: True when the window was maximized.
+        fullscreen: True when the window was fullscreen.
+
+    Returns:
+        ``width``, ``height``, ``x``, and ``y``.
+
+    Raises:
+        ValueError: A size is not a positive integer, a position is not an
+            integer, or a flag is not a bool.
+    """
+    stored = _geometry_record(width, height, x, y, maximized=maximized, fullscreen=fullscreen)
+    _store_geometry(stored)
+    return {"width": width, "height": height, "x": x, "y": y}
 
 
 def set_gpu(value: str) -> str:
@@ -302,6 +494,8 @@ def set_value(key: str, value: object) -> object:
         if data.get("schema") == SCHEMA and data.get(key, object()) == stored:
             return stored
         data[key] = stored
+        if key == "ui.geometry":
+            data.pop("ui.window", None)
         write_text(target, json.dumps(_ordered(data), indent=2, ensure_ascii=False) + "\n")
     return stored
 
@@ -407,7 +601,93 @@ def _validate(key: str, value: object) -> object:
         if isinstance(value, bool) or not isinstance(value, int) or value < 1 or value > 8:
             raise ValueError(f"mdl_parallel_files must be an integer from 1 to 8, got {value!r}")
         return value
+    if key == "ui.expert_mode":
+        if not isinstance(value, bool):
+            raise ValueError(f"ui.expert_mode must be true or false, got {value!r}")
+        return value
+    if key == "ui.theme":
+        if not isinstance(value, str) or value not in UI_THEMES:
+            raise ValueError(f"ui.theme must be dark, light, or system, got {value!r}")
+        return value
+    if key == "ui.window":
+        stored = _normalize_window(value)
+        if stored is None:
+            raise ValueError(f"ui.window must be width, height, x, and y, got {value!r}")
+        return stored
+    if key == "ui.geometry":
+        stored = _normalize_geometry(value)
+        if stored is None:
+            raise ValueError(
+                f"ui.geometry must be x, y, w, h, maximized, and fullscreen, got {value!r}"
+            )
+        return stored
     raise ValueError(f"not a shared setting: {key!r}")
+
+
+def _normalize_window(value: object) -> dict[str, int] | None:
+    if not isinstance(value, dict):
+        return None
+    parsed: dict[str, int] = {}
+    for name in _WINDOW_KEYS:
+        item = value.get(name)
+        if isinstance(item, bool) or not isinstance(item, int):
+            return None
+        if name in {"width", "height"} and item < 1:
+            return None
+        parsed[name] = item
+    return parsed
+
+
+def _geometry_record(
+    width: int,
+    height: int,
+    x: int,
+    y: int,
+    *,
+    maximized: bool,
+    fullscreen: bool,
+) -> dict[str, int | bool]:
+    record = {
+        "x": x,
+        "y": y,
+        "w": width,
+        "h": height,
+        "maximized": maximized,
+        "fullscreen": fullscreen,
+    }
+    stored = _normalize_geometry(record)
+    if stored is None:
+        raise ValueError("ui.geometry must be x, y, w, h, maximized, and fullscreen")
+    return stored
+
+
+def _normalize_geometry(value: object) -> dict[str, int | bool] | None:
+    if not isinstance(value, dict):
+        return None
+    parsed: dict[str, int | bool] = {}
+    for name in _GEOMETRY_INTS:
+        item = value.get(name)
+        if isinstance(item, bool) or not isinstance(item, int):
+            return None
+        if name in {"w", "h"} and item < 1:
+            return None
+        parsed[name] = item
+    for name in ("maximized", "fullscreen"):
+        flag = value.get(name)
+        if not isinstance(flag, bool):
+            return None
+        parsed[name] = flag
+    return parsed
+
+
+def _store_geometry(stored: dict[str, int | bool]) -> None:
+    """Write ``ui.geometry`` and drop a leftover ``ui.window``."""
+    target = file()
+    with exclusive_lock(target.with_name(f"{target.name}.lock"), timeout=_LOCK_TIMEOUT):
+        data = read()
+        data["ui.geometry"] = stored
+        data.pop("ui.window", None)
+        write_text(target, json.dumps(_ordered(data), indent=2, ensure_ascii=False) + "\n")
 
 
 def _ordered(data: dict[str, Any]) -> dict[str, Any]:

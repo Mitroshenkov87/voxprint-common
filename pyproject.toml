@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "voxprint-common"
-version = "0.2.4"
+version = "0.2.5"
 description = "Shared Python library for the Voxprint AI Media Suite."
 readme = "README.md"
 requires-python = ">=3.14"
@@ -52,15 +52,21 @@ packages = ["src/voxprint_common"]
 [tool.hatch.build.targets.wheel.force-include]
 "src/voxprint_common/py.typed" = "voxprint_common/py.typed"
 "src/voxprint_common/ui/tokens.json" = "voxprint_common/ui/tokens.json"
+"src/voxprint_common/ui/presets/canvas.json" = "voxprint_common/ui/presets/canvas.json"
+"src/voxprint_common/ui/presets/enlarge.json" = "voxprint_common/ui/presets/enlarge.json"
+"src/voxprint_common/ui/presets/audio.json" = "voxprint_common/ui/presets/audio.json"
+"src/voxprint_common/ui/presets/video.json" = "voxprint_common/ui/presets/video.json"
+"src/voxprint_common/ui/presets/text.json" = "voxprint_common/ui/presets/text.json"
+"src/voxprint_common/ui/presets/tool.json" = "voxprint_common/ui/presets/tool.json"
 "src/voxprint_common/mdl/schemas/voxprint-model.schema.json" = "voxprint_common/mdl/schemas/voxprint-model.schema.json"
 "src/voxprint_common/mdl/data/model-index.json" = "voxprint_common/mdl/data/model-index.json"
 "src/voxprint_common/mdl/data/examples/pyannote-embedding.json" = "voxprint_common/mdl/data/examples/pyannote-embedding.json"
 "src/voxprint_common/mdl/data/examples/pyannote-speaker-diarization-community-1.json" = "voxprint_common/mdl/data/examples/pyannote-speaker-diarization-community-1.json"
-"src/voxprint_common/i18n/locales/en.json" = "voxprint_common/i18n/locales/en.json"
-"src/voxprint_common/i18n/locales/de.json" = "voxprint_common/i18n/locales/de.json"
-"src/voxprint_common/i18n/locales/ru.json" = "voxprint_common/i18n/locales/ru.json"
-"src/voxprint_common/i18n/locales/uk.json" = "voxprint_common/i18n/locales/uk.json"
-"src/voxprint_common/i18n/locales/lv.json" = "voxprint_common/i18n/locales/lv.json"
+"src/voxprint_common/ui/locales/en.json" = "voxprint_common/ui/locales/en.json"
+"src/voxprint_common/ui/locales/de.json" = "voxprint_common/ui/locales/de.json"
+"src/voxprint_common/ui/locales/ru.json" = "voxprint_common/ui/locales/ru.json"
+"src/voxprint_common/ui/locales/uk.json" = "voxprint_common/ui/locales/uk.json"
+"src/voxprint_common/ui/locales/lv.json" = "voxprint_common/ui/locales/lv.json"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
@@ -85,6 +91,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 "src/voxprint_common/i18n/__init__.py" = ["RUF001", "RUF002", "RUF003"]
 "tests/test_mdl.py" = ["RUF001", "RUF002", "RUF003"]
 "tests/test_i18n.py" = ["RUF001", "RUF002", "RUF003"]
+"tests/test_expert.py" = ["RUF001", "RUF002", "RUF003"]
 "tests/test_i18n_check.py" = ["RUF001", "RUF002", "RUF003"]
 "tests/test_mdl_window.py" = ["RUF001", "RUF002", "RUF003"]
 

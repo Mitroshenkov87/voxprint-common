@@ -1,0 +1,194 @@
+{
+  "schema": "voxprint-presets/1",
+  "groups": [
+    {
+      "id": "quality",
+      "label_key": "simple.quality",
+      "default": "balanced",
+      "options": [
+        {
+          "id": "fast",
+          "label_key": "simple.quality.fast",
+          "values": {
+            "shell.steps": 12,
+            "shell.guidance": 5.0,
+            "shell.sampler": "euler"
+          }
+        },
+        {
+          "id": "balanced",
+          "label_key": "simple.quality.balanced",
+          "values": {
+            "shell.steps": 20,
+            "shell.guidance": 7.0,
+            "shell.sampler": "euler"
+          }
+        },
+        {
+          "id": "best",
+          "label_key": "simple.quality.best",
+          "values": {
+            "shell.steps": 40,
+            "shell.guidance": 9.0,
+            "shell.sampler": "dpm"
+          }
+        }
+      ]
+    },
+    {
+      "id": "style",
+      "label_key": "simple.style",
+      "default": "photo",
+      "options": [
+        {
+          "id": "photo",
+          "label_key": "simple.style.photo",
+          "values": {"shell.negative": ""}
+        },
+        {
+          "id": "cinematic",
+          "label_key": "simple.style.cinematic",
+          "values": {"shell.negative": "flat lighting"}
+        },
+        {
+          "id": "portrait",
+          "label_key": "simple.style.portrait",
+          "values": {"shell.negative": "wide scene"}
+        },
+        {
+          "id": "illustration",
+          "label_key": "simple.style.illustration",
+          "values": {"shell.negative": "photograph"}
+        },
+        {
+          "id": "anime",
+          "label_key": "simple.style.anime",
+          "values": {"shell.negative": "realistic photo"}
+        },
+        {
+          "id": "3d",
+          "label_key": "simple.style.3d",
+          "values": {"shell.negative": "flat drawing"}
+        },
+        {
+          "id": "painting",
+          "label_key": "simple.style.painting",
+          "values": {"shell.negative": "line sketch"}
+        },
+        {
+          "id": "sketch",
+          "label_key": "simple.style.sketch",
+          "values": {"shell.negative": "full color"}
+        }
+      ]
+    },
+    {
+      "id": "size",
+      "label_key": "simple.size",
+      "default": "1:1",
+      "options": [
+        {
+          "id": "16:9",
+          "label_key": "simple.size.16-9",
+          "group_key": "simple.size.landscape",
+          "values": {"shell.resolution": "1344x768"}
+        },
+        {
+          "id": "21:9",
+          "label_key": "simple.size.21-9",
+          "group_key": "simple.size.landscape",
+          "values": {"shell.resolution": "1536x640"}
+        },
+        {
+          "id": "3:2",
+          "label_key": "simple.size.3-2",
+          "group_key": "simple.size.landscape",
+          "values": {"shell.resolution": "1216x832"}
+        },
+        {
+          "id": "4:3",
+          "label_key": "simple.size.4-3",
+          "group_key": "simple.size.landscape",
+          "values": {"shell.resolution": "1152x896"}
+        },
+        {
+          "id": "1:1",
+          "label_key": "simple.size.1-1",
+          "group_key": "simple.size.square",
+          "values": {"shell.resolution": "1024x1024"}
+        },
+        {
+          "id": "9:16",
+          "label_key": "simple.size.9-16",
+          "group_key": "simple.size.portrait",
+          "values": {"shell.resolution": "768x1344"}
+        },
+        {
+          "id": "2:3",
+          "label_key": "simple.size.2-3",
+          "group_key": "simple.size.portrait",
+          "values": {"shell.resolution": "832x1216"}
+        },
+        {
+          "id": "3:4",
+          "label_key": "simple.size.3-4",
+          "group_key": "simple.size.portrait",
+          "values": {"shell.resolution": "896x1152"}
+        }
+      ]
+    },
+    {
+      "id": "output",
+      "label_key": "simple.output",
+      "default": "standard",
+      "options": [
+        {
+          "id": "standard",
+          "label_key": "simple.output.standard",
+          "values": {"shell.output": "standard"}
+        },
+        {
+          "id": "4k",
+          "label_key": "simple.output.4k",
+          "available": false,
+          "reason_key": "simple.output.4k.reason",
+          "action_label_key": "simple.output.install",
+          "action_id": "install.enlarge",
+          "values": {"shell.output": "4k"}
+        }
+      ]
+    },
+    {
+      "id": "detail",
+      "label_key": "simple.detail",
+      "default": "medium",
+      "options": [
+        {
+          "id": "light",
+          "label_key": "simple.detail.light",
+          "values": {"shell.lora_weight": 0.4}
+        },
+        {
+          "id": "medium",
+          "label_key": "simple.detail.medium",
+          "values": {"shell.lora_weight": 0.7}
+        },
+        {
+          "id": "strong",
+          "label_key": "simple.detail.strong",
+          "values": {"shell.lora_weight": 1.1}
+        }
+      ]
+    },
+    {
+      "id": "count",
+      "label_key": "simple.count",
+      "default": "1",
+      "options": [
+        {"id": "1", "label_key": "simple.count.1", "values": {"shell.count": 1}},
+        {"id": "2", "label_key": "simple.count.2", "values": {"shell.count": 2}},
+        {"id": "4", "label_key": "simple.count.4", "values": {"shell.count": 4}}
+      ]
+    }
+  ]
+}

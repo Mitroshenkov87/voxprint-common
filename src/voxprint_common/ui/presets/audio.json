@@ -1,0 +1,45 @@
+{
+  "schema": "voxprint-presets/1",
+  "groups": [
+    {
+      "id": "pace",
+      "label_key": "simple.preset.pace",
+      "default": "natural",
+      "options": [
+        {
+          "id": "calm",
+          "label_key": "simple.preset.pace.calm",
+          "values": {
+            "audio.pace": "calm",
+            "audio.sample_rate": "22",
+            "audio.format": "wav",
+            "audio.normalize": true,
+            "audio.loudness": -18.0
+          }
+        },
+        {
+          "id": "natural",
+          "label_key": "simple.preset.pace.natural",
+          "values": {
+            "audio.pace": "natural",
+            "audio.sample_rate": "44",
+            "audio.format": "flac",
+            "audio.normalize": true,
+            "audio.loudness": -16.0
+          }
+        },
+        {
+          "id": "brisk",
+          "label_key": "simple.preset.pace.brisk",
+          "values": {
+            "audio.pace": "brisk",
+            "audio.sample_rate": "44",
+            "audio.format": "flac",
+            "audio.normalize": false,
+            "audio.loudness": -14.0
+          }
+        }
+      ]
+    }
+  ]
+}

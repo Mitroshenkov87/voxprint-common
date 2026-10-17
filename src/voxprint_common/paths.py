@@ -1,8 +1,11 @@
 """Suite directories shared by every Voxprint app.
 
-The suite root is ``%LOCALAPPDATA%\\Voxprint`` on Windows and
-``~/.local/share/voxprint`` on Linux. ``VOXPRINT_HOME`` overrides that root.
-Nothing in this module creates a directory.
+The suite root is ``%LOCALAPPDATA%\\VOXPrint AI Suite`` on Windows and
+``~/.local/share/voxprint-ai-suite`` on Linux. ``VOXPRINT_HOME`` overrides
+that root and is never moved. The first call to :func:`home` moves an existing
+``%LOCALAPPDATA%\\Voxprint`` or ``~/.local/share/voxprint`` directory.
+:func:`home` does not create an empty directory. :func:`read_home` reads the
+new directory, or the legacy directory through version 0.3, and does not move it.
 """
 
 from __future__ import annotations
@@ -12,13 +15,21 @@ import os
 import sys
 from pathlib import Path
 
+from voxprint_common import __version__
+from voxprint_common.home_migration import HomeMigrationError
+from voxprint_common.home_migration import migrate as _migrate_home
+
 __all__ = [
+    "HomeMigrationError",
     "cache_dir",
+    "final_home",
     "home",
+    "legacy_home",
     "logs_dir",
     "manifest_file",
     "models_dir",
     "projects_dir",
+    "read_home",
     "runtime_dir",
     "shared_dir",
     "state_dir",
@@ -27,27 +38,122 @@ __all__ = [
     "voices_dir",
 ]
 
+_WIN_FINAL = "VOXPrint AI Suite"
+_WIN_LEGACY = "Voxprint"
+_POSIX_FINAL = "voxprint-ai-suite"
+_POSIX_LEGACY = "voxprint"
+# Readers may open the legacy directory through the 0.3 line.
+_LEGACY_READ_THROUGH = (0, 3)
+
 
 def home() -> Path:
-    """Return the suite data directory.
+    """Return the suite data directory, moving a legacy directory on first use.
 
-    ``VOXPRINT_HOME`` wins when it is set to a non-empty value. Otherwise the
-    directory is ``%LOCALAPPDATA%\\Voxprint`` on Windows and
-    ``$XDG_DATA_HOME/voxprint`` elsewhere. When ``XDG_DATA_HOME`` is unset or
-    relative, the Linux path is ``~/.local/share/voxprint``.
+    ``VOXPRINT_HOME`` wins when it is set to a non-empty value. That directory
+    is not moved. Otherwise the directory is :func:`final_home`. When the
+    legacy directory exists and the new one does not, this moves it. An empty
+    suite directory is not created.
 
     Returns:
-        The suite root. The directory is not created.
+        The suite root.
+
+    Raises:
+        HomeMigrationError: A legacy directory was found and the move did not
+            finish. The previous directory is still in place.
     """
+    override = _override()
+    if override is not None:
+        return override
+    destination = final_home()
+    _migrate_home(legacy_home(), destination)
+    return destination
+
+
+def read_home() -> Path:
+    """Return a suite directory for reading, without moving or creating it.
+
+    ``VOXPRINT_HOME`` wins. Otherwise an existing :func:`final_home` wins.
+    Through version 0.3, an existing :func:`legacy_home` is used when the new
+    directory is absent. The next minor version returns the new path only.
+
+    Returns:
+        The directory a reader should open. It may not exist.
+    """
+    override = _override()
+    if override is not None:
+        return override
+    destination = final_home()
+    if destination.is_dir() and not destination.is_symlink():
+        return destination
+    source = legacy_home()
+    if _legacy_fallback_allowed() and source.is_dir() and not source.is_symlink():
+        return source
+    return destination
+
+
+def final_home() -> Path:
+    """Return the platform suite directory, ignoring ``VOXPRINT_HOME``.
+
+    Windows uses ``%LOCALAPPDATA%\\VOXPrint AI Suite``. Elsewhere the directory
+    is ``$XDG_DATA_HOME/voxprint-ai-suite`` when ``XDG_DATA_HOME`` is absolute,
+    and ``~/.local/share/voxprint-ai-suite`` when it is unset or relative.
+    Nothing is created or moved.
+
+    Returns:
+        The final suite root.
+    """
+    name = _WIN_FINAL if _windows() else _POSIX_FINAL
+    return _data_base() / name
+
+
+def legacy_home() -> Path:
+    """Return the previous suite directory, ignoring ``VOXPRINT_HOME``.
+
+    Windows uses ``%LOCALAPPDATA%\\Voxprint``. Elsewhere the directory is
+    ``$XDG_DATA_HOME/voxprint`` when ``XDG_DATA_HOME`` is absolute, and
+    ``~/.local/share/voxprint`` when it is unset or relative. Nothing is
+    created or moved.
+
+    Returns:
+        The legacy suite root.
+    """
+    name = _WIN_LEGACY if _windows() else _POSIX_LEGACY
+    return _data_base() / name
+
+
+def _override() -> Path | None:
     env = os.environ.get("VOXPRINT_HOME", "").strip()
-    if env:
-        return Path(env)
-    if sys.platform == "win32":
+    if not env:
+        return None
+    return Path(env)
+
+
+def _data_base() -> Path:
+    if _windows():
         local = os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))
-        return Path(local) / "Voxprint"
+        return Path(local)
     xdg = os.environ.get("XDG_DATA_HOME", "").strip()
-    base = Path(xdg) if xdg and os.path.isabs(xdg) else Path.home() / ".local" / "share"
-    return base / "voxprint"
+    if xdg and os.path.isabs(xdg):
+        return Path(xdg)
+    return Path.home() / ".local" / "share"
+
+
+def _windows() -> bool:
+    return sys.platform == "win32"
+
+
+def _legacy_fallback_allowed() -> bool:
+    return _version_pair(__version__) <= _LEGACY_READ_THROUGH
+
+
+def _version_pair(text: str) -> tuple[int, int]:
+    parts = text.split(".")
+    if len(parts) < 2:
+        return (0, 0)
+    try:
+        return int(parts[0]), int(parts[1])
+    except ValueError:
+        return (0, 0)
 
 
 def shared_dir() -> Path:
@@ -114,7 +220,7 @@ def trt_cache_dir() -> Path:
     env = os.environ.get("VOXPRINT_TRT_CACHE", "").strip()
     if env:
         return Path(env)
-    if sys.platform == "win32":
+    if _windows():
         local = os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))
         return Path(local) / "Voxprint" / "trt-cache"
     xdg = os.environ.get("XDG_CACHE_HOME", "").strip()

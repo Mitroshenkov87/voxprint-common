@@ -11,6 +11,12 @@ from pathlib import Path
 import pytest
 
 from voxprint_common.ui.shell import ADOPTION, reference_layout
+from voxprint_common.ui.theme import (
+    build_shell_style,
+    contrast_ratio,
+    light_contrast_pairs,
+    palette_colors,
+)
 from voxprint_common.ui.tokens import SCHEMA, load
 
 
@@ -20,6 +26,8 @@ def test_headless_layout_and_adoption() -> None:
     assert layout.contains("layers")
     assert layout.contains("canvas")
     assert layout.contains("history")
+    assert layout.contains("settings")
+    assert layout.contains("advanced")
     assert ADOPTION == (
         "canvas",
         "enlarge",
@@ -32,14 +40,65 @@ def test_headless_layout_and_adoption() -> None:
     tokens = load()
     assert tokens.schema == SCHEMA == 1
     assert tokens.name == "voxprint-dark"
+    assert tokens.light_name == "voxprint-light"
     assert tokens.density.body_px == 13
     assert tokens.density.icon_px == 22
     assert tokens.density.panel_header_px == 28
     assert tokens.density.control_radius_px == 4
+    assert tokens.density.border_px == 1
+    assert tokens.density.focus_ring_px == 2
+    assert tokens.density.chip_pad_px == 16
+    style = build_shell_style(False)
+    assert f"padding: 2px {tokens.density.chip_pad_px}px" in style
+    assert "QScrollArea > QWidget > QWidget" in style
+    assert "QTextEdit > QWidget" in style
+    assert "QPlainTextEdit > QWidget" in style
+    assert "QAbstractScrollArea > QWidget" in style
+    assert "QAbstractScrollArea QScrollBar:vertical" in style
+    assert "QScrollArea#expertScroll QScrollBar:horizontal" in style
+    handle = f"QScrollBar::handle:vertical {{\n    background: {tokens.colors['CONTROL_BORDER']}"
+    groove = f"QScrollBar::groove:vertical {{\n    background: {tokens.colors['CARD_PLAIN']}"
+    assert handle in style
+    assert groove in style
+    dark = palette_colors()
+    light = palette_colors(light=True)
+    assert dark["Base"] == tokens.colors["CARD_PLAIN"]
+    assert dark["Window"] == tokens.colors["ROOT_PLAIN"]
+    assert dark["Text"] == tokens.colors["TEXT"]
+    assert dark["AlternateBase"] == tokens.colors["CONTROL_BG"]
+    assert light["Base"] == tokens.light["Base"] == tokens.light_colors["CARD_PLAIN"]
+    assert light["Window"] == tokens.light_colors["ROOT_PLAIN"]
+    assert light["Text"] == tokens.light_colors["TEXT"]
+    for foreground, background in light_contrast_pairs():
+        assert contrast_ratio(foreground, background) >= 4.5, (foreground, background)
+    light_style = build_shell_style(False, light=True)
+    assert f"background: {tokens.light_colors['ROOT_PLAIN']}" in light_style
+    assert f"color: {light['Text']}" in light_style
+    assert tokens.colors["TEXT"] not in light_style.split("QWidget#shell", 1)[0]
+    assert dark["Base"] != "#efefef"
+    assert light["Base"] != "#efefef"
+    assert f"QPushButton:focus {{\n    border: {tokens.density.focus_ring_px}px solid" in style
     assert tokens.identity["audiobook-builder"] == "#f5d76e"
     assert tokens.identity["movie-dubber"] == "#b98cff"
     assert tokens.identity["enlarge"] == "#ff6b8a"
     assert tokens.identity["clarity"] == "#2dd4bf"
+    assert "PySide6" not in sys.modules
+
+
+def test_chip_text_fits(tmp_path: Path) -> None:
+    if importlib.util.find_spec("PySide6") is None:
+        pytest.skip("ui extra is not installed")
+    env = os.environ.copy()
+    env["QT_QPA_PLATFORM"] = "offscreen"
+    script = Path(__file__).with_name("shell_offscreen.py")
+    completed = subprocess.run(
+        [sys.executable, str(script), str(tmp_path), "chips"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert completed.returncode == 0, completed.stdout + "\n" + completed.stderr
     assert "PySide6" not in sys.modules
 
 
@@ -63,7 +122,69 @@ def test_offscreen_shell_screenshots(tmp_path: Path) -> None:
     palette = (tmp_path / "en-palette.png").read_bytes()
     russian_palette = (tmp_path / "ru-palette.png").read_bytes()
     split = (tmp_path / "en-split.png").read_bytes()
-    for blob in (english, russian, german, palette, russian_palette, split):
+    empty = (tmp_path / "en-simple-empty.png").read_bytes()
+    result = (tmp_path / "en-simple-result.png").read_bytes()
+    russian_result = (tmp_path / "ru-simple-result.png").read_bytes()
+    expert = (tmp_path / "en-expert.png").read_bytes()
+    modified = (tmp_path / "en-expert-modified.png").read_bytes()
+    variants = {
+        name: (tmp_path / name).read_bytes()
+        for name in (
+            "image-simple.png",
+            "en-image-light.png",
+            "image-expert.png",
+            "audio-simple.png",
+            "audio-expert.png",
+            "video-simple.png",
+            "video-expert.png",
+            "text-simple.png",
+            "text-expert.png",
+            "tool-simple.png",
+            "tool-expert.png",
+            "ru-image-simple.png",
+            "ru-image-expert.png",
+            "ru-audio-simple.png",
+            "ru-audio-expert.png",
+            "ru-dub-simple.png",
+            "ru-dub-expert.png",
+            "viewer-simple.png",
+            "viewer-expert.png",
+            "image-modified.png",
+            "audio-modified.png",
+            "video-modified.png",
+            "text-modified.png",
+            "tool-modified.png",
+            "viewer-modified.png",
+            "ru-video-simple.png",
+            "ru-video-expert.png",
+            "ru-text-simple.png",
+            "ru-text-expert.png",
+            "ru-tool-simple.png",
+            "ru-tool-expert.png",
+            "ru-viewer-simple.png",
+            "ru-viewer-expert.png",
+            "de-image-simple.png",
+            "de-image-expert.png",
+            "ru-sections.png",
+            "ru-casting.png",
+            "ru-steps.png",
+            "ru-steps-running.png",
+        )
+    }
+    pictures = (
+        english,
+        russian,
+        german,
+        palette,
+        russian_palette,
+        split,
+        empty,
+        result,
+        russian_result,
+        expert,
+        modified,
+    )
+    for blob in pictures:
         assert blob.startswith(b"\x89PNG")
         assert len(blob) > 1000
     assert english != russian
@@ -71,4 +192,13 @@ def test_offscreen_shell_screenshots(tmp_path: Path) -> None:
     assert palette != russian_palette
     assert english != palette
     assert english != split
+    assert empty != result
+    assert result != russian_result
+    assert result != expert
+    assert expert != modified
+    assert empty != english
+    for blob in variants.values():
+        assert blob.startswith(b"\x89PNG")
+        assert len(blob) > 1000
+    assert len(set(variants.values())) == len(variants)
     assert "PySide6" not in sys.modules

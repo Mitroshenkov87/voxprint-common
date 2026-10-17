@@ -8,7 +8,8 @@ writing them out as JSON: a flat ``{"menu.open": "Open"}`` table and a nested
 
 This module is that mechanism, so an app can adopt it instead of copying its
 own ``tr``. The languages shipped here are English (the source and the
-fallback), German, Russian, Ukrainian, and Latvian.
+fallback), German, Russian, Ukrainian, and Latvian. The files are JSON in
+``ui/locales``, beside ``tokens.json``, so a C++ reader uses the same copy.
 
 An app adds its own folder once, at startup. Files in that folder override
 the same key in this package:
@@ -92,8 +93,12 @@ _current: str | None = None
 
 
 def catalog_dir() -> Path:
-    """Return this package's ``locales`` directory."""
-    return Path(__file__).with_name("locales")
+    """Return the JSON catalogs beside ``tokens.json``.
+
+    One directory is the source of truth. A missing translation falls back to
+    English, then to the key.
+    """
+    return Path(__file__).resolve().parents[1] / "ui" / "locales"
 
 
 def add_catalogs(directory: str | Path) -> None:

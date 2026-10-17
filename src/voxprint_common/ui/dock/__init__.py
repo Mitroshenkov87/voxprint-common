@@ -61,6 +61,7 @@ from voxprint_common.ui.dock.model import (
     layout_json,
     load_layout,
 )
+from voxprint_common.ui.dock.panels import PanelSpec, visible_layout
 
 __all__ = [
     "LAYOUT_SCHEMA",
@@ -84,6 +85,7 @@ __all__ = [
     "MoveFloating",
     "Open",
     "OpenAt",
+    "PanelSpec",
     "Permissions",
     "Placement",
     "Rect",
@@ -113,5 +115,6 @@ __all__ = [
     "load_layout",
     "resolve_drop",
     "split_rect",
+    "visible_layout",
     "zone_rect",
 ]
