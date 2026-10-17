@@ -90,6 +90,7 @@ def main() -> None:
 
     _check_expert(app)
     _check_simple(app, Qt, QTest)
+    _check_clear_and_reparent(app)
     _check_variants(app, out)
     _check_audiobook(app)
     _check_viewer(app)
@@ -528,6 +529,39 @@ def _check_viewer(app: object) -> None:
     assert (restored.widget.width(), restored.widget.height()) == (700, 450)  # type: ignore[attr-defined]
     restored.close()
     app.processEvents()  # type: ignore[attr-defined]
+
+
+def _check_clear_and_reparent(app: object) -> None:
+    from PySide6 import QtGui
+    from PySide6.QtGui import QColor, QPalette
+    from PySide6.QtWidgets import QFormLayout, QLabel, QScrollArea, QVBoxLayout, QWidget
+
+    from voxprint_common.ui.simple_image import _clear, _darken
+    from voxprint_common.ui.theme import CARD_PLAIN
+
+    host = QWidget()
+    outer = QVBoxLayout(host)
+    form = QFormLayout()
+    nested = QLabel("old row")
+    form.addRow("old", nested)
+    outer.addLayout(form)
+    _clear(outer)
+    app.processEvents()  # type: ignore[attr-defined]
+    assert outer.count() == 0 and nested.parent() is None and host.findChildren(QLabel) == []
+    scroll = QScrollArea()
+    _darken(scroll, QtGui)
+    scroll.setWidget(QWidget())
+    other = QWidget()
+    scroll.setParent(other)
+    for _ in range(3):
+        app.processEvents()  # type: ignore[attr-defined]
+    want = QColor(CARD_PLAIN)
+    for target in (scroll.viewport(), scroll.widget()):
+        assert target.palette().color(QPalette.ColorRole.Base) == want
+        assert target.palette().color(QPalette.ColorRole.Window) == want
+        assert target.autoFillBackground() is True
+    other.deleteLater()
+    host.deleteLater()
 
 
 def _check_simple(app: object, qt: object, test: object) -> None:

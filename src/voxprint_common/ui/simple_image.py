@@ -12,6 +12,7 @@ and does not move the rest. The dock stays a separate API.
 
 from __future__ import annotations
 
+import contextlib
 import json
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
@@ -1596,16 +1597,19 @@ class SimpleImageWidget:
                 return core.QSize(0, 0)
 
             def sizeHint(_self: object) -> object:
-                return core.QSize(260, 120)
+                parent = _self.parentWidget()  # type: ignore[attr-defined]
+                height = parent.height() if parent is not None else 480
+                return core.QSize(260, max(height, 240))
 
         scroll = _Scroll()
         scroll.setObjectName("expertScroll")
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(widgets.QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(qt.ScrollBarAlwaysOff)
+        scroll.setMinimumWidth(200)
         scroll.setSizePolicy(
             widgets.QSizePolicy.Policy.Expanding,
-            widgets.QSizePolicy.Policy.Ignored,
+            widgets.QSizePolicy.Policy.Expanding,
         )
         inner = widgets.QWidget()
         inner.setObjectName("expertForm")
@@ -3386,13 +3390,19 @@ def _chip_checked(selected: str, value: str, kind: PresetMatch | None) -> bool:
 
 
 def _clear(layout: object) -> None:
+    """Remove every item of a layout, including nested layouts and their widgets."""
     while layout.count():  # type: ignore[attr-defined]
         item = layout.takeAt(0)  # type: ignore[attr-defined]
         widget = item.widget()
+        child = item.layout()
         if widget is not None:
             widget.hide()
             widget.setParent(None)
             widget.deleteLater()
+        elif child is not None:
+            _clear(child)
+            child.setParent(None)
+            child.deleteLater()
 
 
 def _chapter_text(prompt: str) -> str:
@@ -3758,15 +3768,60 @@ def _apply_suffix(spin: object, spec: SettingSpec) -> None:
         spin.setSuffix(suffix)  # type: ignore[attr-defined]
 
 
-def _darken(scroll: object, gui: object) -> None:
+def _paint_scroll(scroll: object, gui: object) -> None:
     colour = gui.QColor(CARD_PLAIN)  # type: ignore[attr-defined]
+    text = gui.QColor(TEXT)  # type: ignore[attr-defined]
     role = gui.QPalette.ColorRole  # type: ignore[attr-defined]
-    for target in (scroll, scroll.viewport()):  # type: ignore[attr-defined]
+    targets = [scroll, scroll.viewport()]  # type: ignore[attr-defined]
+    content = scroll.widget()  # type: ignore[attr-defined]
+    if content is not None:
+        targets.append(content)
+    for target in targets:
         palette = target.palette()
         palette.setColor(role.Window, colour)
         palette.setColor(role.Base, colour)
+        palette.setColor(role.Text, text)
+        palette.setColor(role.WindowText, text)
         target.setPalette(palette)
         target.setAutoFillBackground(True)
+
+
+_SCROLL_FILTERS: dict[int, object] = {}
+
+
+def _darken(scroll: object, gui: object) -> None:
+    """Paint a scroll area, its viewport and its content from the tokens.
+
+    Qt resets the palette after a reparent or a new content widget, so an
+    event filter paints them again on those events.
+    """
+    _paint_scroll(scroll, gui)
+    key = id(scroll)
+    if key in _SCROLL_FILTERS:
+        return
+    from PySide6 import QtCore
+
+    watched = (
+        QtCore.QEvent.Type.ParentChange,
+        QtCore.QEvent.Type.ChildAdded,
+        QtCore.QEvent.Type.Show,
+    )
+
+    class _Repaint(QtCore.QObject):
+        def eventFilter(self, obj: object, event: object) -> bool:
+            if event.type() in watched:  # type: ignore[attr-defined]
+                QtCore.QTimer.singleShot(0, self._apply)
+            return False
+
+        def _apply(self) -> None:
+            with contextlib.suppress(RuntimeError):
+                _paint_scroll(scroll, gui)
+
+    repaint = _Repaint(scroll)  # type: ignore[arg-type]
+    scroll.installEventFilter(repaint)  # type: ignore[attr-defined]
+    scroll.viewport().installEventFilter(repaint)  # type: ignore[attr-defined]
+    _SCROLL_FILTERS[key] = repaint
+    scroll.destroyed.connect(lambda *_: _SCROLL_FILTERS.pop(key, None))  # type: ignore[attr-defined]
 
 
 def _hill(gui: object, points: tuple[tuple[float, float], ...]) -> object:

@@ -436,7 +436,7 @@ QLabel#expertTitle {{
     color: {TEXT}; font-size: 15px; font-weight: 600; background: transparent;
 }}
 QLabel#settingGroup {{
-    color: {TEXT_MUTED}; font-size: 11px; font-weight: 600; background: transparent;
+    color: {TEXT}; font-size: 15px; font-weight: 600; background: transparent;
     padding: 10px 0 2px 0;
 }}
 QLabel#panel {{ color: {TEXT}; background: transparent; }}
