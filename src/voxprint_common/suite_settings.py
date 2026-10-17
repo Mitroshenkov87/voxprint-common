@@ -10,6 +10,8 @@ key is preserved, so one app does not wipe another's settings.
 * ``keep_awake_during_jobs``: true or false. True asks long jobs to block sleep.
 * ``mdl_parallel_files``: how many model files the downloader fetches at once.
   Missing or invalid values mean 2. The accepted range is 1 through 8.
+* ``keymap``: schema 1 overrides for the shared command chords. Bad entries
+  are dropped by :mod:`voxprint_common.ui.keymap`. Other keys are preserved.
 
 ``VOXPRINT_MODELS_DIR`` is applied by :func:`voxprint_common.paths.models_dir`,
 not by the getters here.
@@ -20,6 +22,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -34,12 +37,14 @@ __all__ = [
     "file",
     "gpu",
     "keep_awake_during_jobs",
+    "keymap_document",
     "mdl_parallel_files",
     "models_dir",
     "normalize_gpu",
     "read",
     "set_gpu",
     "set_keep_awake_during_jobs",
+    "set_keymap",
     "set_mdl_parallel_files",
     "set_models_dir",
     "set_theme",
@@ -241,6 +246,40 @@ def set_gpu(value: str) -> str:
         ValueError: The value is not a GPU choice.
     """
     return str(set_value("gpu", value))
+
+
+def keymap_document() -> dict[str, Any]:
+    """Return the raw ``keymap`` object, or an empty dict.
+
+    A missing key or a value that is not an object yields ``{}``. The keymap
+    module drops individual bad entries.
+    """
+    stored = read().get("keymap")
+    if not isinstance(stored, dict):
+        return {}
+    return stored
+
+
+def set_keymap(document: Mapping[str, Any]) -> None:
+    """Store a schema 1 keymap document. Other suite keys stay as they are.
+
+    Args:
+        document: ``schema``, ``assigned``, and ``removed``.
+
+    Raises:
+        ValueError: ``document`` is not a schema 1 object.
+    """
+    if (
+        document.get("schema") != SCHEMA
+        or not isinstance(document.get("assigned"), list)
+        or not isinstance(document.get("removed"), list)
+    ):
+        raise ValueError("keymap must be schema 1 with assigned and removed lists")
+    target = file()
+    with exclusive_lock(target.with_name(f"{target.name}.lock"), timeout=_LOCK_TIMEOUT):
+        data = read()
+        data["keymap"] = dict(document)
+        write_text(target, json.dumps(_ordered(data), indent=2, ensure_ascii=False) + "\n")
 
 
 def set_value(key: str, value: object) -> object:

@@ -1,8 +1,10 @@
-"""Qt helpers for Voxprint apps.
+"""Qt helpers for VOXPrint apps.
 
-Import :mod:`voxprint_common.ui.theme` for the palette. It does not load Qt.
-Import :mod:`voxprint_common.ui.splash` for the startup window. That module
-loads PySide6 only when a splash is constructed.
+Import :mod:`voxprint_common.ui.theme`, :mod:`voxprint_common.ui.tokens`,
+:mod:`voxprint_common.ui.dock`, :mod:`voxprint_common.ui.commands`,
+:mod:`voxprint_common.ui.keymap`, or :mod:`voxprint_common.ui.palette`
+without Qt. :mod:`voxprint_common.ui.splash` and :mod:`voxprint_common.ui.shell`
+load PySide6 only when a window is constructed.
 """
 
 from __future__ import annotations

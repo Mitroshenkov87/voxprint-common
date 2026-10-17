@@ -73,6 +73,9 @@ def test_palette_contrast_and_stylesheet() -> None:
     assert "QPushButton#gear" in plain
     assert "QPushButton#disclosure" in plain
     assert "QPushButton#disclosure:hover" in plain
+    shell_css = theme.build_shell_style(False)
+    assert "font-size: 13px" in shell_css
+    assert theme.ROOT_PLAIN in shell_css
     assert "PySide6" not in sys.modules
 
 

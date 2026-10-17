@@ -268,7 +268,7 @@ Lucent's C++ self-test stays in Lucent.
 
 ## ui.theme
 
-`voxprint_common.ui.theme` loads `tokens.json`. Importing it does not import Qt. `build_style(glass, more=False)` returns the suite stylesheet. Pass nothing for an identity colour: splash colours are not theme tokens.
+`voxprint_common.ui.theme` loads schema 1 `tokens.json` through `voxprint_common.ui.tokens`. The colour map is the `colors` object. `theme.TOKENS` is that map, so existing `TOKENS["RED"]` reads stay valid. `build_style(glass, more=False)` returns the wizard stylesheet. `build_shell_style` is the editor shell and reads the `density` block. Pass nothing for an identity colour: splash colours live under `identity`, not in the theme colour map. A reader that expected the old flat file should read `colors`.
 
 | App | Old module |
 |---|---|

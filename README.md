@@ -32,7 +32,12 @@ The docs site is [mitroshenkov87.github.io/voxprint-common](https://mitroshenkov
 | `voxprint_common.download` | Multi-source download, SHA-256, resume, disk precheck |
 | `voxprint_common.cli_protocol` | `--json` progress lines and one result line |
 | `voxprint_common.selftest` | `checks.json` helpers |
-| `voxprint_common.ui.theme` | Suite palette. Qt is not imported |
+| `voxprint_common.ui.tokens` | Schema 1 colours, editor density, and splash identity colours |
+| `voxprint_common.ui.theme` | Suite palette and stylesheets. Qt is not imported |
+| `voxprint_common.ui.dock` | Headless tabs, splits, floats, undo, and schema 1 layout JSON |
+| `voxprint_common.ui.commands` | Command ids, localised titles, and default chords |
+| `voxprint_common.ui.keymap` | Context, conflicts, and chord overrides in `suite.json` |
+| `voxprint_common.ui.shell` | Reference window. PySide6 loads only when the window is built |
 | `voxprint_common.ui.splash` | 960×540 splash. PySide6 loads only when a splash is shown |
 | `voxprint_common.i18n` | JSON catalogs. English, German, Russian, Ukrainian, Latvian |
 | `voxprint_common.mdl` | VOXPrint MDL. Shared model download, `voxprint-mdl` |
@@ -50,7 +55,7 @@ python -m pip install "voxprint-common[ui]"
 From a checkout:
 
 ```bash
-python -m pip install -e ".[dev]"
+python -m pip install -e ".[dev,ui]"
 ```
 
 An app that ships an installer copies the wheel into its payload and installs that wheel into its own environment or the shared runtime. It does not ask the user to install a separate Voxprint Common application.
@@ -111,6 +116,6 @@ Maintainers moving an app off its private copy of this code should read [MIGRATI
 
 * Windows 11 or Linux.
 * Python 3.14.
-* A display and the `ui` extra, only for the splash and `voxprint-mdl download --gui`. The download itself is headless.
+* A display and the `ui` extra, only for the splash, the reference shell, and `voxprint-mdl download --gui`. The download itself is headless. Tests grab the reference shell offscreen.
 
 **License:** Apache-2.0. See `LICENSE` and `NOTICE`.
