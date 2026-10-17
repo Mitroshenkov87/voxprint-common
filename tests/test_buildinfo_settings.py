@@ -20,9 +20,12 @@ from voxprint_common.suite_settings import (
     set_models_dir,
     set_theme,
     set_ui_language,
+    set_ui_theme,
     set_window_geometry,
     theme,
+    ui_geometry,
     ui_language,
+    ui_theme,
     window_geometry,
 )
 
@@ -217,14 +220,32 @@ def test_reader_keeps_the_last_good_suite_file(
 ) -> None:
     monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
     assert window_geometry() is None
+    assert ui_geometry() is None
+    assert ui_theme() == "dark"
+    set_ui_theme("light")
+    assert ui_theme() == "light"
+    set_ui_theme("system")
+    assert ui_theme() == "system"
+    with pytest.raises(ValueError):
+        set_ui_theme("glass-dark")
     set_ui_language("ru")
-    set_window_geometry(1100, 800, -4, 12)
+    set_window_geometry(1100, 800, -4, 12, maximized=True)
     assert file() == tmp_path / "state" / "suite.json"
     assert window_geometry() == {"width": 1100, "height": 800, "x": -4, "y": 12}
+    assert ui_geometry() == {
+        "x": -4,
+        "y": 12,
+        "w": 1100,
+        "h": 800,
+        "maximized": True,
+        "fullscreen": False,
+    }
+    assert "ui.window" not in read()
     target = file()
     target.write_text("{", encoding="utf-8")
     assert read()["ui_language"] == "ru"
     assert window_geometry() == {"width": 1100, "height": 800, "x": -4, "y": 12}
+    assert ui_geometry() is not None and ui_geometry()["maximized"] is True
     target.write_text(json.dumps({"schema": 1, "gpu": "cuda:2"}) + "\n", encoding="utf-8")
     assert read()["gpu"] == "cuda:2"
     assert "ui_language" not in read()
@@ -261,3 +282,26 @@ def test_two_processes_keep_both_suite_keys(
     assert saved["ui.expert_mode"] is True
     assert saved["keep_awake_during_jobs"] is False
     assert not list(file().parent.glob(".suite.json.*.tmp"))
+
+
+def test_old_window_key_migrates_into_geometry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VOXPRINT_HOME", str(tmp_path))
+    target = file()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        json.dumps({"schema": 1, "ui.window": {"width": 1000, "height": 700, "x": 3, "y": 4}})
+        + "\n",
+        encoding="utf-8",
+    )
+    assert ui_geometry() == {
+        "x": 3,
+        "y": 4,
+        "w": 1000,
+        "h": 700,
+        "maximized": False,
+        "fullscreen": False,
+    }
+    assert window_geometry() == {"width": 1000, "height": 700, "x": 3, "y": 4}
+    assert "ui.window" not in read()

@@ -391,3 +391,35 @@ def test_finish_blocks_a_missing_picture_before_the_gate(tmp_path: Path) -> None
     payload = ReviewedOutput(data=b"png", mime="image/png")
     assert layout.finish("bytes", payload) is not None
     assert gate.outputs[1] is payload
+
+
+def test_voices_chapters_and_input_path(tmp_path: Path) -> None:
+    settings = reference_settings()
+    layout = SimpleImageLayout(
+        presets=reference_presets(settings),
+        settings=settings,
+        gate=_GATE,
+        state_dir=tmp_path,
+    )
+    layout.set_voices((("anya", "Anya"), ("boris", "Boris")))
+    assert layout.voice_id == "anya"
+    assert layout.live_settings()["shell.voice"] == "anya"
+    layout.select_voice("boris")
+    assert layout.get("shell.voice") == "boris"
+    again = SimpleImageLayout(
+        presets=reference_presets(settings),
+        settings=settings,
+        gate=_GATE,
+        state_dir=tmp_path,
+    )
+    assert again.get("shell.voice") == "boris"
+    layout.set_input_path(str(tmp_path / "book.epub"))
+    assert layout.input_path() == str((tmp_path / "book.epub").resolve())
+    layout.set_chapters((("One", 0), ("Two", 1500)))
+    assert layout.chapters == (("One", 0), ("Two", 1500))
+    layout.set_audio_output("/books/book/audiobook.wav")
+    assert layout.audio_output == "/books/book/audiobook.wav"
+    with pytest.raises(ValueError):
+        layout.set_voices(())
+    with pytest.raises(ValueError):
+        layout.set_chapters(((" ", 0),))

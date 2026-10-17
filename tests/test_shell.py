@@ -11,7 +11,12 @@ from pathlib import Path
 import pytest
 
 from voxprint_common.ui.shell import ADOPTION, reference_layout
-from voxprint_common.ui.theme import build_shell_style, palette_colors
+from voxprint_common.ui.theme import (
+    build_shell_style,
+    contrast_ratio,
+    light_contrast_pairs,
+    palette_colors,
+)
 from voxprint_common.ui.tokens import SCHEMA, load
 
 
@@ -35,6 +40,7 @@ def test_headless_layout_and_adoption() -> None:
     tokens = load()
     assert tokens.schema == SCHEMA == 1
     assert tokens.name == "voxprint-dark"
+    assert tokens.light_name == "voxprint-light"
     assert tokens.density.body_px == 13
     assert tokens.density.icon_px == 22
     assert tokens.density.panel_header_px == 28
@@ -60,10 +66,15 @@ def test_headless_layout_and_adoption() -> None:
     assert dark["Window"] == tokens.colors["ROOT_PLAIN"]
     assert dark["Text"] == tokens.colors["TEXT"]
     assert dark["AlternateBase"] == tokens.colors["CONTROL_BG"]
-    assert light["Base"] == tokens.light["Base"]
+    assert light["Base"] == tokens.light["Base"] == tokens.light_colors["CARD_PLAIN"]
+    assert light["Window"] == tokens.light_colors["ROOT_PLAIN"]
+    assert light["Text"] == tokens.light_colors["TEXT"]
+    for foreground, background in light_contrast_pairs():
+        assert contrast_ratio(foreground, background) >= 4.5, (foreground, background)
     light_style = build_shell_style(False, light=True)
-    assert f"background: {light['Base']}" in light_style
+    assert f"background: {tokens.light_colors['ROOT_PLAIN']}" in light_style
     assert f"color: {light['Text']}" in light_style
+    assert tokens.colors["TEXT"] not in light_style.split("QWidget#shell", 1)[0]
     assert dark["Base"] != "#efefef"
     assert light["Base"] != "#efefef"
     assert f"QPushButton:focus {{\n    border: {tokens.density.focus_ring_px}px solid" in style
@@ -120,6 +131,7 @@ def test_offscreen_shell_screenshots(tmp_path: Path) -> None:
         name: (tmp_path / name).read_bytes()
         for name in (
             "image-simple.png",
+            "en-image-light.png",
             "image-expert.png",
             "audio-simple.png",
             "audio-expert.png",

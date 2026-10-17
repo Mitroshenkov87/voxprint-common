@@ -1,9 +1,10 @@
-"""Dark suite palette: yellow primary actions, soft blue menus and accents.
+"""Suite palette: yellow primary actions, soft blue menus and accents.
 
 Colours live in ``tokens.json`` (schema 1), loaded by
-:mod:`voxprint_common.ui.tokens`. Text colours are opaque. Panels and controls
-are nearly solid. Only the window background is translucent in the Acrylic
-stylesheet.
+:mod:`voxprint_common.ui.tokens`. ``voxprint-dark`` is the default map.
+``voxprint-light`` is the same roles for the light theme. Text colours are
+opaque. Panels and controls are nearly solid. Only the window background is
+translucent in the Acrylic stylesheet.
 
 :func:`build_style` is the wizard and download-window stylesheet. The editor
 shell uses :func:`build_shell_style` and the density block in the same file
@@ -22,9 +23,10 @@ light theme, so every viewport an app creates is covered.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
-from voxprint_common.ui.tokens import PALETTE_ROLES, color_map, load
+from voxprint_common.ui.tokens import PALETTE_ROLES, color_map, load, role_map
 
 __all__ = [
     "ACCENT",
@@ -66,7 +68,9 @@ __all__ = [
     "build_shell_style",
     "build_style",
     "contrast_ratio",
+    "light_contrast_pairs",
     "palette_colors",
+    "resolved_shell_light",
     "tokens_path",
 ]
 
@@ -241,46 +245,98 @@ CONTRAST_PAIRS: list[tuple[str, str]] = [
 def palette_colors(*, light: bool = False) -> dict[str, str]:
     """Return ``QPalette`` role names and colours for one theme.
 
-    ``Base`` is the colour Qt uses to fill a scroll-area viewport. The dark
-    theme takes it from the suite tokens. The light theme takes every role
-    from the ``light`` block in ``tokens.json``. Neither base is Qt's
-    ``#efefef``.
+    ``Base`` is the colour Qt uses to fill a scroll-area viewport. Dark and
+    light use :func:`voxprint_common.ui.tokens.role_map` on their colour map.
+    Neither base is Qt's ``#efefef``.
 
     Args:
-        light: True selects the light theme. False selects the dark tokens.
+        light: True selects ``voxprint-light``. False selects ``voxprint-dark``.
 
     Returns:
         Role name to ``#rrggbb``. ``DisabledText`` is included for the
         disabled colour group and is not itself a palette role.
     """
-    if light:
-        colors = dict(load().light)
-        colors["DisabledText"] = colors["PlaceholderText"]
-        return colors
-    return {
-        "Window": ROOT_PLAIN,
-        "WindowText": TEXT,
-        "Base": CARD_PLAIN,
-        "AlternateBase": CONTROL_BG,
-        "ToolTipBase": MENU_BG,
-        "ToolTipText": TEXT,
-        "Text": TEXT,
-        "Button": CONTROL_BG,
-        "ButtonText": TEXT,
-        "BrightText": TEXT,
-        "Link": ACCENT,
-        "LinkVisited": ACCENT,
-        "Highlight": MENU_SELECTION,
-        "HighlightedText": TEXT,
-        "PlaceholderText": TEXT_MUTED,
-        "Light": CONTROL_HOVER,
-        "Midlight": CONTROL_BG,
-        "Mid": CONTROL_BORDER,
-        "Dark": ROOT_PLAIN,
-        "Shadow": ROOT_PLAIN,
-        "Accent": ACCENT,
-        "DisabledText": TEXT_DISABLED,
-    }
+    tokens = load()
+    colors = tokens.light_colors if light else tokens.colors
+    roles = role_map(colors)
+    roles["DisabledText"] = colors["TEXT_DISABLED"]
+    return roles
+
+
+def resolved_shell_light() -> bool:
+    """Return whether the shell should paint the light theme.
+
+    ``ui.theme`` is ``dark``, ``light``, or ``system``. Missing means dark.
+    ``system`` follows ``VOXPRINT_COLOR_SCHEME`` when that is ``dark`` or
+    ``light``, then the Qt colour scheme when an application exists, then dark.
+    """
+    from voxprint_common.suite_settings import ui_theme
+
+    choice = ui_theme()
+    if choice == "light":
+        return True
+    if choice == "dark":
+        return False
+    forced = os.environ.get("VOXPRINT_COLOR_SCHEME", "").strip().lower()
+    if forced == "light":
+        return True
+    if forced == "dark":
+        return False
+    return _system_scheme_is_light()
+
+
+def light_contrast_pairs() -> list[tuple[str, str]]:
+    """Return opaque pairs that must stay at or above WCAG AA on the light map."""
+    colors = load().light_colors
+    text = colors["TEXT"]
+    muted = colors["TEXT_MUTED"]
+    faint = colors["TEXT_FAINT"]
+    on_accent = colors["TEXT_ON_ACCENT"]
+    on_primary = colors["TEXT_ON_PRIMARY"]
+    return [
+        (text, colors["ROOT_PLAIN"]),
+        (text, colors["CARD_PLAIN"]),
+        (text, colors["CONTROL_BG"]),
+        (text, colors["CONTROL_HOVER"]),
+        (text, colors["MENU_BG"]),
+        (text, colors["MENU_SELECTION"]),
+        (text, colors["NOTE_BG"]),
+        (muted, colors["ROOT_PLAIN"]),
+        (muted, colors["CARD_PLAIN"]),
+        (faint, colors["ROOT_PLAIN"]),
+        (faint, colors["CARD_PLAIN"]),
+        (on_accent, colors["ACCENT"]),
+        (on_accent, colors["ACCENT_HOVER"]),
+        (on_accent, colors["ACCENT_SOFT"]),
+        (on_accent, colors["ACCENT_STRONG"]),
+        (on_primary, colors["PRIMARY"]),
+        (on_primary, colors["PRIMARY_HOVER"]),
+        (colors["PRIMARY_DISABLED_TEXT"], colors["PRIMARY_DISABLED_BG"]),
+        (colors["GREEN"], colors["CARD_PLAIN"]),
+        (colors["BADGE_GREEN_TEXT"], colors["GREEN"]),
+        (colors["AMBER"], colors["CARD_PLAIN"]),
+        (colors["AMBER"], colors["NOTE_BG"]),
+        (colors["AMBER"], colors["ROOT_PLAIN"]),
+        (colors["BADGE_AMBER_TEXT"], colors["AMBER"]),
+        (colors["RED"], colors["CARD_PLAIN"]),
+    ]
+
+
+def _system_scheme_is_light() -> bool:
+    """Return Qt's light colour scheme, or false when Qt is not running.
+
+    The import stays inside this function so a headless caller can import the
+    theme module without the ``ui`` extra.
+    """
+    try:
+        from PySide6 import QtCore, QtGui
+    except ImportError:
+        return False
+    app = QtGui.QGuiApplication.instance()
+    if app is None:
+        return False
+    scheme = app.styleHints().colorScheme()
+    return scheme == QtCore.Qt.ColorScheme.Light
 
 
 def apply_shell_palette(target: object, *, light: bool = False) -> None:
@@ -324,36 +380,46 @@ def _theme_gui() -> object:
 def build_shell_style(glass: bool, *, more: bool = False, light: bool = False) -> str:
     """Return the editor-shell stylesheet.
 
-    Colours are the shared tokens. Sizes come from the density block: body
-    text, panel headers, the control radius, and the focus ring. Text views,
-    lists, trees, tables, and scroll-area viewports use those tokens too, for
-    the dark theme and the light theme. Qt is not imported.
+    Colours are the shared tokens. ``light`` selects ``voxprint-light`` and
+    fills the same stylesheet slots the dark map fills. Sizes come from the
+    density block: body text, panel headers, the control radius, and the focus
+    ring. Text views, lists, trees, tables, and scroll-area viewports use
+    those tokens too. Qt is not imported.
 
     Args:
         glass: Use the translucent Acrylic backgrounds. False uses the solid
             fallback.
         more: Use the more-transparent Acrylic backgrounds. Ignored when
             ``glass`` is false.
-        light: Use the light-theme palette for viewport backgrounds and text.
-            False uses the dark tokens.
+        light: Use ``voxprint-light``. False uses ``voxprint-dark``.
 
     Returns:
         A stylesheet string.
     """
+    chosen = dict(load().light_colors if light else load().colors)
+    TEXT = chosen["TEXT"]
+    TEXT_MUTED = chosen["TEXT_MUTED"]
+    TEXT_FAINT = chosen["TEXT_FAINT"]
+    TEXT_ON_PRIMARY = chosen["TEXT_ON_PRIMARY"]
+    PRIMARY = chosen["PRIMARY"]
+    PRIMARY_BORDER = chosen["PRIMARY_BORDER"]
+    ACCENT = chosen["ACCENT"]
+    CONTROL_BG = chosen["CONTROL_BG"]
+    CONTROL_HOVER = chosen["CONTROL_HOVER"]
+    CONTROL_BORDER = chosen["CONTROL_BORDER"]
     if glass and more:
-        root_bg, card_bg = ROOT_GLASS_MORE, CARD_GLASS_MORE
+        root_bg = chosen["ROOT_GLASS_MORE"]
+        card_bg = chosen["CARD_GLASS_MORE"]
     elif glass:
-        root_bg, card_bg = ROOT_GLASS, CARD_GLASS
+        root_bg = chosen["ROOT_GLASS"]
+        card_bg = chosen["CARD_GLASS"]
     else:
-        root_bg, card_bg = ROOT_PLAIN, CARD_PLAIN
-    if light:
-        light_colors = load().light
-        view_bg = light_colors["Base"]
-        view_text = light_colors["Text"]
-        view_alt = light_colors["AlternateBase"]
-        scroll_bg = light_colors["Window"]
-    else:
-        view_bg, view_text, view_alt, scroll_bg = CONTROL_BG, TEXT, CARD_PLAIN, card_bg
+        root_bg = chosen["ROOT_PLAIN"]
+        card_bg = chosen["CARD_PLAIN"]
+    view_bg = CONTROL_BG
+    view_text = TEXT
+    view_alt = chosen["CARD_PLAIN"]
+    scroll_bg = card_bg
     density = load().density
     radius = density.control_radius_px
     return f"""
@@ -645,7 +711,20 @@ QLabel#videoPoster {{
     border: {density.border_px}px solid {CONTROL_BORDER}; border-radius: 8px;
 }}
 QLabel#videoPath {{ color: {TEXT}; background: transparent; }}
-QPushButton#videoPlay, QPushButton#videoOpen {{ padding: 4px 14px; min-height: 34px; }}
+QPushButton#videoPlay, QPushButton#videoOpen,
+QPushButton#audioPlay, QPushButton#audioOpen {{ padding: 4px 14px; min-height: 34px; }}
+QWidget#audioResult, QWidget#audioDeck {{ background: transparent; }}
+QLabel#audioPath {{ color: {TEXT}; background: transparent; }}
+QListWidget#audioChapters {{
+    background: {CONTROL_BG}; color: {TEXT};
+    border: {density.border_px}px solid {CONTROL_BORDER}; border-radius: {radius}px;
+}}
+QSlider#audioSeek::groove:horizontal {{
+    height: 6px; background: {CONTROL_BG}; border-radius: 3px;
+}}
+QSlider#audioSeek::handle:horizontal {{
+    background: {ACCENT}; width: 16px; margin: -6px 0; border-radius: 8px;
+}}
 QSlider#videoSeek::groove:horizontal {{
     height: 6px; background: {CONTROL_BG}; border-radius: 3px;
 }}

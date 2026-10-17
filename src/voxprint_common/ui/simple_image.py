@@ -80,6 +80,7 @@ _HISTORY_LIMIT = 50
 _HISTORY_NAME = "image-history.json"
 _SOURCE_ID = "image.source"
 _MASK_ID = "image.mask"
+_VOICE_KEY = "shell.voice"
 GenerateHook = Callable[[Mapping[str, object]], None]
 
 
@@ -242,6 +243,12 @@ class SimpleImageLayout:
         self.prompt = ""
         self.video_source = ""
         self.video_output = ""
+        self.audio_output = ""
+        self.chapters: tuple[tuple[str, int], ...] = ()
+        self._input_path = ""
+        self._voices: tuple[tuple[str, str], ...] = ()
+        self._voice_id = ""
+        self._custom_voices = False
         self._seed = 0
         self.phase = Phase.EMPTY
         self.step = 0
@@ -328,6 +335,127 @@ class SimpleImageLayout:
             path: The finished video, including its folder.
         """
         self.video_output = path
+
+    def set_audio_output(self, path: str) -> None:
+        """Remember the finished audio file.
+
+        An empty path leaves the painted waveform in place. A path shows the
+        player.
+
+        Args:
+            path: The finished file, including its folder.
+        """
+        self.audio_output = path.strip()
+
+    def set_chapters(self, chapters: Iterable[tuple[str, int]]) -> None:
+        """Remember chapter titles and the time each one starts.
+
+        Args:
+            chapters: ``(title, start_ms)`` pairs. An empty list clears them.
+
+        Raises:
+            ValueError: A title is blank or a start time is negative.
+        """
+        parsed: list[tuple[str, int]] = []
+        for title, start in chapters:
+            text = str(title).strip()
+            if not text or isinstance(start, bool) or not isinstance(start, int) or start < 0:
+                raise ValueError("a chapter needs a title and a start time")
+            parsed.append((text, start))
+        self.chapters = tuple(parsed)
+
+    def input_path(self) -> str:
+        """Return the absolute path of the dropped or picked file.
+
+        Returns:
+            The path, or an empty string when the input is only a name.
+        """
+        return self._input_path
+
+    def set_input_path(self, path: str) -> None:
+        """Keep the absolute path of a dropped or picked file.
+
+        Args:
+            path: A file path. An empty string clears it. A relative path is
+                resolved from the current directory.
+        """
+        raw = path.strip()
+        if not raw:
+            self._input_path = ""
+            return
+        self._input_path = str(Path(raw).expanduser().resolve())
+
+    def set_voices(self, voices: Iterable[tuple[str, str]]) -> None:
+        """Replace the voice list. The selected id is kept when it is still there.
+
+        Args:
+            voices: ``(id, label)`` pairs. Labels are already translated.
+
+        Raises:
+            ValueError: A voice has no id or label, an id is repeated, or the
+                list is empty.
+        """
+        parsed: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        for voice_id, label in voices:
+            ident = str(voice_id).strip()
+            text = str(label).strip()
+            if not ident or not text:
+                raise ValueError("a voice needs an id and a label")
+            if ident in seen:
+                raise ValueError(f"voice {ident} is repeated")
+            seen.add(ident)
+            parsed.append((ident, text))
+        if not parsed:
+            raise ValueError("set_voices needs at least one voice")
+        self._voices = tuple(parsed)
+        self._custom_voices = True
+        if self._voice_id not in seen:
+            self._voice_id = parsed[0][0]
+        self._remember_voice()
+
+    def select_voice(self, voice_id: str) -> None:
+        """Select a voice by id and store that id in the settings state.
+
+        Args:
+            voice_id: One of the ids from :meth:`set_voices` or the built-in list.
+
+        Raises:
+            ValueError: The id is not in the current list.
+        """
+        voices = self.ensure_voices()
+        if voice_id not in {item[0] for item in voices}:
+            raise ValueError(f"unknown voice {voice_id}")
+        self._voice_id = voice_id
+        self._remember_voice()
+
+    def ensure_voices(self) -> tuple[tuple[str, str], ...]:
+        """Return the voice list, filling the built-in Warm, Clear, and Low names.
+
+        A caller that has used :meth:`set_voices` keeps that list. Otherwise the
+        labels follow the current language.
+        """
+        if not self._custom_voices:
+            self._voices = _builtin_voices()
+            if self._voice_id not in {item[0] for item in self._voices}:
+                self._voice_id = self._voices[0][0]
+            self._remember_voice()
+        return self._voices
+
+    @property
+    def voice_id(self) -> str:
+        """Return the selected voice id, or an empty string before a list exists."""
+        return self._voice_id
+
+    @property
+    def voices(self) -> tuple[tuple[str, str], ...]:
+        """Return the current ``(id, label)`` pairs."""
+        return self._voices
+
+    def _remember_voice(self) -> None:
+        if self._state is None or not self._voice_id:
+            return
+        self._state.remember(_VOICE_KEY, self._voice_id)
 
     def choose(self, row_id: str, value: str) -> None:
         """Select the chip ``value`` in ``row_id``.
@@ -428,8 +556,12 @@ class SimpleImageLayout:
         is the chip selection and the seed.
         """
         if self._state is None:
-            return {"presets": dict(self.presets), "seed": self.seed}
-        return dict(self._state.values)
+            values: dict[str, object] = {"presets": dict(self.presets), "seed": self.seed}
+        else:
+            values = dict(self._state.values)
+        if self._voice_id:
+            values[_VOICE_KEY] = self._voice_id
+        return values
 
     def set_source_path(self, path: str) -> None:
         """Store the source picture path in the shared settings state.
@@ -942,6 +1074,15 @@ def _rows_from(document: PresetFile) -> tuple[PresetRow, ...]:
     return tuple(rows)
 
 
+def _builtin_voices() -> tuple[tuple[str, str], ...]:
+    """Return Warm, Clear, and Low with stable ids."""
+    return (
+        ("warm", tr("simple.voice.warm")),
+        ("clear", tr("simple.voice.clear")),
+        ("low", tr("simple.voice.low")),
+    )
+
+
 class SimpleImageWidget:
     """Qt view of a :class:`SimpleImageLayout`. Construction imports PySide6.
 
@@ -973,6 +1114,8 @@ class SimpleImageWidget:
         on_history: Callable[[str, str], None] | None = None,
         on_seed: Callable[[int], None] | None = None,
         on_refresh: Callable[[], None] | None = None,
+        on_pause: Callable[[], None] | None = None,
+        on_resume: Callable[[], None] | None = None,
         surface: AppSurface | None = None,
     ) -> None:
         """Build the screen.
@@ -990,6 +1133,8 @@ class SimpleImageWidget:
                 actions are ``open``, ``show_folder``, ``copy``, and ``use_input``.
             on_seed: Called with the restored seed after Use prompt again.
             on_refresh: Called after the screen paints, including a time-left change.
+            on_pause: Called from Pause on the busy screen. None hides Pause.
+            on_resume: Called from Resume on the busy screen. None hides Resume.
             surface: Which app this screen is. None is Canvas.
         """
         core, gui, widgets = _qt()
@@ -1005,6 +1150,8 @@ class SimpleImageWidget:
         self._on_history = on_history
         self._on_seed = on_seed
         self._on_refresh = on_refresh
+        self._on_pause = on_pause
+        self._on_resume = on_resume
         self._surface = surface if surface is not None else surface_for("canvas")
         self._drop: object | None = None
         self._voice: object | None = None
@@ -1040,6 +1187,19 @@ class SimpleImageWidget:
         self._video_started = False
         self._value_host: object | None = None
         self._prompt_row: object | None = None
+        self._pause_button: object | None = None
+        self._resume_button: object | None = None
+        self._filling_voice = False
+        self._pill_rows: list[object] = []
+        self._audio_path: object | None = None
+        self._audio_play: object | None = None
+        self._audio_seek: object | None = None
+        self._audio_deck: object | None = None
+        self._audio_chapters: object | None = None
+        self._chapter_heading: object | None = None
+        self._audio: object | None = None
+        self._loaded_audio = ""
+        self._audio_seeking = False
         core = self._core
 
         class _Root(widgets.QWidget):
@@ -1122,12 +1282,77 @@ class SimpleImageWidget:
         self._note.setText(text)  # type: ignore[attr-defined]
         self._note.setVisible(bool(text))  # type: ignore[attr-defined]
 
+    def set_voices(self, voices: Iterable[tuple[str, str]]) -> None:
+        """Replace the voice combo and store the selected id.
+
+        Args:
+            voices: ``(id, label)`` pairs. Labels are already translated.
+        """
+        self._layout.set_voices(voices)
+        self._fill_voices()
+
+    def input_path(self) -> str:
+        """Return the absolute path of the dropped or picked file."""
+        return self._layout.input_path()
+
+    def set_input_path(self, path: str) -> None:
+        """Store a dropped or picked file and show only its name.
+
+        The tooltip keeps the absolute path.
+
+        Args:
+            path: A file path. An empty string clears the file.
+        """
+        self._layout.set_input_path(path)
+        stored = self._layout.input_path()
+        self._layout.set_prompt(stored)
+        if self._surface.video_result:
+            self._layout.set_video_source(stored)
+        self._show_input(stored)
+        if self._surface.video_result and self._layout.phase is Phase.EMPTY and stored:
+            self._paint_video()
+            self._stack.setCurrentIndex(2)  # type: ignore[attr-defined]
+
+    def set_audio_output(self, path: str) -> None:
+        """Point the player at a finished audio file.
+
+        Args:
+            path: The file to play. An empty string returns to the waveform.
+        """
+        self._layout.set_audio_output(path)
+
+    def set_chapters(self, chapters: Iterable[tuple[str, int]]) -> None:
+        """Show a chapter list. Choosing one seeks to that chapter and plays it.
+
+        Args:
+            chapters: ``(title, start_ms)`` pairs.
+        """
+        self._layout.set_chapters(chapters)
+
+    def pause(self) -> None:
+        """Call the app's pause callback. Nothing happens when none was supplied."""
+        if self._on_pause is not None:
+            self._on_pause()
+
+    def resume(self) -> None:
+        """Call the app's resume callback. Nothing happens when none was supplied."""
+        if self._on_resume is not None:
+            self._on_resume()
+
     def set_prompt_text(self, text: str) -> None:
         """Put ``text`` in the input and the layout.
+
+        A file path on a file or media input is stored as an absolute path.
+        The drop shows the file name.
 
         Args:
             text: Prompt words, a file name, or a model name.
         """
+        cleaned = text.strip()
+        kind = self._surface.input_kind
+        if kind in {InputKind.FILE, InputKind.MEDIA_VOICE} and _looks_like_path(cleaned):
+            self.set_input_path(cleaned)
+            return
         self._layout.set_prompt(text)
         if self._surface.video_result:
             self._layout.set_video_source(text.strip())
@@ -1144,6 +1369,7 @@ class SimpleImageWidget:
         """
         if prompt:
             self._show_input(self._layout.prompt)
+        self._fill_voices()
         self._sync_presets()
         self._reflow_expert_toggle()
         self._paint_value_labels()
@@ -1548,6 +1774,22 @@ class SimpleImageWidget:
         layout.addLayout(bar_row)
         cancel_row = widgets.QHBoxLayout()
         cancel_row.addStretch(1)
+        if self._on_pause is not None:
+            pause = widgets.QPushButton(tr("simple.pause"))
+            pause.setObjectName("pause")
+            pause.setAutoDefault(False)
+            _fit_plain(pause, pad=28)
+            pause.clicked.connect(self.pause)
+            self._pause_button = pause
+            cancel_row.addWidget(pause)
+        if self._on_resume is not None:
+            resume = widgets.QPushButton(tr("simple.resume"))
+            resume.setObjectName("resume")
+            resume.setAutoDefault(False)
+            _fit_plain(resume, pad=28)
+            resume.clicked.connect(self.resume)
+            self._resume_button = resume
+            cancel_row.addWidget(resume)
         cancel = widgets.QPushButton(tr("simple.cancel"))
         cancel.setObjectName("cancel")
         cancel.setAutoDefault(False)
@@ -1604,8 +1846,10 @@ class SimpleImageWidget:
         return page
 
     def _player_page(self) -> object:
+        """Build the waveform, and the player that replaces it once audio exists."""
         widgets = self._widgets
         page = widgets.QWidget()
+        page.setObjectName("audioResult")
         layout = widgets.QVBoxLayout(page)
         layout.setContentsMargins(16, 16, 16, 12)
         layout.setSpacing(10)
@@ -1615,12 +1859,62 @@ class SimpleImageWidget:
         player.setMinimumHeight(160)
         self._player = player
         layout.addWidget(player, 1)
-        chapters = widgets.QLabel()
-        chapters.setObjectName("chapters")
-        chapters.setAlignment(self._qt.AlignLeft | self._qt.AlignTop)
-        chapters.setWordWrap(True)
-        self._chapters = chapters
-        layout.addWidget(chapters)
+        deck = widgets.QWidget()
+        deck.setObjectName("audioDeck")
+        deck_layout = widgets.QVBoxLayout(deck)
+        deck_layout.setContentsMargins(0, 0, 0, 0)
+        deck_layout.setSpacing(8)
+        controls = widgets.QWidget()
+        controls.setObjectName("audioControls")
+        row = widgets.QHBoxLayout(controls)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
+        play = widgets.QPushButton(tr("simple.video.play"))
+        play.setObjectName("audioPlay")
+        play.setAutoDefault(False)
+        _fit_plain(play, pad=28)
+        play.clicked.connect(self._toggle_audio)
+        self._audio_play = play
+        row.addWidget(play)
+        seek = widgets.QSlider(self._qt.Horizontal)
+        seek.setObjectName("audioSeek")
+        seek.setRange(0, 1)
+        seek.setValue(0)
+        seek.sliderPressed.connect(self._audio_seek_pressed)
+        seek.sliderReleased.connect(self._audio_seek_released)
+        self._audio_seek = seek
+        row.addWidget(seek, 1)
+        deck_layout.addWidget(controls)
+        heading = widgets.QLabel(tr("simple.player.chapters"))
+        heading.setObjectName("chapters")
+        self._chapter_heading = heading
+        deck_layout.addWidget(heading)
+        chapters = widgets.QListWidget()
+        chapters.setObjectName("audioChapters")
+        chapters.setMaximumHeight(96)
+        chapters.setSpacing(2)
+        chapters.itemClicked.connect(self._play_chapter)
+        self._audio_chapters = chapters
+        deck_layout.addWidget(chapters)
+        path_row = widgets.QHBoxLayout()
+        path_row.setSpacing(8)
+        path = widgets.QLabel()
+        path.setObjectName("audioPath")
+        path.setWordWrap(True)
+        path.setTextInteractionFlags(self._qt.TextSelectableByMouse)
+        self._audio_path = path
+        path_row.addWidget(path, 1)
+        open_folder = widgets.QPushButton(tr("simple.menu.open_folder"))
+        open_folder.setObjectName("audioOpen")
+        open_folder.setAutoDefault(False)
+        _fit_plain(open_folder, pad=28)
+        open_folder.clicked.connect(lambda: self._command("file.open_folder"))
+        path_row.addWidget(open_folder)
+        deck_layout.addLayout(path_row)
+        self._audio_deck = deck
+        deck.hide()
+        layout.addWidget(deck, 1)
+        self._open_audio(page)
         return page
 
     def _video_page(self) -> object:
@@ -1793,6 +2087,7 @@ class SimpleImageWidget:
     def _fill_presets(self) -> None:
         widgets = self._widgets
         compact: object | None = None
+        compact_host: object | None = None
         for row in self._layout.rows:
             group = widgets.QButtonGroup(self.root)
             group.setExclusive(True)
@@ -1800,11 +2095,15 @@ class SimpleImageWidget:
             lines = (("", row.choices),) if row.row_id == "size" else _choice_groups(row.choices)
             for index, (group_key, choices) in enumerate(lines):
                 shared = compact if row.row_id == "detail" and index == 0 else None
-                line = shared if shared is not None else widgets.QHBoxLayout()
                 if shared is None:
-                    line.setSpacing(8)
+                    host, line = _pill_flow(widgets, self._core)
+                    self._pill_rows.append(host)
                 else:
-                    line.addSpacing(16)  # type: ignore[attr-defined]
+                    host = compact_host
+                    line = shared
+                    gap = widgets.QWidget()
+                    gap.setFixedWidth(16)
+                    line.addWidget(gap)  # type: ignore[attr-defined]
                 label = widgets.QLabel(tr(row.label_key) if index == 0 else "")
                 if index == 0:
                     label.setObjectName(f"preset-{row.row_id}")
@@ -1890,11 +2189,13 @@ class SimpleImageWidget:
                     line.addWidget(reset)
                 if row.row_id == "output":
                     compact = line
+                    compact_host = host
+                    self._preset_rows.addWidget(host)  # type: ignore[attr-defined]
                     continue
-                line.addStretch(1)  # type: ignore[attr-defined]
-                if shared is None or row.row_id == "detail":
-                    self._preset_rows.addLayout(line)
+                if shared is None:
+                    self._preset_rows.addWidget(host)  # type: ignore[attr-defined]
                 compact = None
+                compact_host = None
 
     def _sync_presets(self) -> None:
         for row in self._layout.rows:
@@ -1912,20 +2213,26 @@ class SimpleImageWidget:
                 if button is None or not button.isCheckable():
                     continue
                 button.setText(_chip_text(choice.label_key, selected, choice.value, kind))
-                _fit_chip(button)
                 button.setChecked(_chip_checked(selected, choice.value, kind))
+                _fit_chip(button)
             if group is not None and kind is not PresetMatch.CUSTOM:
                 group.setExclusive(True)  # type: ignore[attr-defined]
             custom = self._customs.get(row.row_id)
             if custom is not None:
                 custom.setVisible(kind is PresetMatch.CUSTOM)  # type: ignore[attr-defined]
                 custom.setChecked(kind is PresetMatch.CUSTOM)  # type: ignore[attr-defined]
+                _fit_chip(custom)
             reset = self._resets.get(row.row_id)
             if reset is None or status is None:
                 continue
             reset.setVisible(kind is not PresetMatch.EXACT)  # type: ignore[attr-defined]
             reset.setText(tr("simple.preset.reset", name=tr(status.label_key)))  # type: ignore[attr-defined]
             _fit_chip(reset)
+        for host in self._pill_rows:
+            layout = host.layout()  # type: ignore[attr-defined]
+            if layout is not None:
+                layout.invalidate()
+            host.updateGeometry()  # type: ignore[attr-defined]
         self._apply_size_filter()
         self._refresh_resets()
 
@@ -1948,6 +2255,7 @@ class SimpleImageWidget:
             )
             if button is not None:
                 button.setVisible(choice.group_key == orient)  # type: ignore[attr-defined]
+        fitted: list[object] = []
         for choice in row.choices:
             if not choice.group_key:
                 continue
@@ -1955,8 +2263,11 @@ class SimpleImageWidget:
                 self._widgets.QPushButton,
                 f"orient-{choice.group_key.rsplit('.', 1)[-1]}",
             )
-            if marker is not None:
-                marker.setChecked(choice.group_key == orient)  # type: ignore[attr-defined]
+            if marker is None or marker in fitted:
+                continue
+            marker.setChecked(choice.group_key == orient)  # type: ignore[attr-defined]
+            _fit_chip(marker)
+            fitted.append(marker)
 
     def _set_orientation(self, group_key: str) -> None:
         rows = [row for row in self._layout.rows if row.row_id == "size"]
@@ -2228,10 +2539,9 @@ class SimpleImageWidget:
             voice_label.setObjectName("voiceLabel")
             voice = _eliding_combo()
             voice.setObjectName("voicePicker")
-            voice.addItem(tr("simple.voice.warm"))
-            voice.addItem(tr("simple.voice.clear"))
-            voice.addItem(tr("simple.voice.low"))
             self._voice = voice
+            self._fill_voices()
+            voice.currentIndexChanged.connect(self._on_voice)
             row.addWidget(voice_label)
             row.addWidget(voice, 1)
             column.addLayout(row)
@@ -2253,11 +2563,7 @@ class SimpleImageWidget:
                     if not urls:
                         return False
                     path = urls[0].toLocalFile() or urls[0].toString()
-                    name = Path(path).name or path
-                    if self._surface.video_result:
-                        self.set_prompt_text(path)
-                    else:
-                        self.set_prompt_text(name)
+                    self.set_input_path(path)
                     event.acceptProposedAction()  # type: ignore[attr-defined]
                     return True
                 return False
@@ -2271,7 +2577,16 @@ class SimpleImageWidget:
             self._prompt.setPlainText(text)  # type: ignore[attr-defined]
         if self._drop is not None:
             hint = tr(self._surface.drop_key)
-            name = text.strip()
+            stored = self._layout.input_path()
+            if stored and not self._surface.video_result:
+                name = Path(stored).name
+                self._drop.setToolTip(stored)  # type: ignore[attr-defined]
+            else:
+                name = text.strip()
+                if stored:
+                    self._drop.setToolTip(stored)  # type: ignore[attr-defined]
+                elif str(self._drop.toolTip()) != "":  # type: ignore[attr-defined]
+                    self._drop.setToolTip("")  # type: ignore[attr-defined]
             self._drop.setText(f"{hint}\n{name}" if name else hint)  # type: ignore[attr-defined]
         if self._model is None or not text.strip():
             return
@@ -2343,6 +2658,37 @@ class SimpleImageWidget:
         self._restore_seed()
         self.set_note("")
         self.refresh(prompt=True)
+
+    def _fill_voices(self) -> None:
+        combo = self._voice
+        if combo is None:
+            return
+        voices = self._layout.ensure_voices()
+        ids = [voice_id for voice_id, _label in voices]
+        labels = [label for _voice_id, label in voices]
+        current_ids = [combo.itemData(index) for index in range(combo.count())]  # type: ignore[attr-defined]
+        current_labels = [combo.itemText(index) for index in range(combo.count())]  # type: ignore[attr-defined]
+        if current_ids == ids and current_labels == labels:
+            return
+        self._filling_voice = True
+        combo.blockSignals(True)  # type: ignore[attr-defined]
+        combo.clear()  # type: ignore[attr-defined]
+        for voice_id, label in voices:
+            combo.addItem(label, voice_id)  # type: ignore[attr-defined]
+        index = combo.findData(self._layout.voice_id)  # type: ignore[attr-defined]
+        combo.setCurrentIndex(0 if index < 0 else index)  # type: ignore[attr-defined]
+        combo.blockSignals(False)  # type: ignore[attr-defined]
+        self._filling_voice = False
+        chosen = combo.currentData()  # type: ignore[attr-defined]
+        if isinstance(chosen, str) and chosen != self._layout.voice_id:
+            self._layout.select_voice(chosen)
+
+    def _on_voice(self, index: int) -> None:
+        if self._filling_voice or self._voice is None or index < 0:
+            return
+        chosen = self._voice.itemData(index)  # type: ignore[attr-defined]
+        if isinstance(chosen, str):
+            self._layout.select_voice(chosen)
 
     def _cancel(self) -> None:
         self._layout.cancel()
@@ -2568,6 +2914,145 @@ class SimpleImageWidget:
             return
         seek.setRange(0, max(int(duration), 1))  # type: ignore[attr-defined]
 
+    def _open_audio(self, page: object) -> None:
+        """Attach an audio player, or leave the controls as the fallback."""
+        loaded = _qt_audio()
+        if loaded is None:
+            return
+        player_cls, audio_cls = loaded
+        try:
+            player = player_cls(page)
+            audio = audio_cls(page)
+            player.setAudioOutput(audio)
+        except AttributeError, ImportError, RuntimeError:
+            return
+        self._audio = player
+        player.playbackStateChanged.connect(self._on_audio_state)
+        player.positionChanged.connect(self._on_audio_position)
+        player.durationChanged.connect(self._on_audio_duration)
+        player.errorOccurred.connect(self._on_audio_error)
+
+    def _paint_audio(self, item_id: str) -> None:
+        """Show the waveform until an output path exists, then the player."""
+        player = self._player
+        deck = self._audio_deck
+        if player is None or deck is None:
+            return
+        path = self._layout.audio_output.strip()
+        if not path:
+            deck.hide()  # type: ignore[attr-defined]
+            player.show()  # type: ignore[attr-defined]
+            player.setPixmap(_bars(self._gui, item_id, 880, 220))  # type: ignore[attr-defined]
+            return
+        player.hide()  # type: ignore[attr-defined]
+        deck.show()  # type: ignore[attr-defined]
+        label = self._audio_path
+        if label is not None:
+            label.setText(path)  # type: ignore[attr-defined]
+            label.setToolTip(path)  # type: ignore[attr-defined]
+        self._fill_audio_chapters()
+        self._load_audio(path)
+        self._sync_audio_labels()
+
+    def _fill_audio_chapters(self) -> None:
+        chapters = self._audio_chapters
+        if chapters is None:
+            return
+        chapters.blockSignals(True)  # type: ignore[attr-defined]
+        chapters.clear()  # type: ignore[attr-defined]
+        for title, start in self._layout.chapters:
+            item = self._widgets.QListWidgetItem(title)
+            item.setData(self._qt.UserRole, start)
+            chapters.addItem(item)  # type: ignore[attr-defined]
+        chapters.blockSignals(False)  # type: ignore[attr-defined]
+        visible = bool(self._layout.chapters)
+        chapters.setVisible(visible)  # type: ignore[attr-defined]
+        heading = self._chapter_heading
+        if heading is not None:
+            heading.setVisible(visible)  # type: ignore[attr-defined]
+
+    def _load_audio(self, path: str) -> None:
+        media = self._audio
+        if media is None or path == self._loaded_audio:
+            return
+        url = self._core.QUrl.fromLocalFile(path)
+        media.setSource(url)  # type: ignore[attr-defined]
+        self._loaded_audio = path
+
+    def _toggle_audio(self) -> None:
+        media = self._audio
+        if media is None:
+            return
+        if self._audio_is_playing():
+            media.pause()  # type: ignore[attr-defined]
+            return
+        media.play()  # type: ignore[attr-defined]
+
+    def _audio_is_playing(self) -> bool:
+        media = self._audio
+        if media is None:
+            return False
+        state = media.playbackState()  # type: ignore[attr-defined]
+        return state == media.PlaybackState.PlayingState  # type: ignore[attr-defined]
+
+    def _sync_audio_labels(self) -> None:
+        play = self._audio_play
+        if play is None:
+            return
+        key = "simple.video.pause" if self._audio_is_playing() else "simple.video.play"
+        label = tr(key)
+        if str(play.text()) != label:  # type: ignore[attr-defined]
+            play.setText(label)  # type: ignore[attr-defined]
+            _fit_plain(play, pad=28)
+
+    def _audio_seek_pressed(self) -> None:
+        self._audio_seeking = True
+
+    def _audio_seek_released(self) -> None:
+        self._audio_seeking = False
+        media = self._audio
+        seek = self._audio_seek
+        if media is None or seek is None:
+            return
+        media.setPosition(int(seek.value()))  # type: ignore[attr-defined]
+
+    def _play_chapter(self, item: object) -> None:
+        start = item.data(self._qt.UserRole)  # type: ignore[attr-defined]
+        if isinstance(start, bool) or not isinstance(start, int):
+            return
+        seek = self._audio_seek
+        if seek is not None:
+            if start > int(seek.maximum()):  # type: ignore[attr-defined]
+                seek.setRange(0, start)  # type: ignore[attr-defined]
+            seek.blockSignals(True)  # type: ignore[attr-defined]
+            seek.setValue(start)  # type: ignore[attr-defined]
+            seek.blockSignals(False)  # type: ignore[attr-defined]
+        media = self._audio
+        if media is None:
+            return
+        media.setPosition(start)  # type: ignore[attr-defined]
+        media.play()  # type: ignore[attr-defined]
+
+    def _on_audio_state(self, _state: object) -> None:
+        self._sync_audio_labels()
+
+    def _on_audio_position(self, position: int) -> None:
+        seek = self._audio_seek
+        if self._audio_seeking or seek is None:
+            return
+        seek.blockSignals(True)  # type: ignore[attr-defined]
+        seek.setValue(int(position))  # type: ignore[attr-defined]
+        seek.blockSignals(False)  # type: ignore[attr-defined]
+
+    def _on_audio_duration(self, duration: int) -> None:
+        seek = self._audio_seek
+        if seek is None:
+            return
+        seek.setRange(0, max(int(duration), int(seek.value()), 1))  # type: ignore[attr-defined]
+
+    def _on_audio_error(self, *_args: object) -> None:
+        self._sync_audio_labels()
+
     def _on_video_error(self, *_args: object) -> None:
         self._video_started = False
         self._show_poster()
@@ -2587,8 +3072,7 @@ class SimpleImageWidget:
             if self._surface.video_result:
                 self._paint_video()
             else:
-                self._player.setPixmap(_bars(self._gui, item.item_id, 880, 220))  # type: ignore[attr-defined]
-                self._chapters.setText(_chapters())  # type: ignore[attr-defined]
+                self._paint_audio(item.item_id)
         elif kind is ResultKind.COMPARE:
             self._paint_wipe()
         elif kind is ResultKind.DOCUMENT:
@@ -2911,16 +3395,6 @@ def _clear(layout: object) -> None:
             widget.deleteLater()
 
 
-def _chapters() -> str:
-    return "\n".join(
-        (
-            tr("simple.player.chapters"),
-            tr("simple.chapter.1"),
-            tr("simple.chapter.2"),
-        )
-    )
-
-
 def _chapter_text(prompt: str) -> str:
     title = prompt.strip() or tr("simple.chapter.1")
     return "\n\n".join(
@@ -3145,27 +3619,137 @@ def _fit_plain(button: object, *, pad: int) -> None:
 
 
 def _fit_chip(button: object) -> None:
-    """Reserve the checked face: weight 600, the body size, the chip padding, and the border.
+    """Size one chip or pill to the face it paints, checked or not.
 
     The width is that font's advance plus ``chip_pad_px`` and ``border_px`` on
     each side. Those are the same density tokens the stylesheet uses for
-    ``QPushButton#expertToggle`` and ``QPushButton[chip="true"]``. The checked
-    rule only sets the weight, so an unchecked pill keeps this width and does
-    not clip when it is selected.
+    ``QPushButton#expertToggle`` and ``QPushButton[chip="true"]``.
     """
     button.setMinimumWidth(_chip_width(button))  # type: ignore[attr-defined]
 
 
 def _chip_width(button: object) -> int:
+    """Return the width of the face this pill actually paints.
+
+    A checked chip or Expert toggle is weight 600. Every other pill uses the
+    regular face. The padding and the border are the density tokens the
+    stylesheet uses, on each side.
+    """
     density = load().density
     text = str(button.text())  # type: ignore[attr-defined]
     _core, gui, _widgets = _qt()
     button.ensurePolished()  # type: ignore[attr-defined]
     font = gui.QFont(button.font())  # type: ignore[attr-defined]
     font.setPixelSize(density.body_px)
-    font.setWeight(gui.QFont.Weight.DemiBold)
+    checked = bool(button.isChecked()) and (  # type: ignore[attr-defined]
+        button.property("chip") == "true" or str(button.objectName()) == "expertToggle"  # type: ignore[attr-defined]
+    )
+    if checked:
+        font.setWeight(gui.QFont.Weight.DemiBold)
     advance = int(gui.QFontMetrics(font).horizontalAdvance(text))  # type: ignore[attr-defined]
     return advance + (density.chip_pad_px + density.border_px) * 2
+
+
+def _looks_like_path(text: str) -> bool:
+    """Return whether ``text`` is a file path rather than a bare name."""
+    if not text:
+        return False
+    if Path(text).is_absolute():
+        return True
+    return "/" in text or "\\" in text
+
+
+def _pill_flow(widgets: object, core: object) -> tuple[object, object]:
+    """Return a row that wraps pills onto another line instead of clipping them."""
+
+    class _Flow(widgets.QLayout):  # type: ignore[name-defined]
+        def __init__(self, parent: object = None) -> None:
+            super().__init__(parent)
+            self._items: list[object] = []
+            self.setSpacing(8)
+            self.setContentsMargins(0, 0, 0, 0)
+
+        def addItem(self, item: object) -> None:
+            self._items.append(item)
+
+        def count(self) -> int:
+            return len(self._items)
+
+        def itemAt(self, index: int) -> object:
+            if 0 <= index < len(self._items):
+                return self._items[index]
+            return None  # type: ignore[return-value]
+
+        def takeAt(self, index: int) -> object:
+            if 0 <= index < len(self._items):
+                return self._items.pop(index)
+            return None  # type: ignore[return-value]
+
+        def expandingDirections(self) -> object:
+            return core.Qt.Orientations(0)  # type: ignore[attr-defined]
+
+        def hasHeightForWidth(self) -> bool:
+            return True
+
+        def heightForWidth(self, width: int) -> int:
+            return self._place(core.QRect(0, 0, width, 0), apply=False)  # type: ignore[attr-defined]
+
+        def setGeometry(self, rect: object) -> None:
+            super().setGeometry(rect)  # type: ignore[arg-type]
+            self._place(rect, apply=True)
+
+        def sizeHint(self) -> object:
+            return self.minimumSize()
+
+        def minimumSize(self) -> object:
+            width = 0
+            height = 0
+            for item in self._items:
+                item_width, item_height = _pill_size(item)
+                width = max(width, item_width)
+                height = max(height, item_height)
+            margins = self.contentsMargins()
+            return core.QSize(  # type: ignore[attr-defined]
+                width + margins.left() + margins.right(),
+                height + margins.top() + margins.bottom(),
+            )
+
+        def _place(self, rect: object, *, apply: bool) -> int:
+            margins = self.contentsMargins()
+            spacing = self.spacing()
+            left = rect.x() + margins.left()  # type: ignore[attr-defined]
+            top = rect.y() + margins.top()  # type: ignore[attr-defined]
+            available = max(0, rect.width() - margins.left() - margins.right())  # type: ignore[attr-defined]
+            x = left
+            y = top
+            line_height = 0
+            for item in self._items:
+                item_width, item_height = _pill_size(item)
+                if available > 0 and x > left and x + item_width > left + available:
+                    x = left
+                    y += line_height + spacing
+                    line_height = 0
+                if apply:
+                    item.setGeometry(  # type: ignore[attr-defined]
+                        core.QRect(x, y, item_width, item_height)  # type: ignore[attr-defined]
+                    )
+                x += item_width + spacing
+                line_height = max(line_height, item_height)
+            return y + line_height + margins.bottom() - rect.y()  # type: ignore[attr-defined]
+
+    host = widgets.QWidget()  # type: ignore[attr-defined]
+    host.setObjectName("pillRow")
+    flow = _Flow(host)
+    host.setLayout(flow)
+    return host, flow
+
+
+def _pill_size(item: object) -> tuple[int, int]:
+    hint = item.sizeHint()  # type: ignore[attr-defined]
+    minimum = item.minimumSize()  # type: ignore[attr-defined]
+    width = max(int(hint.width()), int(minimum.width()))
+    height = max(int(hint.height()), int(minimum.height()))
+    return width, height
 
 
 def _apply_suffix(spin: object, spec: SettingSpec) -> None:
@@ -3313,6 +3897,15 @@ def _qt() -> tuple[object, object, object]:
     from PySide6 import QtCore, QtGui, QtWidgets
 
     return QtCore, QtGui, QtWidgets
+
+
+def _qt_audio() -> tuple[object, object] | None:
+    """Import the audio player, or return None when Qt Multimedia is missing."""
+    try:
+        from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+    except ImportError:
+        return None
+    return QMediaPlayer, QAudioOutput
 
 
 def _qt_media() -> tuple[object, object, object] | None:

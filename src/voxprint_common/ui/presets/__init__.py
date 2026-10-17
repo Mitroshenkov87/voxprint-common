@@ -264,6 +264,27 @@ class SettingState:
         self._normalize()
         self._write()
 
+    def remember(self, key: str, value: str) -> None:
+        """Store a text value that is not a preset key.
+
+        Preset groups do not own ``key``, so choosing a chip does not clear it.
+        The value is part of the saved state.
+
+        Args:
+            key: Setting id, such as ``shell.voice``.
+            value: The text to keep.
+
+        Raises:
+            ValueError: ``key`` is reserved or ``value`` is not text.
+        """
+        reject_reserved_key(key)
+        if not isinstance(value, str):
+            raise ValueError(f"{key} must be text")
+        if self.values.get(key) == value:
+            return
+        self.values[key] = value
+        self._write()
+
     def choose(self, group_id: str, option_id: str) -> None:
         """Select a preset and write its values immediately.
 

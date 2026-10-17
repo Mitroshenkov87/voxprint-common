@@ -91,6 +91,7 @@ def main() -> None:
     _check_expert(app)
     _check_simple(app, Qt, QTest)
     _check_variants(app, out)
+    _check_audiobook(app)
     _check_viewer(app)
     grab_shell(out / "en-shell.png", language="en", full_layout=True)
     grab_shell(out / "ru-shell.png", language="ru", full_layout=True)
@@ -127,6 +128,13 @@ def main() -> None:
         modified=True,
     )
     grab_shell(out / "image-simple.png", language="en", result=True, app_id="canvas")
+    grab_shell(
+        out / "en-image-light.png",
+        language="en",
+        result=True,
+        app_id="canvas",
+        light=True,
+    )
     grab_shell(out / "image-expert.png", language="en", expert=True, result=True, app_id="canvas")
     grab_shell(
         out / "audio-simple.png",
@@ -369,7 +377,7 @@ def _check_variants(app: object, out: Path) -> None:
         ("canvas", "simple.generate", "promptBox", "result"),
         ("enlarge", "simple.action.enlarge", "fileDrop", "result"),
         ("lucent", "simple.generate", "promptBox", "result"),
-        ("audiobook-builder", "simple.action.audiobook", "voicePicker", "player"),
+        ("audiobook-builder", "simple.action.audiobook", "voicePicker", "audioPlay"),
         ("movie-dubber", "simple.action.dub", "fileDrop", "videoPoster"),
         ("clarity", "simple.action.improve_video", "fileDrop", "compareSlider"),
         ("plotweaver", "simple.action.write", "promptBox", "documentView"),
@@ -408,6 +416,7 @@ def _check_variants(app: object, out: Path) -> None:
             shell.find("QLabel", result_name)
             or shell.find("QSlider", result_name)
             or shell.find("QPlainTextEdit", result_name)
+            or shell.find("QPushButton", result_name)
         )
         assert result is not None and result.isVisible()  # type: ignore[attr-defined]
         shell.close()
@@ -465,6 +474,7 @@ def _check_viewer(app: object) -> None:
     if path.is_file():
         data = read()
         data.pop("ui.window", None)
+        data.pop("ui.geometry", None)
         path.write_text(json.dumps(data), encoding="utf-8")
     shell = ReferenceShell(state_dir=path.parent / "viewer-geometry")
     shell.show()
@@ -484,6 +494,7 @@ def _check_viewer(app: object) -> None:
     if path.is_file():
         data = read()
         data.pop("ui.window", None)
+        data.pop("ui.geometry", None)
         path.write_text(json.dumps(data), encoding="utf-8")
     viewer = ReferenceShell(app="viewer", state_dir=path.parent / "viewer-screen")
     viewer.show()
@@ -746,7 +757,31 @@ def _check_simple(app: object, qt: object, test: object) -> None:
     app.processEvents()  # type: ignore[attr-defined]
     assert layout_json(shell.history.layout) == before
     assert shell.widget.styleSheet() == style_before  # type: ignore[attr-defined]
-    assert _window_boxes(shell, steady) == simple_boxes
+    after = _window_boxes(shell, steady)
+    toggle_before = simple_boxes["expertToggle"]
+    toggle_after = after["expertToggle"]
+    overflow_before = simple_boxes["overflow"]
+    overflow_after = after["overflow"]
+    # The checked Expert pill paints a heavier face, so it grows left.
+    # The overflow button beside it shifts by that same amount.
+    delta = toggle_after[2] - toggle_before[2]
+    assert delta >= 0
+    assert toggle_after == (
+        toggle_before[0] - delta,
+        toggle_before[1],
+        toggle_after[2],
+        toggle_before[3],
+    )
+    assert overflow_after == (
+        overflow_before[0] - delta,
+        overflow_before[1],
+        overflow_before[2],
+        overflow_before[3],
+    )
+    for name, box in simple_boxes.items():
+        if name in {"expertToggle", "overflow"}:
+            continue
+        assert after[name] == box, (name, box, after[name])
     stage_after = _window_box(shell, stage)
     result_after = _window_box(shell, result)
     assert stage_after[0] == stage_box[0] and stage_after[1] == stage_box[1]
@@ -1483,7 +1518,7 @@ def _check_busy_generate(app: object) -> None:
     from voxprint_common.ui.shell import ReferenceShell
     from voxprint_common.ui.simple_image import Phase
 
-    shell = ReferenceShell(app="canvas")
+    shell = ReferenceShell(app="canvas", state_dir=Path(sys.argv[1]) / "chip-state" / "busy")
     shell.resize(1200, 900)
     shell.show()
     app.processEvents()  # type: ignore[attr-defined]
@@ -1629,7 +1664,8 @@ def _check_dub_surface(app: object) -> None:
     from voxprint_common.ui.shell import ReferenceShell
 
     set_language("en")
-    book = ReferenceShell(app="audiobook-builder")
+    root = Path(sys.argv[1]) / "chip-state"
+    book = ReferenceShell(app="audiobook-builder", state_dir=root / "book")
     book.resize(1200, 900)
     book.show()
     app.processEvents()  # type: ignore[attr-defined]
@@ -1641,7 +1677,7 @@ def _check_dub_surface(app: object) -> None:
     app.processEvents()  # type: ignore[attr-defined]
 
     set_language("ru")
-    shell = ReferenceShell(app="movie-dubber")
+    shell = ReferenceShell(app="movie-dubber", state_dir=root / "dub")
     shell.resize(1200, 900)
     shell.show()
     app.processEvents()  # type: ignore[attr-defined]
@@ -1676,7 +1712,7 @@ def _check_dub_surface(app: object) -> None:
 
 def _check_chip_reflow(app: object) -> None:
     """A chip and the Expert toggle follow a new label, language, or checked state."""
-    from PySide6.QtGui import QFont, QFontMetrics
+    from PySide6.QtGui import QFontMetrics
     from PySide6.QtWidgets import QPushButton
 
     from voxprint_common.i18n import set_language, tr
@@ -1696,10 +1732,7 @@ def _check_chip_reflow(app: object) -> None:
     assert toggle.minimumWidth() == _chip_width(toggle)
 
     def side(button: QPushButton) -> int:
-        font = QFont(button.font())
-        font.setPixelSize(load().density.body_px)
-        font.setWeight(QFont.Weight.DemiBold)
-        advance = QFontMetrics(font).horizontalAdvance(button.text())
+        advance = QFontMetrics(_painted_button_font(button)).horizontalAdvance(button.text())  # type: ignore[arg-type]
         return (button.width() - advance) // 2
 
     shell.simple.set_expert(True)
@@ -1852,6 +1885,169 @@ def _check_chip_fit(app: object) -> None:
             shell.close()
             app.processEvents()  # type: ignore[attr-defined]
     _check_chip_reflow(app)
+    _check_pill_wrap(app)
+
+
+def _check_pill_wrap(app: object) -> None:
+    """A long pill wraps onto a second row instead of clipping, in Russian and German."""
+    from PySide6.QtGui import QFontMetrics
+    from PySide6.QtWidgets import QPushButton, QWidget
+
+    from voxprint_common.i18n import set_language
+    from voxprint_common.ui.shell import ReferenceShell
+    from voxprint_common.ui.simple_image import _chip_width, _fit_chip
+    from voxprint_common.ui.tokens import load
+
+    label = "Оставить язык книги"
+    pad = load().density.chip_pad_px
+    for language in ("ru", "de"):
+        set_language(language)
+        shell = ReferenceShell(app="canvas")
+        shell.resize(1200, 900)
+        shell.show()
+        app.processEvents()  # type: ignore[attr-defined]
+        chips = [
+            button
+            for button in shell.widget.findChildren(QPushButton)
+            if button.property("chip") == "true" and button.isVisible() and button.text()
+        ]
+        assert len(chips) >= 4
+        for chip in chips:
+            chip.setChecked(False)
+            chip.setText(label)
+            _fit_chip(chip)
+        shell.resize(1190, 900)
+        shell.resize(1200, 900)
+        app.processEvents()  # type: ignore[attr-defined]
+        wrapped = False
+        for host in shell.widget.findChildren(QWidget, "pillRow"):
+            buttons = [
+                button
+                for button in host.findChildren(QPushButton)
+                if button.isVisible() and button.text() == label
+            ]
+            if len({button.y() for button in buttons}) >= 2:
+                wrapped = True
+        assert wrapped, language
+        for chip in chips:
+            if not chip.isVisible():
+                continue
+            advance = QFontMetrics(_painted_button_font(chip)).horizontalAdvance(label)  # type: ignore[arg-type]
+            assert chip.text() == label
+            assert chip.minimumWidth() == _chip_width(chip)
+            assert chip.width() >= advance, (language, chip.width(), advance)
+            assert (chip.width() - advance) // 2 >= pad, (language, chip.text(), chip.width())
+        shell.close()
+        app.processEvents()  # type: ignore[attr-defined]
+    set_language("en")
+
+
+def _check_audiobook(app: object) -> None:
+    """Voices, the book path, pause and resume, and the audio player."""
+    from PySide6.QtCore import QMimeData, Qt, QUrl
+    from PySide6.QtGui import QDropEvent
+
+    from voxprint_common.i18n import set_language
+    from voxprint_common.ui.safety import ReviewedOutput
+    from voxprint_common.ui.shell import ReferenceShell
+
+    set_language("en")
+    root = Path(sys.argv[1]) / "audio-state"
+    plain = ReferenceShell(app="audiobook-builder", state_dir=root / "plain")
+    plain.resize(1200, 900)
+    plain.show()
+    app.processEvents()  # type: ignore[attr-defined]
+    plain.simple.set_prompt_text("book.epub")
+    assert plain.image.generate() is True
+    plain.simple.refresh()
+    app.processEvents()  # type: ignore[attr-defined]
+    assert plain.find("QPushButton", "pause") is None
+    assert plain.find("QPushButton", "resume") is None
+    plain.image.cancel()
+    bars = ReferenceShell(app="audiobook-builder", state_dir=root / "bars")
+    bars.resize(1200, 900)
+    bars.show()
+    bars.simple.set_prompt_text("book.epub")
+    assert bars.image.generate() is True
+    finished = bars.image.finish(
+        "bars-only",
+        ReviewedOutput(data=b"wav", mime="audio/wav"),
+    )
+    assert finished is not None
+    bars.simple.refresh()
+    app.processEvents()  # type: ignore[attr-defined]
+    waveform = bars.find("QLabel", "player")
+    deck = bars.find("QWidget", "audioDeck")
+    assert waveform is not None and waveform.isVisible()  # type: ignore[attr-defined]
+    assert deck is not None and deck.isVisible() is False  # type: ignore[attr-defined]
+    bars.close()
+    plain.close()
+    paused: list[str] = []
+    shell = ReferenceShell(
+        app="audiobook-builder",
+        state_dir=root / "player",
+        on_pause=lambda: paused.append("pause"),
+        on_resume=lambda: paused.append("resume"),
+    )
+    shell.resize(1200, 900)
+    shell.show()
+    app.processEvents()  # type: ignore[attr-defined]
+    shell.simple.set_prompt_text("book.epub")
+    assert shell.image.generate() is True
+    shell.simple.refresh()
+    app.processEvents()  # type: ignore[attr-defined]
+    pause = shell.find("QPushButton", "pause")
+    resume = shell.find("QPushButton", "resume")
+    assert pause is not None and pause.isEnabled() and pause.isVisible()  # type: ignore[attr-defined]
+    assert resume is not None and resume.isEnabled() and resume.isVisible()  # type: ignore[attr-defined]
+    pause.click()  # type: ignore[attr-defined]
+    resume.click()  # type: ignore[attr-defined]
+    assert paused == ["pause", "resume"]
+    shell.image.cancel()
+    shell.simple.set_voices((("anya", "Anya"), ("boris", "Boris")))
+    app.processEvents()  # type: ignore[attr-defined]
+    voice = shell.find("QComboBox", "voicePicker")
+    assert voice is not None
+    assert voice.currentData() == "anya"  # type: ignore[attr-defined]
+    assert voice.currentText() == "Anya"  # type: ignore[attr-defined]
+    voice.setCurrentIndex(1)  # type: ignore[attr-defined]
+    app.processEvents()  # type: ignore[attr-defined]
+    assert shell.image.voice_id == "boris"
+    assert shell.image.live_settings()["shell.voice"] == "boris"
+    drop = shell.find("QLabel", "fileDrop")
+    assert drop is not None
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile("/tmp/quiet-chapter.epub")])
+    dropped = QDropEvent(
+        drop.rect().center(),  # type: ignore[attr-defined]
+        Qt.DropAction.CopyAction,
+        mime,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    assert shell.simple._drop_filter.eventFilter(drop, dropped) is True  # type: ignore[attr-defined]
+    stored = shell.simple.input_path()
+    assert stored.endswith("quiet-chapter.epub")
+    assert Path(stored).is_absolute()
+    assert drop.text().endswith("quiet-chapter.epub")  # type: ignore[attr-defined]
+    assert stored not in drop.text()  # type: ignore[attr-defined]
+    assert drop.toolTip() == stored  # type: ignore[attr-defined]
+    shell.show_result("quiet-chapter.epub")
+    app.processEvents()  # type: ignore[attr-defined]
+    play = shell.find("QPushButton", "audioPlay")
+    path = shell.find("QLabel", "audioPath")
+    waveform = shell.find("QLabel", "player")
+    chapters = shell.find("QListWidget", "audioChapters")
+    assert play is not None and play.isVisible()  # type: ignore[attr-defined]
+    assert path is not None and path.text() == "/books/quiet-chapter/audiobook.wav"  # type: ignore[attr-defined]
+    assert waveform is not None and waveform.isVisible() is False  # type: ignore[attr-defined]
+    assert chapters is not None and chapters.count() == 2  # type: ignore[attr-defined]
+    shell.simple._play_chapter(chapters.item(1))  # type: ignore[attr-defined]
+    seek = shell.find("QSlider", "audioSeek")
+    assert seek is not None and seek.value() == 75_000  # type: ignore[attr-defined]
+    shell.close()
+    app.processEvents()  # type: ignore[attr-defined]
+    set_language("en")
 
 
 if __name__ == "__main__":

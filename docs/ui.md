@@ -85,7 +85,7 @@ Shared command ids are `file.save`, `edit.undo`, `edit.redo`, and `view.palette`
 
 ## Tokens
 
-`tokens.json` is schema 1: a colour map, editor density, and the splash colours for Audiobook Builder, Movie Dubber, Enlarge, and Clarity. `voxprint_common.ui.theme.TOKENS` is that colour map. `build_style` remains the wizard and download-window stylesheet. `build_shell_style` uses the density block (13 px body, 28 px panel headers, 4 px control radius, 2 px focus ring) with the same colours. A file whose schema is not 1 is refused. The language catalogs are the JSON files in `ui/locales`, beside `tokens.json`. English is the fallback.
+`tokens.json` is schema 1: the `voxprint-dark` colour map, the `voxprint-light` colour map, editor density, and the splash colours for Audiobook Builder, Movie Dubber, Enlarge, and Clarity. `voxprint_common.ui.theme.TOKENS` is the dark map. `build_style` remains the wizard and download-window stylesheet. `build_shell_style` and the shell palette use the same slots for both themes. `suite.json` key `ui.theme` is `dark`, `light`, or `system`, and missing means dark. A file whose schema is not 1 is refused. The language catalogs are the JSON files in `ui/locales`, beside `tokens.json`. English is the fallback.
 
 ## Image-app pattern
 
@@ -147,6 +147,8 @@ Canvas, Enlarge, and the Lucent helper. Canvas and Lucent ask for a prompt and t
 
 ![English image screen](img/shell/image-simple.png)
 
+![English image screen, light theme](img/shell/en-image-light.png)
+
 ![English image screen, Expert mode](img/shell/image-expert.png)
 
 ![English image screen, preset with changes](img/shell/image-modified.png)
@@ -161,7 +163,7 @@ Canvas, Enlarge, and the Lucent helper. Canvas and Lucent ask for a prompt and t
 
 ### Audio
 
-Audiobook Builder and Movie Dubber share the audio surface. Audiobook Builder asks for a book and a voice. The action is Create audiobook. The result is a player with sound bars and chapters. Movie Dubber asks for a video and leaves out that voice row, so the narrator names are not added to the prompt. The action is Dub video. Before a run the result previews the chosen video. After the dub it plays that video with the new audio: play, pause, seek, the full output path, and Open folder. When Qt Multimedia is missing, the same region keeps the poster and Open folder. History lists past jobs. The preset file is `presets/audio.json` (Pace). The expert panel shows sample rate, format, normalisation, and loudness. A setting can carry a unit such as %, dB, kHz, or px. The pictures below are Audiobook Builder, then Movie Dubber in Russian.
+Audiobook Builder and Movie Dubber share the audio surface. Audiobook Builder asks for a book and a voice. `set_voices` replaces Warm, Clear, and Low, and the selected id is stored with the other settings. A dropped or picked book keeps its absolute path: the drop shows the file name, and the tooltip shows the path. The action is Create audiobook. Before a file exists the result is painted sound bars. After it exists the result plays that audio: play, pause, seek, the chapters the app supplied, the full path, and Open folder. When Qt Multimedia is missing, those controls stay. Pause and Resume sit beside Cancel when the app supplies both callbacks. Movie Dubber asks for a video and leaves out that voice row, so the narrator names are not added to the prompt. The action is Dub video. Before a run the result previews the chosen video. After the dub it plays that video with the new audio: play, pause, seek, the full output path, and Open folder. When Qt Multimedia is missing, the same region keeps the poster and Open folder. History lists past jobs. The preset file is `presets/audio.json` (Pace). The expert panel shows sample rate, format, normalisation, and loudness. A setting can carry a unit such as %, dB, kHz, or px. The pictures below are Audiobook Builder, then Movie Dubber in Russian.
 
 ![English audio screen](img/shell/audio-simple.png)
 
@@ -231,7 +233,7 @@ Model Forge. The input is a model. The action is Prepare model. The result is a 
 
 ### Viewer
 
-The viewer has no input and no primary action. A thin toolbar offers Open, Save, previous, and next. Presets are Fit, 100%, and Enhance. Enhance stays grey until Enlarge is installed. History is a strip of 88 px thumbnails and can be hidden with `viewer.show_history`. The window minimum for this variant is 640 by 400. Other variants stay at 960 by 640. The first launch is 1200 by 900. Later launches restore the saved rectangle from `suite.json`.
+The viewer has no input and no primary action. A thin toolbar offers Open, Save, previous, and next. Presets are Fit, 100%, and Enhance. Enhance stays grey until Enlarge is installed. History is a strip of 88 px thumbnails and can be hidden with `viewer.show_history`. The window minimum for this variant is 640 by 400. Other variants stay at 960 by 640. The first launch is 1200 by 900. Later launches restore `ui.geometry` from `suite.json`, including a maximized or fullscreen window. An older `ui.window` rectangle is copied into that key.
 
 ![English viewer](img/shell/viewer-simple.png)
 

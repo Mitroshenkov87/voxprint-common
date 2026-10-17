@@ -13,14 +13,14 @@ and the palette scorer.
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from html import escape
 from pathlib import Path
 from typing import assert_never
 
 from voxprint_common.i18n import set_language, tr
 from voxprint_common.paths import state_dir as suite_state_dir
-from voxprint_common.suite_settings import set_expert_mode, set_window_geometry, window_geometry
+from voxprint_common.suite_settings import set_expert_mode, set_window_geometry, ui_geometry
 from voxprint_common.ui.commands import CommandSpec, Registry, reference_commands
 from voxprint_common.ui.dock import (
     Activate,
@@ -66,10 +66,12 @@ from voxprint_common.ui.theme import (
     TEXT_ON_ACCENT,
     apply_shell_palette,
     build_shell_style,
+    resolved_shell_light,
 )
 from voxprint_common.ui.variants import (
     WINDOW_HEIGHT,
     WINDOW_WIDTH,
+    ResultKind,
     settings_for,
     state_names,
     surface_for,
@@ -163,6 +165,7 @@ def grab_shell(
     section_id: str = "",
     wizard_id: str = "",
     wizard_running: bool = False,
+    light: bool | None = None,
 ) -> None:
     """Paint the reference shell and save a PNG.
 
@@ -186,6 +189,7 @@ def grab_shell(
         section_id: Section to select when ``sections`` is true.
         wizard_id: Wizard to open when ``sections`` is true.
         wizard_running: Advance that wizard to its running step and show progress.
+        light: Force the light theme. None follows ``ui.theme``.
     """
     set_language(language)
     set_expert_mode(expert or full_layout)
@@ -198,6 +202,7 @@ def grab_shell(
         state_dir=path.parent / "state" / path.stem,
         app=app_id,
         sections=sections,
+        light=light,
     )
     shell.resize(1200, 900)
     shell.show()
@@ -307,6 +312,9 @@ class ReferenceShell:
         state_dir: Path | None = None,
         app: str = "canvas",
         sections: bool = False,
+        light: bool | None = None,
+        on_pause: Callable[[], None] | None = None,
+        on_resume: Callable[[], None] | None = None,
     ) -> None:
         """Build the reference window.
 
@@ -317,6 +325,9 @@ class ReferenceShell:
                 under the suite State dir.
             app: Which simple screen to show. ``canvas`` is the image screen.
             sections: Use the Audiobook Builder section demo on that audio screen.
+            light: Force the light theme. None follows ``ui.theme``.
+            on_pause: Busy-screen Pause. None hides that button.
+            on_resume: Busy-screen Resume. None hides that button.
         """
         if sections and app != "audiobook-builder":
             raise ValueError("sections are the Audiobook Builder demo")
@@ -372,9 +383,10 @@ class ReferenceShell:
         self.widget.setObjectName("shell")
         self.widget.setFocusPolicy(qt.StrongFocus)
         self.widget.setAttribute(qt.WA_StyledBackground, True)
-        self.widget.setStyleSheet(build_shell_style(glass))
-        apply_shell_palette(widgets.QApplication.instance() or self.widget)
-        apply_shell_palette(self.widget)
+        use_light = resolved_shell_light() if light is None else light
+        self.widget.setStyleSheet(build_shell_style(glass, light=use_light))
+        apply_shell_palette(widgets.QApplication.instance() or self.widget, light=use_light)
+        apply_shell_palette(self.widget, light=use_light)
         self.widget.setWindowTitle(tr("shell.window.title"))
         self._status = widgets.QLabel(tr("shell.status.ready"))
         self._status.setObjectName("status")
@@ -397,6 +409,8 @@ class ReferenceShell:
         self._hits.currentRowChanged.connect(self._sync_palette_selection)
         self._empty = widgets.QLabel(tr("shell.palette.empty"))
         self._empty.setObjectName("panel")
+        self._on_pause = on_pause
+        self._on_resume = on_resume
         self._build_chrome()
         self._build_palette()
         self._install_shortcuts()
@@ -413,31 +427,43 @@ class ReferenceShell:
         self._apply_geometry()
 
     def _apply_geometry(self) -> None:
-        """Use 1200 by 900 the first time, then the saved rectangle.
+        """Use 1200 by 900 the first time, then the saved geometry.
 
         The minimum is the variant's. A saved edge that is smaller is raised
-        to that minimum. The saved file is left unchanged until the window
-        moves or is resized.
+        to that minimum. Maximized and fullscreen are restored. The saved file
+        is left unchanged until the window moves or is resized.
         """
         minimum_width = self.surface.min_width
         minimum_height = self.surface.min_height
         self._fitting_geometry = True
         self.widget.setMinimumSize(minimum_width, minimum_height)
-        stored = window_geometry()
+        stored = ui_geometry()
         if stored is None:
             self.widget.resize(WINDOW_WIDTH, WINDOW_HEIGHT)
         else:
             self.widget.resize(
-                max(minimum_width, stored["width"]),
-                max(minimum_height, stored["height"]),
+                max(minimum_width, int(stored["w"])),
+                max(minimum_height, int(stored["h"])),
             )
-            self.widget.move(stored["x"], stored["y"])
+            self.widget.move(int(stored["x"]), int(stored["y"]))
+            if stored["fullscreen"]:
+                self.widget.showFullScreen()
+            elif stored["maximized"]:
+                self.widget.showMaximized()
         self._fitting_geometry = False
         self._geometry_ready = True
 
     def _save_geometry(self) -> None:
         widget = self.widget
-        set_window_geometry(widget.width(), widget.height(), widget.x(), widget.y())
+        state = widget.windowState()
+        set_window_geometry(
+            widget.width(),
+            widget.height(),
+            widget.x(),
+            widget.y(),
+            maximized=bool(state & self._qt.WindowMaximized),
+            fullscreen=bool(state & self._qt.WindowFullScreen),
+        )
 
     def _sync_time_left(self) -> None:
         """Show remaining time on the status row only when a job supplied it."""
@@ -680,6 +706,19 @@ class ReferenceShell:
             source = self.image.video_source.strip() or self.image.prompt.strip()
             stem = Path(source).stem or "film"
             self.image.set_video_output(f"/films/{stem}/dubbed.mp4")
+        if (
+            self.surface.result_kind is ResultKind.PLAYER
+            and not self.surface.video_result
+            and self.image.phase is Phase.READY
+        ):
+            stem = Path(self.image.prompt.strip()).stem or "book"
+            self.image.set_audio_output(f"/books/{stem}/audiobook.wav")
+            self.image.set_chapters(
+                (
+                    (tr("simple.chapter.1"), 0),
+                    (tr("simple.chapter.2"), 75_000),
+                )
+            )
         self.simple.refresh(prompt=True)
 
     def rebuild(self) -> None:
@@ -719,6 +758,8 @@ class ReferenceShell:
             on_history=self._on_history,
             on_seed=self._apply_seed,
             on_refresh=self._sync_time_left,
+            on_pause=self._on_pause,
+            on_resume=self._on_resume,
             surface=self.surface,
         )
         root.addWidget(self.simple.root, 1)
