@@ -161,30 +161,13 @@ IMAGE_CONTENT_FILTER = SettingSpec(
 def reference_settings() -> Settings:
     """Return the settings the reference shell shows.
 
-    Two are plain: how many pictures, and where to save them. They live in
-    the settings sheet. The expert side panel adds steps, sampler, guidance,
-    seed, a LoRA file, a negative prompt, and :data:`IMAGE_CONTENT_FILTER`.
+    How many pictures is a preset chip on the image screen, not a setting.
+    The expert side panel adds steps, sampler, guidance, seed, a LoRA file,
+    a negative prompt, :data:`IMAGE_CONTENT_FILTER`, and the save folder.
+    A path field is expert: Open folder is the everyday action.
     """
     return Settings(
         (
-            SettingSpec(
-                "shell.pictures",
-                "setting.shell.pictures",
-                "setting.shell.pictures.help",
-                SettingType.INT,
-                1,
-                group="picture",
-                minimum=1,
-                maximum=8,
-            ),
-            SettingSpec(
-                "shell.save_folder",
-                "setting.shell.save_folder",
-                "setting.shell.save_folder.help",
-                SettingType.PATH,
-                "",
-                group="picture",
-            ),
             SettingSpec(
                 "shell.steps",
                 "setting.shell.steps",
@@ -251,6 +234,15 @@ def reference_settings() -> Settings:
                 group="tuning",
             ),
             IMAGE_CONTENT_FILTER,
+            SettingSpec(
+                "shell.save_folder",
+                "setting.shell.save_folder",
+                "setting.shell.save_folder.help",
+                SettingType.PATH,
+                "",
+                expert=True,
+                group="picture",
+            ),
         )
     )
 

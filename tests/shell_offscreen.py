@@ -146,17 +146,31 @@ def _check_simple(app: object, qt: object, test: object) -> None:
     assert shell.find("QLabel", "emptyHint").text() == tr("simple.empty")  # type: ignore[attr-defined]
     assert shell.find("QPushButton", "chip-size-square").isChecked() is True  # type: ignore[attr-defined]
     assert shell.find("QPushButton", "chip-style-none").isChecked() is True  # type: ignore[attr-defined]
-    more = shell.find("QPushButton", "overflow")
-    menu_labels = [action.text() for action in more.menu().actions()]  # type: ignore[attr-defined]
-    assert tr("simple.menu.open_folder") in menu_labels
-    assert tr("simple.menu.settings") in menu_labels
-    assert tr("command.view.toggle_expert_mode") in menu_labels
-    assert tr("simple.menu.panels") not in menu_labels
+    assert shell.find("QPushButton", "chip-count-1").isChecked() is True  # type: ignore[attr-defined]
+    assert shell.find("QPushButton", "overflow") is None
+    assert shell.find("QFrame", "settingsSheet") is None
+    assert shell.registry.get("view.full_layout") is None
+    assert shell.registry.get("view.simple_layout") is None
+    toggle = shell.find("QPushButton", "expertToggle")
+    assert toggle is not None and toggle.text() == tr("command.view.toggle_expert_mode")  # type: ignore[attr-defined]
+    assert shell.find("QLabel", "preset-count").text() == tr("simple.count")  # type: ignore[attr-defined]
+    more = shell.find("QPushButton", "moreLike")
+    save = shell.find("QPushButton", "savePicture")
+    folder = shell.find("QPushButton", "openFolder")
+    again = shell.find("QPushButton", "usePrompt")
+    assert more.text() == tr("simple.more") and more.isEnabled() is True  # type: ignore[attr-defined]
+    assert save.text() == tr("simple.menu.save") and save.isEnabled() is True  # type: ignore[attr-defined]
+    assert folder.text() == tr("simple.menu.open_folder") and folder.isEnabled() is True  # type: ignore[attr-defined]
+    assert again.text() == tr("simple.menu.use_prompt") and again.isEnabled() is True  # type: ignore[attr-defined]
+    save.click()  # type: ignore[attr-defined]
+    app.processEvents()  # type: ignore[attr-defined]
+    assert shell.find("QLabel", "simpleNote").text() == tr("simple.error.picture")  # type: ignore[attr-defined]
     prompt.setPlainText("   ")  # type: ignore[attr-defined]
     prompt.setFocus()  # type: ignore[attr-defined]
     test.keyClick(prompt, qt.Key_Return)  # type: ignore[attr-defined]
     app.processEvents()  # type: ignore[attr-defined]
     assert shell.image.phase is Phase.EMPTY
+    assert shell.find("QLabel", "simpleNote").text() == tr("simple.error.prompt")  # type: ignore[attr-defined]
     shell.image.set_prompt("a hill")
     assert shell.image.generate() is True
     shell.simple.refresh()
@@ -203,18 +217,54 @@ def _check_simple(app: object, qt: object, test: object) -> None:
     menu.actions()[2].trigger()
     app.processEvents()  # type: ignore[attr-defined]
     assert prompt.toPlainText() == shell.image.item(item_id).prompt  # type: ignore[attr-defined]
-    shell.run("view.settings")
+    shell.find("QPushButton", "chip-count-4").click()  # type: ignore[attr-defined]
+    assert shell.image.presets["count"] == "4"
+    prompt.setPlainText("four hills")  # type: ignore[attr-defined]
+    test.keyClick(prompt, qt.Key_Return)  # type: ignore[attr-defined]
     app.processEvents()  # type: ignore[attr-defined]
-    sheet = shell.find("QFrame", "settingsSheet")
-    assert sheet is not None and sheet.isVisible() is True  # type: ignore[attr-defined]
-    pictures = sheet.findChild(shell._widgets.QSpinBox, "shell.pictures")  # type: ignore[attr-defined]
-    assert pictures is not None and pictures.value() == 1 and pictures.toolTip() == ""
-    assert sheet.findChild(shell._widgets.QCheckBox, "image.content_filter") is None  # type: ignore[attr-defined]
+    assert shell.image.phase is Phase.READY
+    assert len(shell.image.history) == 5
+    more.click()  # type: ignore[attr-defined]
+    app.processEvents()  # type: ignore[attr-defined]
+    assert len(shell.image.history) == 9
+    assert shell.image.prompt == "four hills"
     before = layout_json(shell.history.layout)
+    steady = (
+        ("QPlainTextEdit", "promptBox"),
+        ("QPushButton", "generate"),
+        ("QPushButton", "expertToggle"),
+        ("QPushButton", "chip-size-square"),
+        ("QPushButton", "chip-style-none"),
+        ("QPushButton", "chip-count-4"),
+        ("QPushButton", "moreLike"),
+        ("QPushButton", "savePicture"),
+        ("QPushButton", "openFolder"),
+        ("QPushButton", "usePrompt"),
+        ("QLabel", "preset-size"),
+        ("QLabel", "preset-count"),
+        ("QScrollArea", "historyStrip"),
+    )
+    simple_boxes = _window_boxes(shell, steady)
+    stage = shell.find("QFrame", "stage")
+    result = shell.find("QLabel", "result")
+    stage_box = _window_box(shell, stage)
+    result_box = _window_box(shell, result)
+    style_before = shell.widget.styleSheet()  # type: ignore[attr-defined]
     shell.run("view.toggle_expert_mode")
     app.processEvents()  # type: ignore[attr-defined]
     assert layout_json(shell.history.layout) == before
-    assert shell.find("QFrame", "expertPanel").isVisible() is True  # type: ignore[attr-defined]
+    assert shell.widget.styleSheet() == style_before  # type: ignore[attr-defined]
+    assert _window_boxes(shell, steady) == simple_boxes
+    stage_after = _window_box(shell, stage)
+    result_after = _window_box(shell, result)
+    assert stage_after[0] == stage_box[0] and stage_after[1] == stage_box[1]
+    assert stage_after[3] == stage_box[3]
+    assert stage_after[2] < stage_box[2]
+    assert result_after[2] < result_box[2]
+    panel = shell.find("QFrame", "expertPanel")
+    assert panel is not None and panel.isVisible() is True  # type: ignore[attr-defined]
+    panel_box = _window_box(shell, panel)
+    assert panel_box[0] >= stage_after[0] + stage_after[2]
     assert shell.find("QDoubleSpinBox", "shell.guidance").isVisible() is True  # type: ignore[attr-defined]
     assert shell.find("QSpinBox", "shell.seed").isVisible() is True  # type: ignore[attr-defined]
     assert shell.find("QLineEdit", "shell.lora").isVisible() is True  # type: ignore[attr-defined]
@@ -223,14 +273,16 @@ def _check_simple(app: object, qt: object, test: object) -> None:
     assert negative.toolTip() == tr("setting.shell.negative.help")  # type: ignore[attr-defined]
     content = shell.find("QCheckBox", "image.content_filter")
     assert content is not None and content.isChecked() is True and content.isVisible() is True  # type: ignore[attr-defined]
-    panels = [action.text() for action in shell.find("QPushButton", "overflow").menu().actions()]  # type: ignore[attr-defined]
-    assert tr("simple.menu.panels") in panels
-    shell.run("view.full_layout")
+    assert shell.find("QCheckBox", "image.content_filter").toolTip() == tr(  # type: ignore[attr-defined]
+        "setting.image.content_filter.help"
+    )
+    assert shell.full_layout is False
+    shell.set_full_layout(True)
     app.processEvents()  # type: ignore[attr-defined]
     assert shell.full_layout is True
     assert shell._dock_host.isVisible() is True  # type: ignore[attr-defined]
     assert shell.simple.root.isVisible() is False  # type: ignore[attr-defined]
-    shell.run("view.simple_layout")
+    shell.set_full_layout(False)
     app.processEvents()  # type: ignore[attr-defined]
     assert shell.full_layout is False
     assert shell.expert.enabled() is True
@@ -265,9 +317,9 @@ def _check_expert(app: object) -> None:
     assert chip is not None and chip.isVisible() is False  # type: ignore[attr-defined]
     assert shell.find("QCheckBox", "image.content_filter") is None
     assert shell.find("QSpinBox", "shell.steps") is None
-    pictures = shell.find("QSpinBox", "shell.pictures")
-    assert pictures is not None and pictures.value() == 1  # type: ignore[attr-defined]
-    assert pictures.toolTip() == ""  # type: ignore[attr-defined]
+    count = shell.find("QPushButton", "chip-count-1")
+    assert count is not None and count.isChecked() is True and count.toolTip() == ""  # type: ignore[attr-defined]
+    assert shell.find("QSpinBox", "shell.pictures") is None
     shell.show_panel("settings")
     app.processEvents()  # type: ignore[attr-defined]
     before = layout_json(shell.history.layout)
@@ -296,8 +348,10 @@ def _check_expert(app: object) -> None:
     assert steps is not None and steps.value() == 20  # type: ignore[attr-defined]
     assert steps.toolTip() == tr("setting.shell.steps.help")  # type: ignore[attr-defined]
     assert sampler is not None and sampler.currentText() == tr("setting.shell.sampler.euler")  # type: ignore[attr-defined]
-    pictures = shell.find("QSpinBox", "shell.pictures")
-    assert pictures is not None and pictures.toolTip() == ""  # type: ignore[attr-defined]
+    count = shell.find("QPushButton", "chip-count-1")
+    assert count is not None and count.toolTip() == ""  # type: ignore[attr-defined]
+    folder = shell.find("QLineEdit", "shell.save_folder")
+    assert folder is not None and folder.toolTip() == tr("setting.shell.save_folder.help")  # type: ignore[attr-defined]
     bar = shell.widget.findChild(QMenuBar)
     assert bar is not None
     view = next(action.menu() for action in bar.actions() if action.text() == tr("shell.menu.view"))
@@ -325,14 +379,32 @@ def _check_expert(app: object) -> None:
         local.resize(900, 600)
         local.show()
         app.processEvents()  # type: ignore[attr-defined]
-        more = local.find("QPushButton", "overflow")
-        assert more is not None and more.menu() is not None  # type: ignore[attr-defined]
-        local_labels = [action.text() for action in more.menu().actions()]  # type: ignore[attr-defined]
-        assert tr("command.view.toggle_expert_mode") in local_labels
-        assert tr("simple.menu.panels") not in local_labels
+        assert local.find("QPushButton", "overflow") is None
+        toggle = local.find("QPushButton", "expertToggle")
+        assert toggle is not None  # type: ignore[attr-defined]
+        assert toggle.text() == tr("command.view.toggle_expert_mode")  # type: ignore[attr-defined]
+        assert local.find("QPushButton", "moreLike").text() == tr("simple.more")  # type: ignore[attr-defined]
         assert local.find("QPushButton", "generate").text() == tr("simple.generate")  # type: ignore[attr-defined]
         local.close()
         app.processEvents()  # type: ignore[attr-defined]
+
+
+def _window_box(shell: object, widget: object) -> tuple[int, int, int, int]:
+    from PySide6.QtCore import QPoint
+
+    origin = widget.mapTo(shell.widget, QPoint(0, 0))  # type: ignore[attr-defined]
+    return (origin.x(), origin.y(), widget.width(), widget.height())  # type: ignore[attr-defined]
+
+
+def _window_boxes(
+    shell: object, names: tuple[tuple[str, str], ...]
+) -> dict[str, tuple[int, int, int, int]]:
+    boxes: dict[str, tuple[int, int, int, int]] = {}
+    for type_name, name in names:
+        widget = shell.find(type_name, name)  # type: ignore[attr-defined]
+        assert widget is not None and widget.isVisible()  # type: ignore[attr-defined]
+        boxes[name] = _window_box(shell, widget)
+    return boxes
 
 
 def _tab_titles(shell: object) -> set[str]:

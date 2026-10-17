@@ -86,10 +86,9 @@ def test_registry_hides_expert_commands_until_the_mode_is_on() -> None:
 def test_settings_hide_expert_rows_and_content_filter_is_standard() -> None:
     settings = reference_settings()
     simple = [item.setting_id for item in settings.visible(expert=False)]
-    assert simple == ["shell.pictures", "shell.save_folder"]
+    assert simple == []
     shown = [item.setting_id for item in settings.visible(expert=True)]
-    assert shown[:2] == ["shell.pictures", "shell.save_folder"]
-    assert shown[2:] == [
+    assert shown == [
         "shell.steps",
         "shell.sampler",
         "shell.guidance",
@@ -97,6 +96,7 @@ def test_settings_hide_expert_rows_and_content_filter_is_standard() -> None:
         "shell.lora",
         "shell.negative",
         "image.content_filter",
+        "shell.save_folder",
     ]
     negative = settings.get("shell.negative")
     assert negative is not None and negative.type is SettingType.TEXT and negative.expert is True
@@ -110,7 +110,8 @@ def test_settings_hide_expert_rows_and_content_filter_is_standard() -> None:
     sampler = settings.get("shell.sampler")
     assert sampler is not None and sampler.type is SettingType.ENUM and sampler.expert is True
     folder = settings.get("shell.save_folder")
-    assert folder is not None and folder.type is SettingType.PATH and folder.expert is False
+    assert folder is not None and folder.type is SettingType.PATH and folder.expert is True
+    assert settings.get("shell.pictures") is None
     custom = Settings(
         [
             SettingSpec(

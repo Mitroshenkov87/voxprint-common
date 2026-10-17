@@ -141,7 +141,7 @@ def grab_shell(
         show_settings: Select the Settings panel before the grab.
         expert: Turn Expert mode on before the grab.
         full_layout: Show the dock. This also turns Expert mode on.
-        result: Show a neutral gradient as the finished picture.
+        result: Show four neutral gradients as finished pictures.
         prompt: Words placed in the prompt when ``result`` is true.
     """
     set_language(language)
@@ -159,7 +159,7 @@ def grab_shell(
         else:
             shell.run("view.settings")
     if result and not shell.full_layout:
-        shell.show_result(prompt)
+        shell.show_result(prompt, pictures=4)
     app.processEvents()
     if show_palette:
         shell.open_palette()
@@ -338,14 +338,6 @@ class ReferenceShell:
         if command_id == "view.settings":
             if self.full_layout:
                 self.show_panel("settings")
-            else:
-                self.simple.toggle_settings()
-            return
-        if command_id == "view.full_layout":
-            self.set_full_layout(True)
-            return
-        if command_id == "view.simple_layout":
-            self.set_full_layout(False)
             return
 
     def show_panel(self, panel: str) -> None:
@@ -382,27 +374,35 @@ class ReferenceShell:
         if self.full_layout:
             self.rebuild()
 
-    def show_result(self, prompt: str) -> None:
-        """Finish one picture and show a neutral gradient for it.
+    def show_result(self, prompt: str, *, pictures: int | None = None) -> None:
+        """Finish pictures and show a neutral gradient for each one.
 
         Args:
             prompt: Words placed in the prompt box.
+            pictures: How many to finish. None uses the count preset.
         """
+        if pictures is not None and "count" in self.image.presets:
+            self.image.choose("count", str(pictures))
         self.simple.set_prompt_text(prompt)
         if self.image.phase is Phase.BUSY:
             self.image.cancel()
         if not self.image.generate():
             return
-        self._picture_count += 1
-        self.image.finish(f"preview-{self._picture_count}")
-        self.simple.refresh(prompt=True)
+        self._finish_batch("preview")
 
     def _complete_picture(self) -> None:
+        self._finish_batch("picture")
+
+    def _finish_batch(self, prefix: str) -> None:
         if self.image.phase is not Phase.BUSY:
             return
-        self._picture_count += 1
-        self.image.finish(f"picture-{self._picture_count}")
-        self.simple.refresh()
+        total = self.image.batch_size()
+        for index in range(total):
+            if index > 0 and not self.image.generate():
+                break
+            self._picture_count += 1
+            self.image.finish(f"{prefix}-{self._picture_count}")
+        self.simple.refresh(prompt=True)
 
     def rebuild(self) -> None:
         """Paint the current dock tree again."""
@@ -485,10 +485,6 @@ class ReferenceShell:
         self._edit_menu.clear()
         self._view_menu.clear()
         for spec in self.registry.visible(expert=self.expert.enabled()):
-            if spec.command_id == "view.full_layout" and self.full_layout:
-                continue
-            if spec.command_id == "view.simple_layout" and not self.full_layout:
-                continue
             if spec.command_id.startswith("file."):
                 self._add_action(self._file_menu, spec)
             elif spec.command_id.startswith("edit."):
@@ -1084,12 +1080,7 @@ def _match_indexes(text: str, query: str) -> set[int]:
 
 def _group_key(command_id: str) -> str:
     """Return the palette category key for a command id."""
-    if command_id in {
-        "view.toggle_expert_mode",
-        "view.settings",
-        "view.full_layout",
-        "view.simple_layout",
-    }:
+    if command_id in {"view.toggle_expert_mode", "view.settings"}:
         return "shell.group.view"
     prefix = command_id.split(".", 1)[0]
     if prefix == "file":

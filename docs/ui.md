@@ -35,7 +35,9 @@ Canvas adopts this first. Then Enlarge, Clarity, Audiobook Builder, Movie Dubber
 - [ ] Show a muted Expert chip while the mode is on.
 - [ ] Put tooltips on expert items only.
 - [ ] Image apps include `IMAGE_CONTENT_FILTER` and do not add a classifier here.
-- [ ] Image apps open on `SimpleImageLayout`. The dock is Panels, and only after Expert mode is on. It is not the default.
+- [ ] Image apps (Canvas, Enlarge, and the Lucent helper) open on the image-app pattern in `SimpleImageLayout`.
+- [ ] Keep Size, Style, Number of pictures, More like this, Save, Open folder, and Use prompt again on that screen.
+- [ ] Expert mode only adds the side panel. Leave the rest of the screen where it is. The dock stays an API, with no switch on the image screen.
 
 ## Import without Qt
 
@@ -80,11 +82,15 @@ Shared command ids are `file.save`, `edit.undo`, `edit.redo`, and `view.palette`
 
 `tokens.json` is schema 1: a colour map, editor density, and the splash colours for Audiobook Builder, Movie Dubber, Enlarge, and Clarity. `voxprint_common.ui.theme.TOKENS` is that colour map. `build_style` remains the wizard and download-window stylesheet. `build_shell_style` uses the density block (13 px body, 28 px panel headers, 4 px control radius) with the same colours. A file whose schema is not 1 is refused.
 
-## Simple image layout
+## Image-app pattern
 
-Image apps open on `SimpleImageLayout`, not the dock. The screen is a prompt, plain preset chips, the picture, and a history strip. Enter starts a picture. Shift+Enter adds a line. A thumbnail shows that picture large. Right-click offers Save, Copy, and Use prompt again.
+Canvas, Enlarge, and the Lucent helper open on one screen: `SimpleImageLayout`. The level of complexity stays the same from an empty window, through progress, to a finished picture. There is no settings dialog and no jargon. A problem is one plain sentence, such as "Write a few words about the picture."
 
-The overflow menu is Open folder, Settings, and Expert mode. Settings holds the plain fields, such as how many pictures and where to save them. Expert mode adds a side panel: steps, sampler, guidance, seed, LoRA, a negative prompt, and the content filter. Panels, in that same menu, opens the dock. The dock is never the default, and leaving Expert mode returns to this screen.
+The screen is a prompt and a yellow Generate button. Enter starts a picture. Shift+Enter adds a line. Under the prompt are plain chips: Size (Square, Portrait, Landscape, Wide), Style (None, Photo, Illustration, Anime, 3D), and Number of pictures (1, 2, 4). An app can pass its own rows. On the picture are More like this, Save, Open folder, and Use prompt again. A thumbnail shows that picture large. Right-click still offers Save, Copy, and Use prompt again.
+
+Expert mode adds a side panel to the right of the picture and does not move or restyle the rest. The panel holds steps, sampler, guidance, seed, LoRA, a negative prompt, the content filter, and the save folder. A path field is expert because Open folder is the everyday action.
+
+The dock (`Layout`, and `ReferenceShell(full_layout=True)`) stays available as an API for tools that arrange panels. The image screen has no control that opens it.
 
 ```python
 from voxprint_common.ui.simple_image import SimpleImageLayout, image_presets
@@ -92,11 +98,9 @@ from voxprint_common.ui.simple_image import SimpleImageLayout, image_presets
 layout = SimpleImageLayout(image_presets())
 ```
 
-An app can pass its own preset rows. The reference rows are Size (Square, Portrait, Landscape, Wide) and Style (None, Photo, Illustration, Anime, 3D).
-
 ## Reference window
 
-`ReferenceShell` opens on that simple screen. Panels paints two side tab groups around a protected centre, a command palette, and the shell theme. Screenshots below are grabbed with `QT_QPA_PLATFORM=offscreen`.
+`ReferenceShell` opens on the image-app screen. `full_layout=True` is the dock API: two side tab groups around a protected centre, a command palette, and the shell theme. Those pictures are separate from the image screen. Screenshots below are grabbed with `QT_QPA_PLATFORM=offscreen`.
 
 ![English reference shell](img/shell/en-shell.png)
 
@@ -112,7 +116,7 @@ An app can pass its own preset rows. The reference rows are Size (Square, Portra
 
 The German picture shows the close control on the active side tab. Inactive tabs keep that control hidden until the pointer is over them. The splitter picture is the root divider while it is dragged: the resting line is one pixel in the border colour, and the drag stroke is a wider accent-blue line. The hit area stays wider than the stroke and stays invisible. The translucent Acrylic backgrounds are a stylesheet flag (`glass=True`). An offscreen grab cannot show operating-system blur, so these pictures use the solid background.
 
-Simple mode is the picture screen. Expert mode keeps that screen and adds the side panel. These pictures are offscreen grabs. The result is a neutral gradient, not a photograph.
+Simple mode is the picture screen. Expert mode keeps that screen and adds the side panel. The result pictures are offscreen grabs of a neutral gradient, not a photograph. The English result strip holds four of those placeholders.
 
 ![English simple mode, before a picture](img/shell/en-simple-empty.png)
 

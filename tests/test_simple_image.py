@@ -26,8 +26,11 @@ def test_defaults_are_plain_and_data_driven() -> None:
     assert layout.history == []
     assert layout.selected is None
     assert layout.full_layout is False
-    assert layout.presets == {"size": "square", "style": "none"}
-    assert [row.row_id for row in layout.rows] == ["size", "style"]
+    assert layout.presets == {"size": "square", "style": "none", "count": "1"}
+    assert [row.row_id for row in layout.rows] == ["size", "style", "count"]
+    assert layout.batch_size() == 1
+    layout.choose("count", "4")
+    assert layout.batch_size() == 4
     size = layout.rows[0]
     assert [choice.value for choice in size.choices] == [
         "square",
@@ -79,6 +82,12 @@ def test_custom_rows_generate_cancel_and_history() -> None:
     assert layout.selected == "one"
     assert layout.phase is Phase.READY
     assert layout.use_prompt_again() == "a red door"
+    assert layout.prompt == "a red door"
+    assert layout.presets["size"] == "wide"
+    assert layout.more_like("missing") is False
+    layout.set_prompt("elsewhere")
+    assert layout.more_like("one") is True
+    assert layout.phase is Phase.BUSY
     assert layout.prompt == "a red door"
     assert layout.presets["size"] == "wide"
 

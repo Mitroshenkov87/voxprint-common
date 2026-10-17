@@ -1,8 +1,9 @@
-"""Simple image screen: a prompt, plain presets, the picture, and a history strip.
+"""Image-app pattern: a prompt, plain presets, the picture, and a history strip.
 
-:class:`SimpleImageLayout` is the headless description. :class:`SimpleImageWidget`
-is the Qt view. Importing this module does not import PySide6. The dock is a
-separate option and is never the default.
+Canvas, Enlarge, and the Lucent helper use this screen. :class:`SimpleImageLayout`
+is the headless description. :class:`SimpleImageWidget` is the Qt view. Importing
+this module does not import PySide6. Expert mode adds a side panel beside the
+picture. The dock stays a separate API and is not a control on this screen.
 """
 
 from __future__ import annotations
@@ -81,9 +82,10 @@ class GalleryItem:
 class SimpleImageLayout:
     """Headless state for the simple image screen. Qt is not imported.
 
-    Apps supply preset rows. Size and style are the reference rows from
-    :func:`image_presets`. ``full_layout`` is only honoured while Expert mode
-    is on, and it starts off.
+    Apps supply preset rows. Size, style, and how many pictures are the
+    reference rows from :func:`image_presets`. ``full_layout`` is a host API
+    for a dock. It is off unless a caller asks, and only while Expert mode
+    is on. The widget does not draw that switch.
     """
 
     def __init__(self, rows: Iterable[PresetRow] = ()) -> None:
@@ -223,6 +225,32 @@ class SimpleImageLayout:
                 self.presets[row_id] = value
         return item.prompt
 
+    def more_like(self, item_id: str | None = None) -> bool:
+        """Start another picture from one already in the strip.
+
+        The prompt and chips are copied from that picture first.
+
+        Args:
+            item_id: History item. None uses the picture on screen.
+
+        Returns:
+            True when a picture starts.
+        """
+        if self.phase is Phase.BUSY or self.use_prompt_again(item_id) is None:
+            return False
+        return self.generate()
+
+    def batch_size(self) -> int:
+        """Return how many pictures one Generate makes.
+
+        The ``count`` preset is the source. A missing or non-numeric value
+        means one picture.
+        """
+        raw = self.presets.get("count", "1")
+        if raw.isdigit() and int(raw) >= 1:
+            return int(raw)
+        return 1
+
     def request_full_layout(self, enabled: bool, *, expert: bool) -> bool:
         """Ask for the dock. The dock stays off unless Expert mode is on.
 
@@ -283,15 +311,28 @@ def image_presets() -> tuple[PresetRow, ...]:
             ),
             "none",
         ),
+        PresetRow(
+            "count",
+            "simple.count",
+            (
+                PresetChoice("1", "simple.count.1"),
+                PresetChoice("2", "simple.count.2"),
+                PresetChoice("4", "simple.count.4"),
+            ),
+            "1",
+        ),
     )
 
 
 class SimpleImageWidget:
     """Qt view of a :class:`SimpleImageLayout`. Construction imports PySide6.
 
-    Enter in the prompt starts a picture. Shift+Enter inserts a line. The
-    history strip shows a neutral gradient for each finished item. That
-    gradient is a placeholder, not a photograph.
+    Enter in the prompt starts a picture. Shift+Enter inserts a line. Size,
+    style, and how many pictures stay on screen, with More like this, Save,
+    Open folder, and Use prompt again. Expert mode adds a side panel and
+    leaves every other control where it was. The history strip shows a
+    neutral gradient for each finished item. That gradient is a placeholder,
+    not a photograph. A problem is one plain sentence under the strip.
     """
 
     def __init__(
@@ -306,10 +347,11 @@ class SimpleImageWidget:
 
         Args:
             layout: Headless state. The widget does not replace it.
-            settings: Plain settings go in the settings sheet. Expert settings
-                go in the side panel.
+            settings: Expert settings go in the side panel. Plain settings are
+                not drawn here; everyday choices are preset chips.
             on_generate: Called after a prompt starts a picture.
-            on_command: Called with a command id from the overflow menu or Save.
+            on_command: Called with a command id from Save, Open folder, or
+                Expert mode.
         """
         core, gui, widgets = _qt()
         self._core = core
@@ -320,7 +362,6 @@ class SimpleImageWidget:
         self._settings = settings
         self._on_generate = on_generate
         self._on_command = on_command
-        self._expert = False
         self._handling_enter = False
         self._source: object | None = None
         self.root = widgets.QWidget()
@@ -328,14 +369,17 @@ class SimpleImageWidget:
         self._build()
 
     def place_chip(self, chip: object) -> None:
-        """Put the Expert chip in the top row, before the overflow button.
+        """Put the Expert chip at the top of the side panel.
+
+        The chip stays inside the panel, so turning Expert mode on does not
+        move the prompt, the chips, or the everyday actions.
 
         Args:
             chip: The shell's status chip. It is moved, not copied.
         """
-        if self._top.indexOf(chip) >= 0:  # type: ignore[attr-defined]
+        if self._panel_layout.indexOf(chip) >= 0:  # type: ignore[attr-defined]
             return
-        self._top.insertWidget(max(self._top.count() - 1, 0), chip)  # type: ignore[attr-defined]
+        self._panel_layout.insertWidget(0, chip)  # type: ignore[attr-defined]
 
     def set_expert(self, enabled: bool) -> None:
         """Show or hide the expert side panel.
@@ -343,14 +387,12 @@ class SimpleImageWidget:
         Args:
             enabled: True shows the expert settings beside the picture.
         """
-        self._expert = enabled
         self._expert_panel.setVisible(enabled)  # type: ignore[attr-defined]
         _clear(self._expert_form)
         if enabled:
             specs = tuple(spec for spec in self._settings.visible(expert=True) if spec.expert)
             _fill_form(self._widgets, self._expert_form, specs)
             self._expert_form.addStretch(1)  # type: ignore[attr-defined]
-        self._fill_overflow()
 
     def set_note(self, text: str) -> None:
         """Show a short line under the history, or hide it when ``text`` is empty.
@@ -369,17 +411,6 @@ class SimpleImageWidget:
         """
         self._layout.set_prompt(text)
         self._prompt.setPlainText(text)  # type: ignore[attr-defined]
-
-    def toggle_settings(self) -> None:
-        """Open or close the plain settings sheet."""
-        opening = not self._sheet.isVisible()  # type: ignore[attr-defined]
-        if opening and self._sheet_form.count() == 0:  # type: ignore[attr-defined]
-            _fill_form(
-                self._widgets,
-                self._sheet_form,
-                self._settings.visible(expert=False),
-            )
-        self._sheet.setVisible(opening)  # type: ignore[attr-defined]
 
     def refresh(self, *, prompt: bool = False) -> None:
         """Paint the current phase, chips, and history.
@@ -423,10 +454,11 @@ class SimpleImageWidget:
         self._top = widgets.QHBoxLayout()
         self._top.setSpacing(8)
         self._top.addStretch(1)
-        self._overflow = widgets.QPushButton(tr("shell.toolbar.overflow"))
-        self._overflow.setObjectName("overflow")
-        self._overflow.setAutoDefault(False)
-        self._top.addWidget(self._overflow)
+        self._expert_toggle = widgets.QPushButton(tr("command.view.toggle_expert_mode"))
+        self._expert_toggle.setObjectName("expertToggle")
+        self._expert_toggle.setAutoDefault(False)
+        self._expert_toggle.clicked.connect(lambda: self._command("view.toggle_expert_mode"))
+        self._top.addWidget(self._expert_toggle)
         root.addLayout(self._top)
         prompt_row = widgets.QHBoxLayout()
         prompt_row.setSpacing(12)
@@ -448,23 +480,6 @@ class SimpleImageWidget:
         self._preset_rows.setSpacing(8)
         root.addWidget(self._preset_host)
         self._fill_presets()
-        sheet_row = widgets.QHBoxLayout()
-        self._sheet = widgets.QFrame()
-        self._sheet.setObjectName("settingsSheet")
-        self._sheet.setAttribute(qt.WA_StyledBackground, True)
-        sheet_layout = widgets.QVBoxLayout(self._sheet)
-        sheet_layout.setContentsMargins(12, 10, 12, 10)
-        sheet_layout.setSpacing(6)
-        heading = widgets.QLabel(tr("simple.menu.settings"))
-        heading.setObjectName("settingGroup")
-        sheet_layout.addWidget(heading)
-        self._sheet_form = widgets.QVBoxLayout()
-        self._sheet_form.setSpacing(6)
-        sheet_layout.addLayout(self._sheet_form)
-        self._sheet.hide()
-        sheet_row.addWidget(self._sheet)
-        sheet_row.addStretch(1)
-        root.addLayout(sheet_row)
         centre = widgets.QHBoxLayout()
         centre.setSpacing(12)
         self._stage = widgets.QFrame()
@@ -477,24 +492,36 @@ class SimpleImageWidget:
         self._stack.addWidget(self._empty_page())
         self._stack.addWidget(self._busy_page())
         self._stack.addWidget(self._ready_page())
-        stage_layout.addWidget(self._stack)
+        stage_layout.addWidget(self._stack, 1)
+        stage_layout.addWidget(self._action_bar())
         centre.addWidget(self._stage, 1)
         self._expert_panel = widgets.QFrame()
         self._expert_panel.setObjectName("expertPanel")
         self._expert_panel.setAttribute(qt.WA_StyledBackground, True)
         self._expert_panel.setFixedWidth(280)
-        panel = widgets.QVBoxLayout(self._expert_panel)
-        panel.setContentsMargins(0, 0, 0, 0)
+        self._expert_panel.setMinimumHeight(0)
+        panel_policy = widgets.QSizePolicy(
+            widgets.QSizePolicy.Policy.Fixed,
+            widgets.QSizePolicy.Policy.Expanding,
+        )
+        self._expert_panel.setSizePolicy(panel_policy)
+        self._panel_layout = widgets.QVBoxLayout(self._expert_panel)
+        self._panel_layout.setContentsMargins(12, 10, 12, 10)
+        self._panel_layout.setSpacing(8)
         scroll = widgets.QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(widgets.QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(qt.ScrollBarAlwaysOff)
+        scroll.setSizePolicy(
+            widgets.QSizePolicy.Policy.Expanding,
+            widgets.QSizePolicy.Policy.Ignored,
+        )
         inner = widgets.QWidget()
         self._expert_form = widgets.QVBoxLayout(inner)
-        self._expert_form.setContentsMargins(12, 10, 12, 10)
+        self._expert_form.setContentsMargins(0, 0, 0, 0)
         self._expert_form.setSpacing(4)
         scroll.setWidget(inner)
-        panel.addWidget(scroll)
+        self._panel_layout.addWidget(scroll, 1)
         self._expert_panel.hide()
         centre.addWidget(self._expert_panel)
         root.addLayout(centre, 1)
@@ -516,7 +543,6 @@ class SimpleImageWidget:
         self._note.hide()
         root.addWidget(self._note)
         self._install_keys()
-        self._fill_overflow()
         self.refresh()
 
     def _empty_page(self) -> object:
@@ -588,8 +614,9 @@ class SimpleImageWidget:
             line = widgets.QHBoxLayout()
             line.setSpacing(8)
             label = widgets.QLabel(tr(row.label_key))
-            label.setObjectName("presetLabel")
-            label.setMinimumWidth(72)
+            label.setObjectName(f"preset-{row.row_id}")
+            label.setProperty("presetLabel", "true")
+            label.setMinimumWidth(156)
             line.addWidget(label)
             group = widgets.QButtonGroup(self.root)
             group.setExclusive(True)
@@ -653,20 +680,37 @@ class SimpleImageWidget:
             button.style().polish(button)
         self._history.addStretch(1)
 
-    def _fill_overflow(self) -> None:
+    def _action_bar(self) -> object:
         widgets = self._widgets
-        menu = widgets.QMenu(self.root)
-        menu.addAction(tr("simple.menu.open_folder"), lambda: self._command("file.open_folder"))
-        menu.addAction(tr("simple.menu.settings"), lambda: self._command("view.settings"))
-        expert = menu.addAction(
-            tr("command.view.toggle_expert_mode"),
-            lambda: self._command("view.toggle_expert_mode"),
+        bar = widgets.QWidget()
+        bar.setObjectName("actionBar")
+        row = widgets.QHBoxLayout(bar)
+        row.setContentsMargins(12, 0, 12, 12)
+        row.setSpacing(8)
+        self._more = self._action_button("moreLike", "simple.more", self._more_like)
+        self._save = self._action_button("savePicture", "simple.menu.save", self._save_current)
+        self._open = self._action_button(
+            "openFolder",
+            "simple.menu.open_folder",
+            lambda: self._command("file.open_folder"),
         )
-        expert.setCheckable(True)
-        expert.setChecked(self._expert)
-        if self._expert:
-            menu.addAction(tr("simple.menu.panels"), lambda: self._command("view.full_layout"))
-        self._overflow.setMenu(menu)
+        self._use_button = self._action_button(
+            "usePrompt",
+            "simple.menu.use_prompt",
+            self._use_current,
+        )
+        for button in (self._more, self._save, self._open, self._use_button):
+            row.addWidget(button)
+        row.addStretch(1)
+        return bar
+
+    def _action_button(self, name: str, label_key: str, handler: Callable[[], None]) -> object:
+        button = self._widgets.QPushButton(tr(label_key))
+        button.setObjectName(name)
+        button.setAutoDefault(False)
+        button.setMinimumHeight(34)
+        button.clicked.connect(handler)
+        return button
 
     def _install_keys(self) -> None:
         core = self._core
@@ -702,12 +746,42 @@ class SimpleImageWidget:
 
     def _generate(self) -> None:
         self._layout.set_prompt(self._prompt.toPlainText())  # type: ignore[attr-defined]
+        if not self._layout.prompt.strip():
+            self.set_note(tr("simple.error.prompt"))
+            self.refresh()
+            return
         if not self._layout.generate():
             self.refresh()
             return
+        self.set_note("")
         self.refresh()
         if self._on_generate is not None:
             self._on_generate()
+
+    def _more_like(self) -> None:
+        if self._layout.item(self._layout.selected) is None:
+            self.set_note(tr("simple.error.picture"))
+            return
+        if not self._layout.more_like():
+            return
+        self.set_note("")
+        self.refresh(prompt=True)
+        if self._on_generate is not None:
+            self._on_generate()
+
+    def _save_current(self) -> None:
+        item_id = self._layout.selected
+        if item_id is None or self._layout.item(item_id) is None:
+            self.set_note(tr("simple.error.picture"))
+            return
+        self._save(item_id)
+
+    def _use_current(self) -> None:
+        if self._layout.use_prompt_again() is None:
+            self.set_note(tr("simple.error.picture"))
+            return
+        self.set_note("")
+        self.refresh(prompt=True)
 
     def _cancel(self) -> None:
         self._layout.cancel()
@@ -758,7 +832,7 @@ class SimpleImageWidget:
         if item is None:
             return
         self._gui.QGuiApplication.clipboard().setText(item.prompt)
-        self.set_note(tr("simple.menu.copy"))
+        self.set_note(tr("simple.copied"))
 
     def _use(self, item_id: str) -> None:
         if self._layout.use_prompt_again(item_id) is None:

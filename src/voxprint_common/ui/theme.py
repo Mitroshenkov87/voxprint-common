@@ -357,11 +357,12 @@ QPushButton#generate {{
 QPushButton#generate:disabled {{
     background: {CONTROL_BG}; color: {TEXT_MUTED}; border-color: {CONTROL_BORDER};
 }}
-QPushButton#overflow {{
+QPushButton#overflow, QPushButton#expertToggle {{
     background: transparent; color: {TEXT_MUTED}; border: none; padding: 2px 10px;
     min-height: 28px;
 }}
 QPushButton#overflow::menu-indicator {{ image: none; width: 0; }}
+QWidget#actionBar QPushButton {{ min-height: 34px; padding: 4px 14px; }}
 QPushButton[chip="true"] {{
     min-height: 30px; padding: 2px 14px; border-radius: 15px;
 }}
@@ -373,7 +374,7 @@ QPushButton[thumb="true"] {{ padding: 2px; border-radius: 8px; }}
 QPushButton[thumb="true"]:checked {{
     border: 2px solid {PRIMARY}; background: {CONTROL_BG};
 }}
-QLabel#presetLabel, QLabel#emptyHint, QLabel#simpleNote {{
+QLabel#presetLabel, QLabel[presetLabel="true"], QLabel#emptyHint, QLabel#simpleNote {{
     color: {TEXT_MUTED}; background: transparent;
 }}
 QLabel#emptyHint {{ font-size: 16px; }}

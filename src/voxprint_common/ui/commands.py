@@ -128,8 +128,8 @@ def reference_commands() -> tuple[CommandSpec, ...]:
 
     App commands are added beside these. Ids already used here stay shared:
     ``file.save``, ``edit.undo``, ``edit.redo``, ``view.palette``, and
-    ``view.toggle_expert_mode``. The toggle has no default chord.
-    ``view.full_layout`` and ``view.simple_layout`` are expert commands.
+    ``view.toggle_expert_mode``. The toggle has no default chord. The image
+    screen does not register a command that opens the dock.
     """
     return (
         CommandSpec("file.save", "command.file.save", "Mod+S"),
@@ -142,6 +142,4 @@ def reference_commands() -> tuple[CommandSpec, ...]:
         CommandSpec("view.focus_canvas", "command.view.focus_canvas", "Mod+1"),
         CommandSpec("view.settings", "simple.menu.settings"),
         CommandSpec("view.toggle_expert_mode", "command.view.toggle_expert_mode"),
-        CommandSpec("view.full_layout", "simple.menu.panels", expert=True),
-        CommandSpec("view.simple_layout", "simple.menu.simple", expert=True),
     )
