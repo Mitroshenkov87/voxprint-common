@@ -321,17 +321,21 @@ def _theme_gui() -> object:
     return QtGui
 
 
-def build_shell_style(glass: bool, *, more: bool = False) -> str:
+def build_shell_style(glass: bool, *, more: bool = False, light: bool = False) -> str:
     """Return the editor-shell stylesheet.
 
     Colours are the shared tokens. Sizes come from the density block: body
-    text, panel headers, the control radius, and the focus ring. Qt is not imported.
+    text, panel headers, the control radius, and the focus ring. Text views,
+    lists, trees, tables, and scroll-area viewports use those tokens too, for
+    the dark theme and the light theme. Qt is not imported.
 
     Args:
         glass: Use the translucent Acrylic backgrounds. False uses the solid
             fallback.
         more: Use the more-transparent Acrylic backgrounds. Ignored when
             ``glass`` is false.
+        light: Use the light-theme palette for viewport backgrounds and text.
+            False uses the dark tokens.
 
     Returns:
         A stylesheet string.
@@ -342,6 +346,14 @@ def build_shell_style(glass: bool, *, more: bool = False) -> str:
         root_bg, card_bg = ROOT_GLASS, CARD_GLASS
     else:
         root_bg, card_bg = ROOT_PLAIN, CARD_PLAIN
+    if light:
+        light_colors = load().light
+        view_bg = light_colors["Base"]
+        view_text = light_colors["Text"]
+        view_alt = light_colors["AlternateBase"]
+        scroll_bg = light_colors["Window"]
+    else:
+        view_bg, view_text, view_alt, scroll_bg = CONTROL_BG, TEXT, CARD_PLAIN, card_bg
     density = load().density
     radius = density.control_radius_px
     return f"""
@@ -503,7 +515,7 @@ QLabel#progressText, QLabel#blockedText, QLabel#featureText,
 QLabel#progressPercent, QLabel#progressEta, QLabel#chapters, QLabel#reportView {{
     color: {TEXT}; font-size: 15px; background: transparent;
 }}
-QLabel#fileDrop {{
+QLabel#fileDrop, QLabel#sourceDrop {{
     color: {TEXT_MUTED}; background: {CONTROL_BG};
     border: {density.border_px}px dashed {CONTROL_BORDER};
     border-radius: {radius}px; padding: 16px; font-size: 15px;
@@ -515,10 +527,28 @@ QFrame#stage, QFrame#expertPanel, QFrame#settingsSheet {{
     background: {card_bg}; border: {density.border_px}px solid {CONTROL_BORDER};
     border-radius: 8px;
 }}
+QAbstractScrollArea > QWidget {{
+    background: {scroll_bg}; color: {view_text};
+}}
 QScrollArea {{
-    background: {card_bg}; border: none;
+    background: {scroll_bg}; border: none;
 }}
 QScrollArea > QWidget > QWidget {{
+    background: {scroll_bg}; color: {view_text};
+}}
+QTextEdit, QPlainTextEdit, QTextBrowser,
+QListView, QListWidget, QTreeView, QTreeWidget,
+QTableView, QTableWidget, QHeaderView {{
+    background: {view_bg}; color: {view_text};
+    alternate-background-color: {view_alt};
+}}
+QTextEdit > QWidget, QPlainTextEdit > QWidget, QTextBrowser > QWidget,
+QListView > QWidget, QListWidget > QWidget,
+QTreeView > QWidget, QTreeWidget > QWidget,
+QTableView > QWidget, QTableWidget > QWidget {{
+    background: {view_bg}; color: {view_text};
+}}
+QListWidget#paletteHits, QListWidget#paletteHits > QWidget {{
     background: {card_bg}; color: {TEXT};
 }}
 QScrollArea#historyStrip, QScrollArea#expertScroll {{

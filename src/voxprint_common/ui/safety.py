@@ -5,17 +5,20 @@ Off adds a general-audience template and negatives.
 
 The minors gate is not a setting. Keys under ``safety``, and keys whose
 segments are minor, age, or guard, are rejected. :class:`SafetyGate` reviews
-a prompt and a result. It has no switch.
+a prompt and a finished picture. It has no switch. The picture is a path or
+bytes with a mime type. A missing picture is blocked before the gate runs.
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
 __all__ = [
     "AdultPromptPolicy",
+    "ReviewedOutput",
     "SafetyGate",
     "adult_prompt_policy",
     "reject_reserved_key",
@@ -25,6 +28,25 @@ _TOKEN = re.compile(r"(?i)(?:^|[._-])(?:safety|minors?|ages?|guards?)(?:$|[._-])
 _CONTAINED = re.compile(r"(?i)minor|guard")
 _SAFE_TEMPLATE = "Suitable for a general audience."
 _SAFE_NEGATIVES = "adult content"
+
+
+@dataclass(frozen=True)
+class ReviewedOutput:
+    """The picture :meth:`SafetyGate.review_result` checks.
+
+    Pass ``path`` or both ``data`` and ``mime``. The layout blocks when
+    neither is present. This type does not decide whether the picture is allowed.
+    """
+
+    path: Path | None = None
+    data: bytes | None = None
+    mime: str = ""
+
+    def present(self) -> bool:
+        """Return whether a path or a byte payload was supplied."""
+        if self.path is not None and str(self.path).strip():
+            return True
+        return bool(self.data) and bool(self.mime.strip())
 
 
 class SafetyGate(Protocol):
@@ -44,12 +66,13 @@ class SafetyGate(Protocol):
             A plain refusal, or None when the picture may start.
         """
 
-    def review_result(self, prompt: str, item_id: str) -> str | None:
+    def review_result(self, prompt: str, item_id: str, output: ReviewedOutput) -> str | None:
         """Review a finished picture before it is kept.
 
         Args:
             prompt: The words that produced the picture.
             item_id: The id the app assigned to the picture.
+            output: The picture, as a path or as bytes and a mime type.
 
         Returns:
             A plain refusal, or None when the picture may be kept.

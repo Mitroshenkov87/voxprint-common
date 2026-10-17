@@ -16,10 +16,21 @@ from voxprint_common.ui.presets import (
     parse_presets,
     reference_presets,
 )
+from voxprint_common.ui.safety import ReviewedOutput
 from voxprint_common.ui.settings import reference_settings
 from voxprint_common.ui.simple_image import SimpleImageLayout
 
 _CANVAS = Path(__file__).parents[1] / "src" / "voxprint_common" / "ui" / "presets" / "canvas.json"
+
+
+class _Allow:
+    def review_prompt(self, prompt: str) -> str | None:
+        del prompt
+        return None
+
+    def review_result(self, prompt: str, item_id: str, output: ReviewedOutput) -> str | None:
+        del prompt, item_id, output
+        return None
 
 
 def test_import_does_not_load_qt() -> None:
@@ -59,7 +70,9 @@ def test_reference_presets_write_canvas_values() -> None:
 
 def test_hand_edit_marks_one_group_and_reset_restores_it() -> None:
     settings = reference_settings()
-    layout = SimpleImageLayout(presets=reference_presets(settings), settings=settings)
+    layout = SimpleImageLayout(
+        presets=reference_presets(settings), settings=settings, gate=_Allow()
+    )
     layout.choose("style", "sketch")
     assert layout.get("shell.negative") == "full color"
     layout.set_value("shell.steps", 24)
@@ -145,7 +158,9 @@ def test_later_group_owns_a_shared_key() -> None:
 
 def test_mode_switch_is_outside_the_image_state() -> None:
     settings = reference_settings()
-    layout = SimpleImageLayout(presets=reference_presets(settings), settings=settings)
+    layout = SimpleImageLayout(
+        presets=reference_presets(settings), settings=settings, gate=_Allow()
+    )
     layout.set_value("shell.steps", 24)
     layout.seed = 9
     first = layout.snapshot()
@@ -158,12 +173,16 @@ def test_mode_switch_is_outside_the_image_state() -> None:
 def test_settings_state_round_trip(tmp_path: Path) -> None:
     settings = reference_settings()
     document = reference_presets(settings)
-    layout = SimpleImageLayout(presets=document, settings=settings, state_dir=tmp_path)
+    layout = SimpleImageLayout(
+        presets=document, settings=settings, state_dir=tmp_path, gate=_Allow()
+    )
     layout.choose("quality", "fast")
     layout.choose("style", "anime")
     layout.set_value("shell.steps", 15)
     layout.seed = 9
-    again = SimpleImageLayout(presets=document, settings=settings, state_dir=tmp_path)
+    again = SimpleImageLayout(
+        presets=document, settings=settings, state_dir=tmp_path, gate=_Allow()
+    )
     assert again.snapshot() == layout.snapshot()
     assert again.get("shell.steps") == 15
     assert again.get("shell.guidance") == 5.0

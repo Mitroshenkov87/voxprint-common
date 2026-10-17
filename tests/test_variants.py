@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from voxprint_common.ui.presets import PresetMatch
-from voxprint_common.ui.safety import reject_reserved_key
+from voxprint_common.ui.safety import ReviewedOutput, reject_reserved_key
 from voxprint_common.ui.simple_image import SimpleLayout
 from voxprint_common.ui.variants import (
     LOWER_MIN_HEIGHT,
@@ -112,6 +112,7 @@ def test_audio_state_file_and_progress_eta(tmp_path: Path) -> None:
         gate=_Allow(),
         state_name=settings_file,
         history_name=history_file,
+        variant=surface.variant,
     )
     layout.set_prompt("A quiet chapter")
     assert layout.generate() is True
@@ -123,7 +124,7 @@ def test_audio_state_file_and_progress_eta(tmp_path: Path) -> None:
     assert layout.eta_seconds is None
     with pytest.raises(ValueError, match="eta"):
         layout.progress(2, 4, "Reading", eta_seconds=-1)
-    layout.finish("job-1")
+    layout.finish("job-1", ReviewedOutput(data=b"wav", mime="audio/wav"))
     pace = layout.preset_status("pace")
     assert pace is not None and pace.kind is PresetMatch.EXACT
     layout.choose("pace", "calm")
@@ -142,6 +143,7 @@ def test_viewer_history_setting_defaults_on(tmp_path: Path) -> None:
         gate=_Allow(),
         state_name="viewer-settings.json",
         history_name="viewer-history.json",
+        variant=surface.variant,
     )
     assert layout.get("viewer.show_history") is True
     layout.set_value("viewer.show_history", False)
@@ -156,6 +158,7 @@ def test_missing_gate_blocks_every_variant(tmp_path: Path) -> None:
         presets=variant_presets(surface, settings),
         settings=settings,
         state_dir=tmp_path,
+        variant=surface.variant,
     )
     layout.set_prompt("A quiet hill at dusk")
     assert layout.generate() is False
@@ -166,5 +169,6 @@ class _Allow:
     def review_prompt(self, prompt: str) -> str | None:
         return None
 
-    def review_result(self, prompt: str, item_id: str) -> str | None:
+    def review_result(self, prompt: str, item_id: str, output: ReviewedOutput) -> str | None:
+        del prompt, item_id, output
         return None

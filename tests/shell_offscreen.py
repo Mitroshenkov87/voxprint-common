@@ -1411,10 +1411,16 @@ def _combo_usable_width(combo: object) -> int:
     return max(rect.width() - 2, 0)
 
 
+def _near_white(widget: object) -> bool:
+    image = widget.grab().toImage()  # type: ignore[attr-defined]
+    color = image.pixelColor(max(image.width() // 2, 0), max(image.height() // 2, 0))
+    return min(color.red(), color.green(), color.blue()) >= 220
+
+
 def _check_viewports(shell: object) -> None:
     """A scroll area the app creates uses the token palette, not Qt's grey base."""
     from PySide6.QtGui import QColor, QPalette
-    from PySide6.QtWidgets import QApplication, QScrollArea, QWidget
+    from PySide6.QtWidgets import QApplication, QScrollArea, QTextEdit, QWidget
 
     from voxprint_common.ui.theme import TEXT_DISABLED, apply_shell_palette, palette_colors
 
@@ -1445,6 +1451,87 @@ def _check_viewports(shell: object) -> None:
     top.setWidget(QWidget())
     top_base = top.viewport().palette().color(role.Base).name()
     assert top_base == QColor(dark["Base"]).name()
+    edit = QTextEdit(shell.widget)  # type: ignore[attr-defined]
+    edit.resize(120, 80)
+    edit.show()
+    area.resize(120, 80)
+    area.show()
+    QApplication.processEvents()
+    assert not _near_white(edit.viewport())
+    assert not _near_white(area.viewport())
+
+
+def _check_busy_generate(app: object) -> None:
+    """Generate becomes busy, and a second click does not start another job."""
+    from PySide6.QtWidgets import QPushButton
+
+    from voxprint_common.ui.shell import ReferenceShell
+    from voxprint_common.ui.simple_image import Phase
+
+    shell = ReferenceShell(app="canvas")
+    shell.resize(1200, 900)
+    shell.show()
+    app.processEvents()  # type: ignore[attr-defined]
+    shell.simple.set_prompt_text("a red door")
+    button = shell.widget.findChild(QPushButton, "generate")
+    assert button is not None and button.isEnabled()
+    before = shell._picture_count
+    button.click()
+    assert shell.image.phase is Phase.BUSY
+    assert button.isEnabled() is False
+    button.click()
+    assert shell._picture_count == before
+    assert shell.image.phase is Phase.BUSY
+    shell.close()
+    app.processEvents()  # type: ignore[attr-defined]
+
+
+def _check_source_drop(app: object) -> None:
+    """The source drop is absent until the app turns that slot on."""
+    from PySide6.QtWidgets import QLabel
+
+    from voxprint_common.ui.presets import reference_presets
+    from voxprint_common.ui.safety import ReviewedOutput
+    from voxprint_common.ui.settings import reference_settings
+    from voxprint_common.ui.simple_image import SimpleImageLayout, SimpleImageWidget
+
+    class _Gate:
+        def review_prompt(self, prompt: str) -> str | None:
+            del prompt
+            return None
+
+        def review_result(self, prompt: str, item_id: str, output: ReviewedOutput) -> str | None:
+            del prompt, item_id, output
+            return None
+
+    settings = reference_settings()
+    hidden = SimpleImageLayout(
+        presets=reference_presets(settings),
+        settings=settings,
+        gate=_Gate(),
+    )
+    plain = SimpleImageWidget(hidden, settings)
+    plain.root.show()
+    app.processEvents()  # type: ignore[attr-defined]
+    assert plain.root.findChild(QLabel, "sourceDrop") is None
+    plain.root.close()
+
+    shown_settings = reference_settings()
+    shown = SimpleImageLayout(
+        presets=reference_presets(shown_settings),
+        settings=shown_settings,
+        gate=_Gate(),
+        source_picture=True,
+        mask=True,
+    )
+    view = SimpleImageWidget(shown, shown_settings)
+    view.root.show()
+    app.processEvents()  # type: ignore[attr-defined]
+    drop = view.root.findChild(QLabel, "sourceDrop")
+    assert drop is not None and drop.isVisible()
+    assert drop.text() == "Add a picture"
+    view.root.close()
+    app.processEvents()  # type: ignore[attr-defined]
 
 
 def _check_chip_fit(app: object) -> None:
@@ -1462,6 +1549,8 @@ def _check_chip_fit(app: object) -> None:
     from voxprint_common.ui.tokens import load
 
     pad = load().density.chip_pad_px
+    _check_busy_generate(app)
+    _check_source_drop(app)
 
     surfaces = (
         "canvas",

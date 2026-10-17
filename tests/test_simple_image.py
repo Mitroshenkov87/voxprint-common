@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Mapping
+from pathlib import Path
 
 import pytest
 
+from voxprint_common.ui.presets import reference_presets
+from voxprint_common.ui.safety import ReviewedOutput
+from voxprint_common.ui.settings import reference_settings
 from voxprint_common.ui.simple_image import (
     GalleryItem,
     Phase,
@@ -14,17 +19,20 @@ from voxprint_common.ui.simple_image import (
     SimpleImageLayout,
     image_presets,
 )
+from voxprint_common.ui.variants import VariantId
 
 
 class _Allow:
     def review_prompt(self, prompt: str) -> str | None:
         return None
 
-    def review_result(self, prompt: str, item_id: str) -> str | None:
+    def review_result(self, prompt: str, item_id: str, output: ReviewedOutput) -> str | None:
+        del prompt, item_id, output
         return None
 
 
 _GATE = _Allow()
+_OUT = ReviewedOutput(data=b"png", mime="image/png")
 
 
 def test_import_does_not_load_qt() -> None:
@@ -114,12 +122,13 @@ def test_custom_rows_generate_cancel_and_history() -> None:
     layout.set_prompt("  a red door  ")
     assert layout.generate() is True
     assert layout.phase is Phase.BUSY
-    assert layout.generate() is False
+    assert layout.generate() is True
+    assert layout.phase is Phase.BUSY
     layout.cancel()
     assert layout.phase is Phase.EMPTY
     assert layout.history == []
     assert layout.generate() is True
-    item = layout.finish("one")
+    item = layout.finish("one", _OUT)
     assert isinstance(item, GalleryItem)
     assert item is not None
     assert item.prompt == "a red door"
@@ -129,7 +138,7 @@ def test_custom_rows_generate_cancel_and_history() -> None:
     layout.set_prompt("second")
     layout.choose("size", "square")
     assert layout.generate() is True
-    assert layout.finish("two") is not None
+    assert layout.finish("two", _OUT) is not None
     assert [saved.item_id for saved in layout.history] == ["two", "one"]
     assert layout.select("one") is not None
     assert layout.selected == "one"
@@ -149,7 +158,7 @@ def test_busy_cancel_returns_to_the_picture_on_screen() -> None:
     layout = SimpleImageLayout(image_presets(), gate=_GATE)
     layout.set_prompt("first")
     assert layout.generate() is True
-    assert layout.finish("one") is not None
+    assert layout.finish("one", _OUT) is not None
     layout.set_prompt("second")
     assert layout.generate() is True
     layout.cancel()
@@ -187,11 +196,11 @@ def test_invalid_presets_are_refused() -> None:
         layout.choose("missing", "square")
     layout.set_prompt("one")
     layout.generate()
-    assert layout.finish("same") is not None
+    assert layout.finish("same", _OUT) is not None
     layout.set_prompt("two")
     layout.generate()
     with pytest.raises(ValueError):
-        layout.finish("same")
+        layout.finish("same", _OUT)
     with pytest.raises(ValueError):
         PresetChoice("4k", "simple.output.4k", available=False)
     with pytest.raises(ValueError):
@@ -251,7 +260,7 @@ def test_history_keeps_fifty_items_seed_and_survives_a_bad_file(tmp_path) -> Non
     layout.choose("style", "sketch")
     for index in range(55):
         assert layout.generate() is True
-        layout.finish(f"id-{index}")
+        layout.finish(f"id-{index}", _OUT)
     assert len(layout.history) == 50
     assert layout.history[0].item_id == "id-54"
     assert layout.history[0].seed == 42
@@ -272,3 +281,113 @@ def test_history_keeps_fifty_items_seed_and_survives_a_bad_file(tmp_path) -> Non
     (tmp_path / "image-history.json").write_text("{", encoding="utf-8")
     broken = SimpleImageLayout(image_presets(), state_dir=tmp_path, gate=_GATE)
     assert broken.history == []
+
+
+def test_hook_runs_before_busy_with_the_expert_values() -> None:
+    settings = reference_settings()
+    seen: list[Mapping[str, object]] = []
+    phases: list[Phase] = []
+    layout = SimpleImageLayout(
+        presets=reference_presets(settings),
+        settings=settings,
+        gate=_GATE,
+    )
+
+    def hook(values: Mapping[str, object]) -> None:
+        seen.append(values)
+        phases.append(layout.phase)
+
+    layout.set_value("shell.steps", 28)
+    layout.set_value("shell.guidance", 4.5)
+    layout.set_value("shell.sampler", "dpm")
+    layout.seed = 7
+    layout.set_prompt("a red door")
+    assert layout.generate(hook) is True
+    assert phases == [Phase.EMPTY]
+    assert layout.phase is Phase.BUSY
+    values = seen[0]
+    assert values["shell.steps"] == 28
+    assert values["shell.guidance"] == 4.5
+    assert values["shell.sampler"] == "dpm"
+    assert values["shell.seed"] == 7
+    assert values["shell.resolution"]
+    assert layout.generate(hook) is True
+    assert len(seen) == 1
+    assert layout.phase is Phase.BUSY
+
+
+def test_image_gate_is_required_and_source_slots_stay_hidden() -> None:
+    with pytest.raises(TypeError, match="gate"):
+        SimpleImageLayout()
+    text = SimpleImageLayout(variant=VariantId.TEXT)
+    text.set_prompt("a quiet hill")
+    assert text.generate() is False
+    assert text.phase is Phase.BLOCKED
+    with pytest.raises(ValueError, match="image screen"):
+        SimpleImageLayout(variant=VariantId.TEXT, source_picture=True, gate=_GATE)
+    settings = reference_settings()
+    hidden = SimpleImageLayout(
+        presets=reference_presets(settings),
+        settings=settings,
+        gate=_GATE,
+    )
+    assert hidden.source_picture is False
+    assert hidden.mask is False
+    assert settings.get("image.source") is None
+    assert settings.get("image.mask") is None
+    with pytest.raises(ValueError, match="source"):
+        hidden.set_source_path("in.png")
+    with pytest.raises(ValueError, match="mask"):
+        hidden.set_mask_path("mask.png")
+    shown_settings = reference_settings()
+    shown = SimpleImageLayout(
+        presets=reference_presets(shown_settings),
+        settings=shown_settings,
+        gate=_GATE,
+        source_picture=True,
+        mask=True,
+    )
+    shown.set_source_path("in.png")
+    shown.set_mask_path("mask.png")
+    assert shown.live_settings()["image.source"] == "in.png"
+    assert shown.live_settings()["image.mask"] == "mask.png"
+    source = shown_settings.get("image.source")
+    mask = shown_settings.get("image.mask")
+    assert source is not None and source.expert is False
+    assert mask is not None and mask.expert is True
+    with pytest.raises(ValueError, match="shared settings"):
+        SimpleImageLayout(image_presets(), gate=_GATE, source_picture=True)
+
+
+def test_finish_blocks_a_missing_picture_before_the_gate(tmp_path: Path) -> None:
+    class _Seen:
+        def __init__(self) -> None:
+            self.outputs: list[ReviewedOutput] = []
+
+        def review_prompt(self, prompt: str) -> str | None:
+            del prompt
+            return None
+
+        def review_result(self, prompt: str, item_id: str, output: ReviewedOutput) -> str | None:
+            del prompt, item_id
+            self.outputs.append(output)
+            return None
+
+    gate = _Seen()
+    layout = SimpleImageLayout(image_presets(), gate=gate)
+    layout.set_prompt("a hill")
+    assert layout.generate() is True
+    assert layout.finish("missing") is None
+    assert gate.outputs == []
+    assert layout.phase is Phase.BLOCKED
+    layout.cancel()
+    layout.set_prompt("a hill")
+    assert layout.generate() is True
+    path = tmp_path / "out.png"
+    assert layout.finish("path", ReviewedOutput(path=path)) is not None
+    assert gate.outputs[0].path == path
+    layout.set_prompt("bytes")
+    assert layout.generate() is True
+    payload = ReviewedOutput(data=b"png", mime="image/png")
+    assert layout.finish("bytes", payload) is not None
+    assert gate.outputs[1] is payload

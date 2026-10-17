@@ -113,11 +113,11 @@ Size is grouped, with no orientation switch: Landscape is 16:9, 21:9, 3:2, and 4
 
 The history strip keeps the last 50 pictures in the app's State directory (`image-history.json`). The menu offers Open, Show in folder, Copy, Use prompt again (the words and the seed), Use as input picture, and Delete. Delete asks in that same menu before it removes the picture. The overflow menu is Open folder, Manage models, Settings, and Expert mode. Manage models calls the app. Canvas runs `voxprint-mdl --gui --app canvas`. The reference shell records that choice and does not start the program.
 
-A long job uses one progress block: a stage label, a percent, an estimate of the time left, and Cancel. `progress(step, total, stage_label, eta_seconds=...)` fills it. `stage_label` is already translated. Omit `eta_seconds` to leave the estimate off.
+A long job uses one progress block: a stage label, a percent, an estimate of the time left, and Cancel. `progress(step, total, stage_label, eta_seconds=...)` fills it. `stage_label` is already translated. Omit `eta_seconds` to leave the estimate off. `generate` calls the app hook with the live settings, including the expert values, and then the screen becomes busy. A second Generate while that job is running is ignored, and the button stays disabled.
 
 Expert mode adds a side panel to the right of the picture and does not move or restyle the rest. The panel holds the live values. The reference list is Steps, Guidance (CFG), Seed, Sampler, Picture size, Output size, Negative prompt, Add-ons, Add-on strength, VRAM limit, and Adult content (18+). A path field is expert because Open folder is the everyday action. The adult-content value selects the prompt policy. The minors gate still reviews the prompt and the picture.
 
-The dock (`Layout`, and `ReferenceShell(full_layout=True)`) stays available as an API for tools that arrange panels. The image screen has no control that opens it. Pass the app's `SafetyGate` as `gate`. Without that object, every picture is blocked.
+The dock (`Layout`, and `ReferenceShell(full_layout=True)`) stays available as an API for tools that arrange panels. The image screen has no control that opens it. Pass the app's `SafetyGate` as `gate`. An image screen requires that object. A non-image screen without it blocks every picture. `review_result` receives the finished picture, as a path or as bytes and a mime type. A missing picture is blocked before the gate runs. An image screen can also store a source picture and a mask. Simple mode shows Add a picture only when the app turns that slot on. The mask stays an Expert field, or the app sets the path itself.
 
 ```python
 from pathlib import Path

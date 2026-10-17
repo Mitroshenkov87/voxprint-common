@@ -45,6 +45,9 @@ def test_headless_layout_and_adoption() -> None:
     style = build_shell_style(False)
     assert f"padding: 2px {tokens.density.chip_pad_px}px" in style
     assert "QScrollArea > QWidget > QWidget" in style
+    assert "QTextEdit > QWidget" in style
+    assert "QPlainTextEdit > QWidget" in style
+    assert "QAbstractScrollArea > QWidget" in style
     assert "QAbstractScrollArea QScrollBar:vertical" in style
     assert "QScrollArea#expertScroll QScrollBar:horizontal" in style
     handle = f"QScrollBar::handle:vertical {{\n    background: {tokens.colors['CONTROL_BORDER']}"
@@ -58,6 +61,9 @@ def test_headless_layout_and_adoption() -> None:
     assert dark["Text"] == tokens.colors["TEXT"]
     assert dark["AlternateBase"] == tokens.colors["CONTROL_BG"]
     assert light["Base"] == tokens.light["Base"]
+    light_style = build_shell_style(False, light=True)
+    assert f"background: {light['Base']}" in light_style
+    assert f"color: {light['Text']}" in light_style
     assert dark["Base"] != "#efefef"
     assert light["Base"] != "#efefef"
     assert f"QPushButton:focus {{\n    border: {tokens.density.focus_ring_px}px solid" in style

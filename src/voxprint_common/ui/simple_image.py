@@ -27,7 +27,12 @@ from voxprint_common.ui.presets import (
     SettingState,
     reference_presets,
 )
-from voxprint_common.ui.safety import AdultPromptPolicy, SafetyGate, adult_prompt_policy
+from voxprint_common.ui.safety import (
+    AdultPromptPolicy,
+    ReviewedOutput,
+    SafetyGate,
+    adult_prompt_policy,
+)
 from voxprint_common.ui.section_view import install_sections, sync_sections
 from voxprint_common.ui.sections import SectionDeck, SectionSet
 from voxprint_common.ui.settings import Settings, SettingSpec, SettingType, reference_settings
@@ -66,6 +71,9 @@ class Phase(StrEnum):
 
 _HISTORY_LIMIT = 50
 _HISTORY_NAME = "image-history.json"
+_SOURCE_ID = "image.source"
+_MASK_ID = "image.mask"
+GenerateHook = Callable[[Mapping[str, object]], None]
 
 
 @dataclass(frozen=True)
@@ -157,6 +165,9 @@ class SimpleImageLayout:
         section_set: SectionSet | None = None,
         capture: Callable[[str, str], Mapping[str, object]] | None = None,
         restore: Callable[[str, str, Mapping[str, object]], None] | None = None,
+        variant: VariantId | None = None,
+        source_picture: bool = False,
+        mask: bool = False,
     ) -> None:
         """Copy ``rows`` and select each row's default.
 
@@ -169,17 +180,30 @@ class SimpleImageLayout:
             settings: Descriptors for the shared state. Used with ``presets``.
             state_dir: The app's State directory. History and the settings
                 state are read and written there. None keeps both in memory.
-            gate: The app's review of the prompt and of each result. None
-                blocks every picture.
+            gate: The app's review of the prompt and of each result. An image
+                screen requires one. None blocks a non-image screen.
             state_name: Settings file name inside ``state_dir``.
             history_name: History file name inside ``state_dir``.
             section_set: Sections and wizards. None keeps the single shared screen.
             capture: Returns the app's wizard blob. The shell stores it and does not read it.
             restore: Receives that blob when a checkpoint is loaded.
+            variant: Which surface this is. None means the image screen.
+            source_picture: Show the simple "Add a picture" drop and store its path.
+            mask: Store a mask path for an Expert field or :meth:`set_mask_path`.
 
         Raises:
-            ValueError: Two rows share an id.
+            TypeError: An image screen was built without a gate.
+            ValueError: Two rows share an id, a source or mask was asked for
+                on a screen that is not an image screen, or those slots were
+                asked for without a shared settings state.
         """
+        self.variant = variant if variant is not None else VariantId.IMAGE
+        if self.variant is VariantId.IMAGE and gate is None:
+            raise TypeError("an image screen needs a gate")
+        if (source_picture or mask) and self.variant is not VariantId.IMAGE:
+            raise ValueError("a source picture and a mask belong to an image screen")
+        self.source_picture = source_picture
+        self.mask = mask
         if presets is not None:
             rows = _rows_from(presets)
         self._rows = tuple(rows)
@@ -189,10 +213,19 @@ class SimpleImageLayout:
         self._state_dir = state_dir
         self._history_name = history_name or _HISTORY_NAME
         self._gate = gate
+        held = settings
+        if source_picture or mask:
+            if presets is None:
+                raise ValueError("a source picture and a mask need the shared settings state")
+            if held is None:
+                held = reference_settings()
+            _add_image_inputs(held, source=source_picture, mask=mask)
+        elif held is None and presets is not None:
+            held = reference_settings()
         self._state = (
             SettingState(
                 presets,
-                settings or reference_settings(),
+                held or reference_settings(),
                 state_dir=state_dir,
                 state_name=state_name,
             )
@@ -361,18 +394,72 @@ class SimpleImageLayout:
             return {"presets": dict(self.presets), "seed": self.seed}
         return self._state.snapshot()
 
-    def generate(self) -> bool:
+    def live_settings(self) -> dict[str, object]:
+        """Return the live values the generator hook receives.
+
+        With a shared settings state, the keys are the ones the Expert panel
+        shows, including steps, guidance, sampler, seed, and resolution, plus
+        the preset values stored beside them. Without that state, the mapping
+        is the chip selection and the seed.
+        """
+        if self._state is None:
+            return {"presets": dict(self.presets), "seed": self.seed}
+        return dict(self._state.values)
+
+    def set_source_path(self, path: str) -> None:
+        """Store the source picture path in the shared settings state.
+
+        Args:
+            path: A file path. An empty string clears it.
+
+        Raises:
+            ValueError: This screen has no source-picture slot.
+        """
+        if not self.source_picture:
+            raise ValueError("this screen has no source picture")
+        self.set_value(_SOURCE_ID, path)
+
+    def set_mask_path(self, path: str) -> None:
+        """Store the mask path. The simple screen does not draw an editor.
+
+        The Expert panel shows the field when the mask slot is enabled. An app
+        can also call this method from its own editor.
+
+        Args:
+            path: A file path. An empty string clears it.
+
+        Raises:
+            ValueError: This screen has no mask slot.
+        """
+        if not self.mask:
+            raise ValueError("this screen has no mask")
+        self.set_value(_MASK_ID, path)
+
+    def generate(self, hook: GenerateHook | None = None) -> bool:
         """Start a picture when the prompt has words and the gate allows it.
 
+        ``hook`` runs first, with :meth:`live_settings`, and only then does
+        the phase become a clean busy state with Cancel. A second call while
+        a job is running is ignored: the Generate button is disabled, and
+        this method returns True so the busy job is not reported as a refusal.
+
+        Args:
+            hook: Called with the live settings before the phase changes.
+                None starts the job with no callback.
+
         Returns:
-            True when the phase changed to busy. False when the prompt is blank,
-            a picture is already running, or the gate blocks the prompt.
+            True when a job is running afterwards, including one that was
+            already running. False when the prompt is blank or the gate blocks it.
         """
+        if self.phase is Phase.BUSY:
+            return True
         prompt = self.prompt.strip()
-        if self.phase is Phase.BUSY or not prompt:
+        if not prompt:
             return False
         if not self._review_prompt(prompt):
             return False
+        if hook is not None:
+            hook(self.live_settings())
         self._clear_run()
         self.phase = Phase.BUSY
         return True
@@ -454,14 +541,16 @@ class SimpleImageLayout:
         """
         self._show_reason(reason, Phase.UNAVAILABLE)
 
-    def finish(self, item_id: str) -> GalleryItem | None:
+    def finish(self, item_id: str, output: ReviewedOutput | None = None) -> GalleryItem | None:
         """Store a finished picture at the front of the history and show it.
 
         Args:
             item_id: Stable id for this picture. The caller chooses it.
+            output: The picture as a path or as bytes and a mime type. A
+                missing picture is blocked. The gate's own yes or no is unchanged.
 
         Returns:
-            The new history item, or None when the gate blocks the picture.
+            The new history item, or None when the output is missing or the gate blocks it.
 
         Raises:
             ValueError: Nothing is in progress, or ``item_id`` is empty or already used.
@@ -470,7 +559,10 @@ class SimpleImageLayout:
             raise ValueError("finish needs a picture that is in progress")
         if not item_id or any(item.item_id == item_id for item in self.history):
             raise ValueError(f"gallery id {item_id!r} is empty or already used")
-        if not self._review_result(self.prompt.strip(), item_id):
+        if output is None or not output.present():
+            self.block(tr("simple.blocked"))
+            return None
+        if not self._review_result(self.prompt.strip(), item_id, output):
             return None
         item = GalleryItem(
             item_id,
@@ -561,20 +653,24 @@ class SimpleImageLayout:
         self._write_history()
         return item
 
-    def more_like(self, item_id: str | None = None) -> bool:
+    def more_like(self, item_id: str | None = None, hook: GenerateHook | None = None) -> bool:
         """Start another picture from one already in the strip.
 
-        The prompt and chips are copied from that picture first.
+        The prompt and chips are copied from that picture first. ``hook`` runs
+        before the phase becomes busy, the same way as :meth:`generate`.
 
         Args:
             item_id: History item. None uses the picture on screen.
+            hook: Called with the live settings before the phase changes.
 
         Returns:
-            True when a picture starts.
+            True when a picture is running afterwards.
         """
-        if self.phase is Phase.BUSY or self.use_prompt_again(item_id) is None:
+        if self.phase is Phase.BUSY:
+            return True
+        if self.use_prompt_again(item_id) is None:
             return False
-        return self.generate()
+        return self.generate(hook)
 
     def _review_prompt(self, prompt: str) -> bool:
         gate = self._gate
@@ -588,13 +684,13 @@ class SimpleImageLayout:
             return False
         return self._verdict(reason)
 
-    def _review_result(self, prompt: str, item_id: str) -> bool:
+    def _review_result(self, prompt: str, item_id: str, output: ReviewedOutput) -> bool:
         gate = self._gate
         if gate is None:
             self.block(tr("simple.blocked"))
             return False
         try:
-            reason = gate.review_result(prompt, item_id)
+            reason = gate.review_result(prompt, item_id, output)
         except Exception:
             self.block(tr("simple.blocked"))
             return False
@@ -775,6 +871,33 @@ def image_presets(*, enlarge_installed: bool = False) -> tuple[PresetRow, ...]:
     return _rows_from(reference_presets(reference_settings(), enlarge_installed=enlarge_installed))
 
 
+def _add_image_inputs(settings: Settings, *, source: bool, mask: bool) -> None:
+    """Register the optional source and mask paths on ``settings``."""
+    if source and settings.get(_SOURCE_ID) is None:
+        settings.add(
+            SettingSpec(
+                _SOURCE_ID,
+                "setting.image.source",
+                "setting.image.source.help",
+                SettingType.PATH,
+                "",
+                group="image",
+            )
+        )
+    if mask and settings.get(_MASK_ID) is None:
+        settings.add(
+            SettingSpec(
+                _MASK_ID,
+                "setting.image.mask",
+                "setting.image.mask.help",
+                SettingType.PATH,
+                "",
+                expert=True,
+                group="image",
+            )
+        )
+
+
 def _rows_from(document: PresetFile) -> tuple[PresetRow, ...]:
     rows: list[PresetRow] = []
     for group in document.groups:
@@ -804,6 +927,9 @@ class SimpleImageWidget:
     Improve prompt, when the app supplies it, replaces the text in that same
     box. Expert mode adds a side panel and leaves every other control where it
     was. A long job shows a stage, a percent, an estimate, and Cancel. The
+    generator hook runs first, with the live settings, and then the screen
+    enters that busy state. A second Generate while busy is ignored because
+    the button is disabled. The
     history strip shows a neutral placeholder for each finished item, not a
     photograph. The overflow menu is Open folder, Manage models, Settings, and
     Expert mode. Those commands, and an unavailable chip's action, call
@@ -816,7 +942,7 @@ class SimpleImageWidget:
         layout: SimpleImageLayout,
         settings: Settings,
         *,
-        on_generate: Callable[[], None] | None = None,
+        on_generate: GenerateHook | None = None,
         on_command: Callable[[str], None] | None = None,
         on_improve: Callable[[str], str] | None = None,
         on_history: Callable[[str, str], None] | None = None,
@@ -829,7 +955,8 @@ class SimpleImageWidget:
         Args:
             layout: Headless state. The widget does not replace it.
             settings: Expert settings the app supplied. They go in the side panel.
-            on_generate: Called after the primary action starts a job.
+            on_generate: Called with the live settings before the phase becomes
+                busy. None means the screen only changes phase.
             on_command: Called with a command id from Save, Open folder, Expert
                 mode, Manage models, Settings, or an unavailable-chip action.
             on_improve: Replaces the prompt text in the same field. None hides
@@ -1113,6 +1240,8 @@ class SimpleImageWidget:
             tools.addWidget(self._revert)
             tools.addStretch(1)
             prompt_col.addLayout(tools)
+            if self._layout.source_picture:
+                prompt_col.insertWidget(1, self._source_drop())
             if self._on_improve is None or self._surface.input_kind is not InputKind.PROMPT:
                 self._improve.hide()
                 self._revert.hide()
@@ -1751,6 +1880,7 @@ class SimpleImageWidget:
             )
             group.addButton(button)
             self._history.addWidget(button)
+            button.show()
             button.style().unpolish(button)
             button.style().polish(button)
         self._history.addStretch(1)
@@ -1887,6 +2017,45 @@ class SimpleImageWidget:
             return self._file_column(column, kind)
         assert_never(kind)
 
+    def _source_drop(self) -> object:
+        widgets = self._widgets
+        drop = widgets.QLabel(tr("simple.source.add"))
+        drop.setObjectName("sourceDrop")
+        drop.setAlignment(self._qt.AlignCenter)
+        drop.setWordWrap(True)
+        drop.setMinimumHeight(64)
+        drop.setAcceptDrops(True)
+        self._source = drop
+        self._install_source_drop(drop)
+        return drop
+
+    def _install_source_drop(self, label: object) -> None:
+        core = self._core
+
+        class _SourceDrop(core.QObject):
+            def eventFilter(_self: object, _watched: object, event: object) -> bool:
+                kind = event.type()  # type: ignore[attr-defined]
+                if kind == core.QEvent.Type.DragEnter:
+                    if event.mimeData().hasUrls():  # type: ignore[attr-defined]
+                        event.acceptProposedAction()  # type: ignore[attr-defined]
+                        return True
+                    return False
+                if kind == core.QEvent.Type.Drop:
+                    urls = event.mimeData().urls()  # type: ignore[attr-defined]
+                    if not urls:
+                        return False
+                    path = urls[0].toLocalFile() or urls[0].toString()
+                    self._layout.set_source_path(path)
+                    name = Path(path).name or path
+                    label.setText(f"{tr('simple.source.add')}\n{name}")  # type: ignore[attr-defined]
+                    event.acceptProposedAction()  # type: ignore[attr-defined]
+                    return True
+                return False
+
+        watcher = _SourceDrop(label)
+        label.installEventFilter(watcher)  # type: ignore[attr-defined]
+        self._source_filter = watcher
+
     def _file_column(self, column: object, kind: InputKind) -> object:
         widgets = self._widgets
         drop = widgets.QLabel(tr(self._surface.drop_key))
@@ -1971,6 +2140,8 @@ class SimpleImageWidget:
         assert_never(kind)
 
     def _generate(self) -> None:
+        if self._layout.phase is Phase.BUSY:
+            return
         self._layout.set_prompt(self._input_text())
         if not self._layout.prompt.strip():
             kind = self._surface.input_kind
@@ -1982,26 +2153,24 @@ class SimpleImageWidget:
             self.set_note(tr(key))
             self.refresh()
             return
-        if not self._layout.generate():
+        if not self._layout.generate(self._on_generate):
             self.refresh()
             return
         self.set_note("")
         self.refresh()
-        if self._on_generate is not None:
-            self._on_generate()
 
     def _more_like(self) -> None:
+        if self._layout.phase is Phase.BUSY:
+            return
         if self._layout.item(self._layout.selected) is None:
             self.set_note(tr("simple.error.picture"))
             return
-        if not self._layout.more_like():
+        if not self._layout.more_like(hook=self._on_generate):
             self.refresh()
             return
         self._restore_seed()
         self.set_note("")
         self.refresh(prompt=True)
-        if self._on_generate is not None:
-            self._on_generate()
 
     def _save_current(self) -> None:
         item_id = self._layout.selected

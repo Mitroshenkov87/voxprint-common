@@ -51,6 +51,7 @@ from voxprint_common.ui.keymap import (
     load_overrides,
 )
 from voxprint_common.ui.palette import score_text
+from voxprint_common.ui.safety import ReviewedOutput
 from voxprint_common.ui.sections import audiobook_sections
 from voxprint_common.ui.settings import SettingSpec, SettingType, reference_settings
 from voxprint_common.ui.simple_image import (
@@ -258,13 +259,15 @@ class _ReferenceReview:
         """
         return None
 
-    def review_result(self, prompt: str, item_id: str) -> str | None:
+    def review_result(self, prompt: str, item_id: str, output: ReviewedOutput) -> str | None:
         """Allow the placeholder picture.
 
         Args:
             prompt: The words that produced the picture.
             item_id: The id assigned to the picture.
+            output: The picture, as a path or as bytes and a mime type.
         """
+        del output
         return None
 
 
@@ -340,6 +343,7 @@ class ReferenceShell:
             section_set=self._section_set,
             capture=_checkpoint_blob,
             restore=_restore_checkpoint,
+            variant=self.surface.variant,
         )
         self.prompt_policy = self.image.prompt_policy()
         self._picture_count = 0
@@ -604,9 +608,10 @@ class ReferenceShell:
         extra = pictures if pictures is not None and "count" not in self.image.presets else None
         self._finish_batch("preview", total=extra)
 
-    def _complete_picture(self) -> None:
+    def _complete_picture(self, _settings: Mapping[str, object]) -> None:
         self.prompt_policy = self.image.prompt_policy()
-        self._finish_batch("picture")
+        core = _qt_core()
+        core.QTimer.singleShot(0, lambda: self._finish_batch("picture"))
 
     def _improve_prompt(self, text: str) -> str:
         """Collapse repeated spaces in the same prompt field.
@@ -663,7 +668,13 @@ class ReferenceShell:
             if index > 0 and not self.image.generate():
                 break
             self._picture_count += 1
-            if self.image.finish(f"{prefix}-{self._picture_count}") is None:
+            if (
+                self.image.finish(
+                    f"{prefix}-{self._picture_count}",
+                    ReviewedOutput(data=b"placeholder", mime="image/png"),
+                )
+                is None
+            ):
                 break
         self.simple.refresh(prompt=True)
 

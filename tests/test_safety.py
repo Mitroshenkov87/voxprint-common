@@ -9,6 +9,7 @@ import pytest
 
 from voxprint_common.ui.presets import SettingState, parse_presets, reference_presets
 from voxprint_common.ui.safety import (
+    ReviewedOutput,
     SafetyGate,
     adult_prompt_policy,
     reject_reserved_key,
@@ -25,6 +26,7 @@ class _Record:
     ) -> None:
         self.prompts: list[str] = []
         self.results: list[tuple[str, str]] = []
+        self.outputs: list[ReviewedOutput] = []
         self.prompt_reason = prompt
         self.result_reason = result
         self.boom = boom
@@ -35,8 +37,9 @@ class _Record:
             raise RuntimeError("prompt review failed")
         return self.prompt_reason
 
-    def review_result(self, prompt: str, item_id: str) -> str | None:
+    def review_result(self, prompt: str, item_id: str, output: ReviewedOutput) -> str | None:
         self.results.append((prompt, item_id))
+        self.outputs.append(output)
         if self.boom == "result":
             raise RuntimeError("result review failed")
         return self.result_reason
@@ -50,7 +53,11 @@ def test_adult_content_policy_is_neutral_only_when_on() -> None:
     assert on.template == ""
     assert on.negatives == ""
     settings = reference_settings()
-    layout = SimpleImageLayout(presets=reference_presets(settings), settings=settings)
+    layout = SimpleImageLayout(
+        presets=reference_presets(settings),
+        settings=settings,
+        gate=_Record(),
+    )
     assert layout.get("image.adult_content") is False
     assert layout.prompt_policy().template == off.template
     layout.set_value("image.adult_content", True)
@@ -81,12 +88,15 @@ def test_gate_runs_for_every_example_preset_while_adult_content_is_off() -> None
             prompt = f"picture {index}"
             layout.set_prompt(prompt)
             assert layout.generate() is True
-            item = layout.finish(f"id-{index}")
+            picture = ReviewedOutput(data=f"png-{index}".encode(), mime="image/png")
+            item = layout.finish(f"id-{index}", picture)
             assert item is not None
             assert layout.get("image.adult_content") is False
             index += 1
     assert gate.prompts == [f"picture {i}" for i in range(index)]
     assert gate.results == [(f"picture {i}", f"id-{i}") for i in range(index)]
+    assert [output.data for output in gate.outputs] == [f"png-{i}".encode() for i in range(index)]
+    assert all(output.mime == "image/png" for output in gate.outputs)
     assert index == sum(len(group.options) for group in document.groups)
 
 
@@ -104,22 +114,31 @@ def test_gate_failure_blocks_the_picture() -> None:
     assert refused.phase is Phase.BLOCKED
     assert refused.reason == "Stopped."
 
-    missing = SimpleImageLayout()
-    missing.set_prompt("a hill")
-    assert missing.generate() is False
-    assert missing.phase is Phase.BLOCKED
+    with pytest.raises(TypeError, match="gate"):
+        SimpleImageLayout()
 
-    result = SimpleImageLayout(gate=_Record(boom="result"))
+    result_gate = _Record(boom="result")
+    result = SimpleImageLayout(gate=result_gate)
     result.set_prompt("a hill")
     assert result.generate() is True
-    assert result.finish("one") is None
+    assert result.finish("one", ReviewedOutput(data=b"png", mime="image/png")) is None
     assert result.phase is Phase.BLOCKED
     assert result.history == []
+    assert result_gate.outputs[0].present()
 
-    words = SimpleImageLayout(gate=_Record(result="Not this picture."))
+    missing_gate = _Record()
+    missing = SimpleImageLayout(gate=missing_gate)
+    missing.set_prompt("a hill")
+    assert missing.generate() is True
+    assert missing.finish("gone") is None
+    assert missing.phase is Phase.BLOCKED
+    assert missing_gate.results == []
+
+    words_gate = _Record(result="Not this picture.")
+    words = SimpleImageLayout(gate=words_gate)
     words.set_prompt("a hill")
     assert words.generate() is True
-    assert words.finish("one") is None
+    assert words.finish("one", ReviewedOutput(path=Path("picture.png"))) is None
     assert words.phase is Phase.BLOCKED
     assert words.reason == "Not this picture."
     assert words.history == []
