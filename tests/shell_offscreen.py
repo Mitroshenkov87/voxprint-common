@@ -1683,16 +1683,17 @@ def _check_dub_surface(app: object) -> None:
     app.processEvents()  # type: ignore[attr-defined]
     assert shell.widget.findChild(QComboBox, "voicePicker") is None
     assert shell.widget.findChild(QLabel, "voiceLabel") is None
+    film = str(Path("/films/тихий-фильм.mp4").expanduser().resolve())
     shell.simple.set_prompt_text("/films/тихий-фильм.mp4")
     app.processEvents()  # type: ignore[attr-defined]
-    assert shell.simple._input_text() == "/films/тихий-фильм.mp4"
+    assert shell.simple._input_text() == film
     poster = shell.widget.findChild(QLabel, "videoPoster")
     path = shell.widget.findChild(QLabel, "videoPath")
     opener = shell.widget.findChild(QPushButton, "videoOpen")
     region = shell.widget.findChild(QWidget, "videoResult")
     assert region is not None and poster is not None and path is not None and opener is not None
     assert region.isVisible() and poster.isVisible()
-    assert path.text() == "/films/тихий-фильм.mp4"
+    assert path.text() == film
     assert "\u2026" not in path.text()
     shell.show_result("тихий-фильм.mp4")
     app.processEvents()  # type: ignore[attr-defined]
