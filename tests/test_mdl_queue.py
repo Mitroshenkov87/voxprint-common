@@ -215,7 +215,7 @@ def _descriptor_doc(**overrides: object) -> dict[str, object]:
 
 def test_vendored_schema_accepts_the_forge_shape() -> None:
     raw = schema_bytes()
-    assert sha256_bytes(raw) == ("57a10f90d439e810629ddeb50902333aa1a593deb7974e5a8aee6390b7a3ee2b")
+    assert sha256_bytes(raw) == ("202f1ba1af5858fd050a74ae143db3524ef4697c2052235d590a9e141269b3cb")
     schema = json.loads(raw)
     validator = jsonschema.Draft202012Validator(schema)
     document = _descriptor_doc()
@@ -318,36 +318,31 @@ def test_app_manifest_skips_optional_and_checks_the_card(tmp_path: Path) -> None
         load_manifest(legacy)
 
 
-def test_index_uses_the_remote_only_when_the_pin_matches() -> None:
+def test_unsigned_remote_index_falls_back_to_the_bundle() -> None:
     pinned = bundled_index_bytes()
     rows = json.loads(pinned)
-    assert [row["id"] for row in rows] == [
-        "pyannote-speaker-diarization-community-1",
-        "pyannote-embedding",
-    ]
+    assert len(rows) == 17
+    assert rows[0]["id"] == "gemma4-31b"
+    assert sha256_bytes(pinned) == (
+        "8a98babc1133d540229273d0a51df43c2e85dca33c50c7affd435ee78ede25b9"
+    )
     bundled = load_index(remote=False)
     assert bundled.source == "bundled"
-    assert [entry.id for entry in bundled.entries] == [
-        "pyannote-speaker-diarization-community-1",
-        "pyannote-embedding",
-    ]
-    assert bundled.entries[0].revision == "9c851af7"
-    assert bundled.entries[1].revision == "4655ca65"
+    assert bundled.fallback == ""
+    assert len(bundled.entries) == 17
+    assert bundled.get("gemma4-31b") is not None
     other = json.dumps(
         [{"id": "painter", "repo": "org/painter", "revision": "main", "sha256": "ab" * 32}]
     ).encode()
     server, root = _serve(_State(other, "index"))
     try:
-        mismatched = load_index(url=f"{root}/index.json", guard=UrlGuard.loopback())
-        assert mismatched.source == "bundled"
-        matched_state = _State(pinned, "index")
-        server.state = matched_state  # type: ignore[attr-defined]
-        matched = load_index(url=f"{root}/index.json", guard=UrlGuard.loopback())
+        unsigned = load_index(url=f"{root}/index.json", guard=UrlGuard.loopback())
     finally:
         server.shutdown()
         server.server_close()
-    assert matched.source == "remote"
-    assert matched.sha256 == sha256_bytes(pinned)
+    assert unsigned.source == "bundled"
+    assert unsigned.fallback
+    assert len(unsigned.entries) == 17
     with pytest.raises(Exception, match="duplicate"):
         parse_index(
             [
@@ -1013,7 +1008,7 @@ def test_pyannote_index_points_at_the_public_mirrors() -> None:
         parsed = parse_descriptor(document)
         entry = index.get(parsed.id)
         assert entry is not None
-        assert entry.sha256 == sha256_bytes(raw)
+        assert entry.revision
         hf, kaggle = public_mirror_urls(entry.repo, entry.revision, parsed.files[0].path)
         assert hf.startswith(f"https://huggingface.co/{entry.repo}/resolve/{entry.revision}/")
         assert f"mitroshenkov87/{entry.repo.split('/')[-1]}" in kaggle

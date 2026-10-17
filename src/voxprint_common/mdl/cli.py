@@ -1,6 +1,7 @@
 """``voxprint-mdl`` command line.
 
-Subcommands: ``plan``, ``enqueue``, ``download``, ``status``, ``verify``, ``worker``.
+Subcommands: ``plan``, ``enqueue``, ``download``, ``status``, ``verify``, ``worker``,
+``index``. ``--check`` prints which model index is in use.
 
 ``voxprint-mdl --gui --app <id>`` opens Manage models with no subcommand.
 
@@ -42,6 +43,12 @@ from voxprint_common.cli_protocol import (
 )
 from voxprint_common.mdl.catalog import CatalogError, discover, load_manifest
 from voxprint_common.mdl.events import TransferSession
+from voxprint_common.mdl.index import (
+    SuiteIndexError,
+    load_index,
+    verify_index_file,
+    write_index_signature,
+)
 from voxprint_common.mdl.job import Outcome, download, plan, verify
 from voxprint_common.mdl.names import CLI_NAME, DISPLAY_NAME
 from voxprint_common.mdl.queue import enqueue, load_queue, run_or_attach
@@ -127,7 +134,12 @@ def _parser() -> _Parser:
         "--dry-run", action="store_true", help="plan and check disk, do not download"
     )
     parser.add_argument("--version", action="version", version=f"{DISPLAY_NAME} {__version__}")
-    commands = parser.add_subparsers(dest="command", required=True)
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="print the model index source, pin, and any fallback",
+    )
+    commands = parser.add_subparsers(dest="command", required=False)
     for name, help_text in (
         ("plan", "show the models this machine needs and check free disk space"),
         ("enqueue", "add a download job and exit"),
@@ -163,10 +175,28 @@ def _parser() -> _Parser:
                 action="store_true",
                 help="clear manifest paths that could delete a shared root; never deletes files",
             )
+    index = commands.add_parser("index", help="sign or verify the model index")
+    index_commands = index.add_subparsers(dest="index_command", required=True)
+    sign = index_commands.add_parser("sign", help="write a detached index.json.sig")
+    sign.add_argument("index_path", help="path to index.json")
+    sign.add_argument("--key-file", help="Ed25519 private key; else VOXPRINT_MDL_INDEX_KEY")
+    sign.add_argument("--output", help="signature path; default is index.json.sig beside the file")
+    verify_index = index_commands.add_parser("verify", help="check a detached index.json.sig")
+    verify_index.add_argument("index_path", help="path to index.json")
+    verify_index.add_argument("--signature", help="signature path; default is index.json.sig")
+    verify_index.add_argument("--public-key", help="PEM public key; default is the bundled key")
     return parser
 
 
 def _run(args: argparse.Namespace, session: Session | None) -> tuple[int, str, dict[str, object]]:
+    if args.check:
+        if args.command:
+            return EXIT_USAGE, "--check does not take a command", {}
+        return _check()
+    if not args.command:
+        return EXIT_USAGE, "a command is required", {}
+    if args.command == "index":
+        return _index_command(args)
     if args.command == "worker":
         return serve(), "", {}
     if args.gui and args.command != "download":
@@ -205,6 +235,48 @@ def _run(args: argparse.Namespace, session: Session | None) -> tuple[int, str, d
     else:
         return EXIT_USAGE, f"unknown command {args.command}", {}
     return outcome.code, outcome.message, _payload(outcome.status)
+
+
+def _check() -> tuple[int, str, dict[str, object]]:
+    """Print the index that would be used, including a fallback reason."""
+    index = load_index()
+    lines = [
+        f"source: {index.source}",
+        f"head: {index.head}",
+        f"serial: {index.serial}",
+        f"generated_at: {index.generated_at}",
+        f"entries: {len(index.entries)}",
+        f"sha256: {index.sha256}",
+    ]
+    if index.fallback:
+        lines.append(f"fallback: {index.fallback}")
+    return EXIT_OK, "\n".join(lines), {}
+
+
+def _index_command(args: argparse.Namespace) -> tuple[int, str, dict[str, object]]:
+    """Sign or verify an index file. The private key stays outside the repo."""
+    try:
+        match args.index_command:
+            case "sign":
+                path = write_index_signature(
+                    Path(args.index_path),
+                    key_file=Path(args.key_file) if args.key_file else None,
+                    output=Path(args.output) if args.output else None,
+                )
+                return EXIT_OK, str(path), {}
+            case "verify":
+                ok = verify_index_file(
+                    Path(args.index_path),
+                    signature=Path(args.signature) if args.signature else None,
+                    public_key_path=Path(args.public_key) if args.public_key else None,
+                )
+                if ok:
+                    return EXIT_OK, "index signature verified", {}
+                return EXIT_FAILED, "index signature is invalid", {}
+            case _:
+                return EXIT_USAGE, f"unknown index command {args.index_command}", {}
+    except (SuiteIndexError, OSError) as exc:
+        return EXIT_FAILED, str(exc), {}
 
 
 def _enqueue(args: argparse.Namespace) -> tuple[int, str, dict[str, object]]:

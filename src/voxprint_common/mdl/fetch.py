@@ -134,6 +134,7 @@ def fetch_file(
     segment_min: int = SEGMENT_MIN_BYTES,
     budget: ConnectionBudget | None = None,
     speed_floor: float = SPEED_FLOOR_BPS,
+    mirror_policy: str = "race",
 ) -> Path:
     """Download ``destination`` from the fastest mirror whose bytes match ``sha256``.
 
@@ -173,6 +174,12 @@ def fetch_file(
         budget: Shared connection cap. Segment transfers take one slot each.
         speed_floor: A mirror at or under this many bytes per second is
             dropped when another mirror is faster. The default is 84 KiB/s.
+            ``strict-priority`` ignores this floor.
+        mirror_policy: ``race`` measures mirrors and switches at
+            ``switch_ratio``. ``strict-priority`` stays on the first source
+            until it returns 404, the hash does not match, or that source is
+            unavailable after its own retries. A 404 skips the source
+            immediately in both policies.
 
     Returns:
         ``destination`` after the digest has been checked.
@@ -192,6 +199,8 @@ def fetch_file(
         raise FetchError("chunk_size and batch_bytes must be positive")
     if switch_ratio < 1:
         raise FetchError("switch_ratio must be at least 1")
+    if mirror_policy not in {"race", "strict-priority"}:
+        raise FetchError("mirror_policy must be race or strict-priority")
     policy = guard if guard is not None else UrlGuard()
     try:
         checked = [policy.check(url) for url in urls]
@@ -226,29 +235,38 @@ def fetch_file(
             if all(mirror.poisoned for mirror in state.mirrors):
                 _give_up(destination.name, state.failures)
             moment = now()
-            waiting = [mirror for mirror in state.mirrors if not mirror.poisoned]
-            ready = [mirror for mirror in waiting if mirror.down_until <= moment]
-            if not ready:
-                _interruptible(min(mirror.down_until for mirror in waiting) - moment, pause, cancel)
-                continue
-            _measure(
-                ready,
-                have,
-                size,
-                probe_bytes,
-                open_url,
-                timeout,
-                chunk_size,
-                now,
-                state,
-                backoff_base,
-                backoff_max,
-                max_failures,
-                cancel,
-            )
-            chosen = _pick(state.mirrors, current, now(), switch_ratio, speed_floor)
-            if chosen is None:
-                continue
+            if mirror_policy == "strict-priority":
+                chosen, wait = _strict_ready(state.mirrors, moment)
+                if chosen is None:
+                    if wait > 0:
+                        _interruptible(wait, pause, cancel)
+                    continue
+            else:
+                waiting = [mirror for mirror in state.mirrors if not mirror.poisoned]
+                ready = [mirror for mirror in waiting if mirror.down_until <= moment]
+                if not ready:
+                    delay = min(mirror.down_until for mirror in waiting) - moment
+                    _interruptible(delay, pause, cancel)
+                    continue
+                _measure(
+                    ready,
+                    have,
+                    size,
+                    probe_bytes,
+                    open_url,
+                    timeout,
+                    chunk_size,
+                    now,
+                    state,
+                    backoff_base,
+                    backoff_max,
+                    max_failures,
+                    cancel,
+                )
+                chosen = _pick(state.mirrors, current, now(), switch_ratio, speed_floor)
+                if chosen is None:
+                    continue
+            strict = mirror_policy == "strict-priority"
             if (
                 use_xet
                 and have == 0
@@ -287,8 +305,8 @@ def fetch_file(
                             host=_host(chosen.url),
                             budget=budget,
                             user_agent=_USER_AGENT,
-                            speed_floor=speed_floor,
-                            other_mirrors=len(state.mirrors) > 1,
+                            speed_floor=0.0 if strict else speed_floor,
+                            other_mirrors=not strict and len(state.mirrors) > 1,
                             cancelled=lambda: _stop_requested(cancel, control),
                         )
                         have = _partial_size(partial)
@@ -310,16 +328,19 @@ def fetch_file(
                     cancel,
                     control,
                 )
-            except SegmentFailed as exc:
+            except (SegmentFailed, _SourceFailed) as exc:
                 have = _partial_size(partial)
-                state.failures.append(f"{chosen.url}: {exc}")
-                _mark_down(chosen, now(), backoff_base, backoff_max, max_failures)
-                current = None
-                continue
-            except _SourceFailed as exc:
-                have = _partial_size(partial)
-                state.failures.append(f"{chosen.url}: {exc}")
-                _mark_down(chosen, now(), backoff_base, backoff_max, max_failures)
+                _note_failure(
+                    chosen,
+                    exc,
+                    mirror_policy=mirror_policy,
+                    moment=now(),
+                    base=backoff_base,
+                    cap=backoff_max,
+                    max_failures=max_failures,
+                    name=destination.name,
+                    failures=state.failures,
+                )
                 current = None
                 continue
             have = _partial_size(partial)
@@ -391,7 +412,10 @@ def _measure(
             )
         except _SourceFailed as exc:
             state.failures.append(f"{mirror.url}: {exc}")
-            _mark_down(mirror, clock(), backoff_base, backoff_max, max_failures)
+            if exc.status == 404:
+                _drop(mirror)
+            else:
+                _mark_down(mirror, clock(), backoff_base, backoff_max, max_failures)
 
 
 def _probe(
@@ -417,7 +441,7 @@ def _probe(
     try:
         status = _status(response)
         if status >= 400:
-            raise _SourceFailed(f"HTTP {status}")
+            raise _SourceFailed(f"HTTP {status}", status=status)
         received = 0
         while received < want:
             block = _read(response, min(chunk_size, want - received))
@@ -460,7 +484,7 @@ def _pull(
             mirror.batch_seconds = 0.0
             return
         if status >= 400:
-            raise _SourceFailed(f"HTTP {status}")
+            raise _SourceFailed(f"HTTP {status}", status=status)
         restart = status != 206
         if restart:
             if partial.exists():
@@ -626,6 +650,68 @@ def _pick(
     return current
 
 
+def _strict_ready(mirrors: list[_Mirror], moment: float) -> tuple[_Mirror | None, float]:
+    """Return the first live source, and the wait when that source is backed off.
+
+    A later source stays unused while an earlier one is only waiting out its
+    own retry. ``404`` poisons a source, so the next call moves on.
+
+    Args:
+        mirrors: Declared order.
+        moment: Current clock reading.
+    """
+    for mirror in mirrors:
+        if mirror.poisoned:
+            continue
+        if mirror.down_until > moment:
+            return None, mirror.down_until - moment
+        return mirror, 0.0
+    return None, 0.0
+
+
+def _note_failure(
+    mirror: _Mirror,
+    exc: BaseException,
+    *,
+    mirror_policy: str,
+    moment: float,
+    base: float,
+    cap: float,
+    max_failures: int,
+    name: str,
+    failures: list[str],
+) -> None:
+    """Record one source failure and decide whether a later source may run.
+
+    Args:
+        mirror: The source that failed.
+        exc: The failure. ``status`` 404 skips immediately. In
+            ``strict-priority``, any other 4xx stops the download.
+        mirror_policy: ``race`` or ``strict-priority``.
+        moment: Current clock reading.
+        base: Backoff base in seconds.
+        cap: Backoff cap in seconds.
+        max_failures: Failures before the source is abandoned.
+        name: Destination file name, used in the error.
+        failures: Lines already collected for this file.
+    """
+    failures.append(f"{mirror.url}: {exc}")
+    status = getattr(exc, "status", None)
+    if status == 404:
+        _drop(mirror)
+        return
+    if mirror_policy == "strict-priority" and isinstance(status, int) and 400 <= status < 500:
+        _give_up(name, failures)
+    _mark_down(mirror, moment, base, cap, max_failures)
+
+
+def _drop(mirror: _Mirror) -> None:
+    """Abandon ``mirror`` with no backoff. A 404 takes this path."""
+    mirror.poisoned = True
+    mirror.bps = None
+    mirror.down_until = 0.0
+
+
 def _mark_down(
     mirror: _Mirror,
     moment: float,
@@ -659,7 +745,7 @@ def _open(url: str, headers: dict[str, str], opener: Opener, timeout: float) -> 
     except urllib.error.HTTPError as exc:
         if exc.code == 416:
             return exc
-        raise _SourceFailed(f"HTTP {exc.code}") from exc
+        raise _SourceFailed(f"HTTP {exc.code}", status=exc.code) from exc
     except (OSError, urllib.error.URLError, TimeoutError) as exc:
         raise _SourceFailed(str(exc)) from exc
 
@@ -803,3 +889,13 @@ class _GuardedRedirect(urllib.request.HTTPRedirectHandler):
 
 class _SourceFailed(FetchError):
     """One mirror failed. The caller tries another, or the same one later."""
+
+    def __init__(self, message: str, *, status: int | None = None) -> None:
+        """Record the HTTP status when the failure was an HTTP response.
+
+        Args:
+            message: Short failure text.
+            status: HTTP status, or None for a connection failure.
+        """
+        super().__init__(message)
+        self.status = status

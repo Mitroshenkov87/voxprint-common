@@ -1,7 +1,8 @@
 """Pinned snapshot of the suite model index.
 
-``model-index.json`` is the fallback when the Hugging Face dataset
-``Mitroshenkov87/voxprint-model-index`` cannot be fetched or does not match
-the pin. Each entry's ``sha256`` is the bundled example descriptor in
-``examples/``, not a file from the weight repo.
+``model-index.json`` is the ``d2325ed`` snapshot of
+``Mitroshenkov87/voxprint-model-index``. ``model-index.pin.json`` records
+that commit, serial 1, and ``generated_at``. ``index-public.pem`` is the
+Ed25519 trust anchor. A remote index replaces the snapshot only after its
+detached signature verifies and it is at least this pin.
 """

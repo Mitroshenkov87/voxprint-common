@@ -347,6 +347,7 @@ def _fetch_all(
             extra = dict(options)
             concurrent = 1 if workers == 1 else min(workers, max(1, len(files)))
             extra.setdefault("segments", segment_count(item.size, concurrent, parallel))
+            extra.setdefault("mirror_policy", item.mirror_policy)
             fetch_file(
                 item.destination,
                 item.urls,
