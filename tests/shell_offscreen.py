@@ -29,6 +29,9 @@ def main() -> None:
     out = Path(sys.argv[1])
     set_language("en")
     app = QApplication([])
+    if len(sys.argv) > 2 and sys.argv[2] == "chips":
+        _check_chip_fit(app)
+        return
     shell = ReferenceShell(full_layout=True)
     shell.resize(1100, 700)
     shell.show()
@@ -1346,6 +1349,50 @@ def _check_split_colour(app: object, accent: str) -> None:
         assert side == accent.lower(), (dx, side, accent)
     shell.close()
     app.processEvents()  # type: ignore[attr-defined]
+
+
+def _check_chip_fit(app: object) -> None:
+    """Selected chips are bold. The bold text has to fit the contents rect."""
+    from PySide6.QtGui import QFont, QFontMetrics
+    from PySide6.QtWidgets import QPushButton
+
+    from voxprint_common.i18n import set_language
+    from voxprint_common.suite_settings import set_expert_mode
+    from voxprint_common.ui.shell import _MODIFIED, ReferenceShell
+
+    surfaces = (
+        "canvas",
+        "audiobook-builder",
+        "clarity",
+        "plotweaver",
+        "model-forge",
+        "viewer",
+    )
+    for language in ("en", "ru", "de"):
+        for app_id in surfaces:
+            set_language(language)
+            set_expert_mode(False)
+            shell = ReferenceShell(app=app_id)
+            shell.resize(1200, 900)
+            shell.show()
+            app.processEvents()  # type: ignore[attr-defined]
+            key, value = _MODIFIED[app_id]
+            shell.image.set_value(key, value)
+            shell.simple.refresh()
+            app.processEvents()  # type: ignore[attr-defined]
+            for button in shell.widget.findChildren(QPushButton):
+                if button.property("chip") != "true" or not button.isVisible():
+                    continue
+                text = button.text()
+                if not text:
+                    continue
+                font = QFont(button.font())
+                font.setWeight(QFont.Weight.DemiBold)
+                advance = QFontMetrics(font).horizontalAdvance(text)
+                contents = button.contentsRect().width()
+                assert advance <= contents, (language, app_id, text, advance, contents)
+            shell.close()
+            app.processEvents()  # type: ignore[attr-defined]
 
 
 if __name__ == "__main__":

@@ -670,8 +670,11 @@ class ReferenceShell:
         self.simple.root.setVisible(not dock)
         self.simple.set_expert(self.expert.enabled() and not dock)
         if dock:
-            if self._status_layout.indexOf(self._expert_chip) < 0:
-                self._status_layout.addWidget(self._expert_chip)
+            chip = self._expert_chip
+            chip.setMinimumSize(0, 0)
+            chip.setMaximumSize(16777215, 16777215)
+            if self._status_layout.indexOf(chip) < 0:
+                self._status_layout.addWidget(chip)
         else:
             self.simple.place_chip(self._expert_chip)
         self._expert_chip.setText(tr("shell.status.expert"))

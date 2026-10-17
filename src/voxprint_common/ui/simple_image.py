@@ -866,17 +866,20 @@ class SimpleImageWidget:
         self._build()
 
     def place_chip(self, chip: object) -> None:
-        """Put the Expert chip at the top of the side panel.
+        """Keep the status chip out of the expert panel.
 
-        The chip stays inside the panel, so turning Expert mode on does not
-        move the prompt, the chips, or the everyday actions.
+        The panel title is the heading. The chip stays in the tree so the
+        shell can show it on the dock status row, and so a test can read it.
+        It takes no space on this screen.
 
         Args:
             chip: The shell's status chip. It is moved, not copied.
         """
-        if self._panel_layout.indexOf(chip) >= 0:  # type: ignore[attr-defined]
-            return
-        self._panel_layout.insertWidget(0, chip)  # type: ignore[attr-defined]
+        layout = self._panel_layout
+        if layout.indexOf(chip) >= 0:  # type: ignore[attr-defined]
+            layout.removeWidget(chip)  # type: ignore[attr-defined]
+        chip.setParent(self.root)  # type: ignore[attr-defined]
+        chip.setFixedSize(0, 0)  # type: ignore[attr-defined]
 
     def set_expert(self, enabled: bool) -> None:
         """Show or hide the expert side panel.
@@ -2430,9 +2433,14 @@ def _swatch(
 
 
 def _fit_chip(button: object) -> None:
+    """Reserve the bold label width. Selected chips are drawn at weight 600."""
     text = str(button.text())  # type: ignore[attr-defined]
-    width = int(button.fontMetrics().horizontalAdvance(text)) + 28  # type: ignore[attr-defined]
-    button.setMinimumWidth(max(width, 36))  # type: ignore[attr-defined]
+    _core, gui, _widgets = _qt()
+    font = gui.QFont(button.font())  # type: ignore[attr-defined]
+    font.setWeight(gui.QFont.Weight.DemiBold)  # type: ignore[attr-defined]
+    advance = int(gui.QFontMetrics(font).horizontalAdvance(text))  # type: ignore[attr-defined]
+    # 14 px of padding on each side, plus the border.
+    button.setMinimumWidth(max(advance + 32, 36))  # type: ignore[attr-defined]
 
 
 def _darken(scroll: object, gui: object) -> None:

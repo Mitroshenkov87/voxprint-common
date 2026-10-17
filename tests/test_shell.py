@@ -50,6 +50,23 @@ def test_headless_layout_and_adoption() -> None:
     assert "PySide6" not in sys.modules
 
 
+def test_chip_text_fits(tmp_path: Path) -> None:
+    if importlib.util.find_spec("PySide6") is None:
+        pytest.skip("ui extra is not installed")
+    env = os.environ.copy()
+    env["QT_QPA_PLATFORM"] = "offscreen"
+    script = Path(__file__).with_name("shell_offscreen.py")
+    completed = subprocess.run(
+        [sys.executable, str(script), str(tmp_path), "chips"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert completed.returncode == 0, completed.stdout + "\n" + completed.stderr
+    assert "PySide6" not in sys.modules
+
+
 def test_offscreen_shell_screenshots(tmp_path: Path) -> None:
     if importlib.util.find_spec("PySide6") is None:
         pytest.skip("ui extra is not installed")

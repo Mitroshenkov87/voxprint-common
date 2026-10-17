@@ -439,7 +439,10 @@ QPushButton#expertReset {{
 }}
 QSlider#compareSlider {{ background: transparent; }}
 QSlider#compareSlider::groove:horizontal {{
-    height: 2px; background: rgba(255, 255, 255, 90); border: none;
+    height: 0px; background: transparent; border: none;
+}}
+QSlider#compareSlider::add-page:horizontal, QSlider#compareSlider::sub-page:horizontal {{
+    background: transparent; border: none;
 }}
 QSlider#compareSlider::handle:horizontal {{
     width: 4px; margin: -220px 0; background: {TEXT}; border: none; border-radius: 1px;
