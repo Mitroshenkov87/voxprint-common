@@ -8,9 +8,11 @@ picture. The dock stays a separate API and is not a control on this screen.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 from typing import assert_never
 
 from voxprint_common.i18n import tr
@@ -33,24 +35,45 @@ class Phase(StrEnum):
     EMPTY = "empty"
     BUSY = "busy"
     READY = "ready"
+    BLOCKED = "blocked"
+    UNAVAILABLE = "unavailable"
+
+
+_HISTORY_LIMIT = 50
+_HISTORY_NAME = "image-history.json"
 
 
 @dataclass(frozen=True)
 class PresetChoice:
     """One chip in a preset row.
 
-    ``label_key`` is a catalog key. The visible word is plain.
+    ``label_key`` is a catalog key. The visible word is plain. ``group_key``
+    gathers chips under a second plain label, such as Landscape. An unavailable
+    choice stays on the row, greyed out, with a plain reason and an action id
+    the app handles.
     """
 
     value: str
     label_key: str
+    group_key: str = ""
+    available: bool = True
+    reason_key: str = ""
+    action_label_key: str = ""
+    action_id: str = ""
+
+    def __post_init__(self) -> None:
+        """An unavailable chip needs a reason and an action the app can run."""
+        if self.available:
+            return
+        if not self.reason_key or not self.action_label_key or not self.action_id:
+            raise ValueError("an unavailable choice needs a plain reason and an action")
 
 
 @dataclass(frozen=True)
 class PresetRow:
     """A row of segmented chips an app supplies.
 
-    ``default`` is the chip selected when the screen opens.
+    ``default`` is the chip selected when the screen opens. It has to be available.
     """
 
     row_id: str
@@ -59,24 +82,30 @@ class PresetRow:
     default: str
 
     def __post_init__(self) -> None:
-        """Reject an empty row or a default that is not one of the chips."""
+        """Reject an empty row or a default that is not an available chip."""
         values = [choice.value for choice in self.choices]
         if not self.row_id or not self.label_key or not values or len(values) != len(set(values)):
             raise ValueError("a preset row needs an id and distinct choices")
         if self.default not in values:
             raise ValueError("a preset default must be one of the choices")
+        chosen = next(choice for choice in self.choices if choice.value == self.default)
+        if not chosen.available:
+            raise ValueError("a preset default must be available")
 
 
 @dataclass(frozen=True)
 class GalleryItem:
     """One finished picture in the history strip.
 
-    ``presets`` is the chip selection that produced it, in row order.
+    ``presets`` is the chip selection that produced it, in row order. ``seed``
+    is the number that repeats it. The layout stores the style id and does not
+    rewrite the prompt.
     """
 
     item_id: str
     prompt: str
     presets: tuple[tuple[str, str], ...]
+    seed: int = 0
 
 
 class SimpleImageLayout:
@@ -88,11 +117,13 @@ class SimpleImageLayout:
     is on. The widget does not draw that switch.
     """
 
-    def __init__(self, rows: Iterable[PresetRow] = ()) -> None:
+    def __init__(self, rows: Iterable[PresetRow] = (), *, state_dir: Path | None = None) -> None:
         """Copy ``rows`` and select each row's default.
 
         Args:
             rows: Preset rows. Ids must be unique.
+            state_dir: The app's State directory. History is read and written
+                there. None keeps the strip in memory.
 
         Raises:
             ValueError: Two rows share an id.
@@ -101,12 +132,19 @@ class SimpleImageLayout:
         ids = [row.row_id for row in self._rows]
         if len(ids) != len(set(ids)):
             raise ValueError("preset row ids must be unique")
+        self._state_dir = state_dir
         self.prompt = ""
+        self.seed = 0
         self.phase = Phase.EMPTY
+        self.step = 0
+        self.total = 0
+        self.stage_label = ""
+        self.reason = ""
         self.presets = {row.row_id: row.default for row in self._rows}
         self.history: list[GalleryItem] = []
         self.selected: str | None = None
         self.full_layout = False
+        self._load_history()
 
     @property
     def rows(self) -> tuple[PresetRow, ...]:
@@ -132,8 +170,11 @@ class SimpleImageLayout:
             ValueError: The row or the value is unknown.
         """
         row = self._row(row_id)
-        if row is None or value not in {choice.value for choice in row.choices}:
+        choice = None if row is None else self._choice(row, value)
+        if choice is None:
             raise ValueError(f"unknown preset {row_id}={value}")
+        if not choice.available:
+            raise ValueError(f"preset {row_id}={value} is unavailable")
         self.presets[row_id] = value
 
     def generate(self) -> bool:
@@ -144,14 +185,64 @@ class SimpleImageLayout:
         """
         if self.phase is Phase.BUSY or not self.prompt.strip():
             return False
+        self._clear_run()
         self.phase = Phase.BUSY
         return True
 
-    def cancel(self) -> None:
-        """Leave the busy phase. A picture already in the strip stays up."""
+    def progress(self, step: int, total: int, stage_label: str) -> None:
+        """Record how far the current picture has got.
+
+        ``stage_label`` is already translated by the app.
+
+        Args:
+            step: Finished steps, from zero through ``total``.
+            total: How many steps the picture takes.
+            stage_label: Plain words for the current stage.
+
+        Raises:
+            ValueError: Nothing is running, or the numbers do not fit.
+        """
         if self.phase is not Phase.BUSY:
+            raise ValueError("progress needs a picture that is in progress")
+        label = stage_label.strip()
+        if total < 1 or step < 0 or step > total or not label:
+            raise ValueError("progress needs a step inside the total and a stage label")
+        self.step = step
+        self.total = total
+        self.stage_label = label
+
+    def cancel(self) -> None:
+        """Return to a clean idle state.
+
+        Progress, a blocked reason, and an unavailable reason are cleared. A
+        picture already in the strip stays up. An idle screen stays idle.
+        """
+        if self.phase in {Phase.EMPTY, Phase.READY}:
             return
+        self._clear_run()
         self.phase = Phase.READY if self.selected else Phase.EMPTY
+
+    def block(self, reason: str) -> None:
+        """Show a plain reason in the result area.
+
+        Args:
+            reason: Already translated. It is shown in the picture area.
+
+        Raises:
+            ValueError: ``reason`` is blank.
+        """
+        self._show_reason(reason, Phase.BLOCKED)
+
+    def unavailable(self, reason: str) -> None:
+        """Show that a feature is unavailable, in the result area.
+
+        Args:
+            reason: Already translated.
+
+        Raises:
+            ValueError: ``reason`` is blank.
+        """
+        self._show_reason(reason, Phase.UNAVAILABLE)
 
     def finish(self, item_id: str) -> GalleryItem:
         """Store a finished picture at the front of the history and show it.
@@ -173,10 +264,14 @@ class SimpleImageLayout:
             item_id,
             self.prompt.strip(),
             tuple(self.presets.items()),
+            self.seed,
         )
         self.history.insert(0, item)
+        del self.history[_HISTORY_LIMIT:]
         self.selected = item.item_id
+        self._clear_run()
         self.phase = Phase.READY
+        self._write_history()
         return item
 
     def select(self, item_id: str) -> GalleryItem | None:
@@ -219,11 +314,34 @@ class SimpleImageLayout:
         if item is None:
             return None
         self.prompt = item.prompt
+        self.seed = item.seed
         for row_id, value in item.presets:
             row = self._row(row_id)
-            if row is not None and value in {choice.value for choice in row.choices}:
+            choice = None if row is None else self._choice(row, value)
+            if choice is not None and choice.available:
                 self.presets[row_id] = value
         return item.prompt
+
+    def delete(self, item_id: str) -> GalleryItem | None:
+        """Remove one history item and write the strip back to the State dir.
+
+        Args:
+            item_id: History item id.
+
+        Returns:
+            The removed item, or None when the id is unknown.
+        """
+        item = self.item(item_id)
+        if item is None:
+            return None
+        self.history = [saved for saved in self.history if saved.item_id != item_id]
+        if self.selected == item_id:
+            self.selected = self.history[0].item_id if self.history else None
+            if self.phase is not Phase.BUSY:
+                self._clear_run()
+                self.phase = Phase.READY if self.selected else Phase.EMPTY
+        self._write_history()
+        return item
 
     def more_like(self, item_id: str | None = None) -> bool:
         """Start another picture from one already in the strip.
@@ -281,35 +399,172 @@ class SimpleImageLayout:
     def _row(self, row_id: str) -> PresetRow | None:
         return next((row for row in self._rows if row.row_id == row_id), None)
 
+    def _choice(self, row: PresetRow, value: str) -> PresetChoice | None:
+        return next((choice for choice in row.choices if choice.value == value), None)
 
-def image_presets() -> tuple[PresetRow, ...]:
-    """Return the reference size and style rows.
+    def _clear_run(self) -> None:
+        self.step = 0
+        self.total = 0
+        self.stage_label = ""
+        self.reason = ""
 
-    Apps pass their own rows to :class:`SimpleImageLayout` instead of these.
+    def _show_reason(self, reason: str, phase: Phase) -> None:
+        text = reason.strip()
+        if not text:
+            raise ValueError("the result needs a plain reason")
+        self._clear_run()
+        self.reason = text
+        self.phase = phase
+
+    def _load_history(self) -> None:
+        if self._state_dir is None:
+            return
+        path = self._state_dir / _HISTORY_NAME
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except OSError, UnicodeError, json.JSONDecodeError:
+            return
+        if not isinstance(payload, dict) or payload.get("schema") != 1:
+            return
+        items = payload.get("items")
+        if not isinstance(items, list):
+            return
+        loaded: list[GalleryItem] = []
+        seen: set[str] = set()
+        for raw in items:
+            item = _history_item(raw)
+            if item is None or item.item_id in seen:
+                continue
+            seen.add(item.item_id)
+            loaded.append(item)
+            if len(loaded) == _HISTORY_LIMIT:
+                break
+        self.history = loaded
+
+    def _write_history(self) -> None:
+        if self._state_dir is None:
+            return
+        self._state_dir.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "schema": 1,
+            "items": [
+                {
+                    "id": item.item_id,
+                    "prompt": item.prompt,
+                    "presets": [list(pair) for pair in item.presets],
+                    "seed": item.seed,
+                }
+                for item in self.history[:_HISTORY_LIMIT]
+            ],
+        }
+        path = self._state_dir / _HISTORY_NAME
+        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def _history_item(raw: object) -> GalleryItem | None:
+    if not isinstance(raw, dict):
+        return None
+    item_id = raw.get("id")
+    prompt = raw.get("prompt")
+    presets = raw.get("presets")
+    seed = raw.get("seed", 0)
+    if not isinstance(item_id, str) or not item_id or not isinstance(prompt, str):
+        return None
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        return None
+    if not isinstance(presets, list):
+        return None
+    pairs: list[tuple[str, str]] = []
+    for pair in presets:
+        if (
+            not isinstance(pair, list)
+            or len(pair) != 2
+            or not isinstance(pair[0], str)
+            or not isinstance(pair[1], str)
+        ):
+            return None
+        pairs.append((pair[0], pair[1]))
+    return GalleryItem(item_id, prompt, tuple(pairs), seed)
+
+
+def _safe_id(value: str) -> str:
+    return "".join(char if char.isalnum() else "-" for char in value)
+
+
+def _chip_name(row_id: str, value: str) -> str:
+    return f"chip-{row_id}-{_safe_id(value)}"
+
+
+def _choice_groups(
+    choices: tuple[PresetChoice, ...],
+) -> tuple[tuple[str, tuple[PresetChoice, ...]], ...]:
+    groups: list[tuple[str, list[PresetChoice]]] = []
+    for choice in choices:
+        if groups and groups[-1][0] == choice.group_key:
+            groups[-1][1].append(choice)
+        else:
+            groups.append((choice.group_key, [choice]))
+    return tuple((key, tuple(items)) for key, items in groups)
+
+
+def image_presets(*, enlarge_installed: bool = False) -> tuple[PresetRow, ...]:
+    """Return Canvas's size, output, style, and picture-count rows.
+
+    The style value is only an id. The app owns any words added to the prompt.
+    ``enlarge_installed`` marks 4K available. When it is false, 4K stays on the
+    row, greyed out, with a reason and an install action.
+
+    Args:
+        enlarge_installed: True when Enlarge can make a 4K picture.
     """
+    four_k = (
+        PresetChoice("4k", "simple.output.4k")
+        if enlarge_installed
+        else PresetChoice(
+            "4k",
+            "simple.output.4k",
+            available=False,
+            reason_key="simple.output.4k.reason",
+            action_label_key="simple.output.install",
+            action_id="install.enlarge",
+        )
+    )
     return (
         PresetRow(
             "size",
             "simple.size",
             (
-                PresetChoice("square", "simple.size.square"),
-                PresetChoice("portrait", "simple.size.portrait"),
-                PresetChoice("landscape", "simple.size.landscape"),
-                PresetChoice("wide", "simple.size.wide"),
+                PresetChoice("16:9", "simple.size.16-9", "simple.size.landscape"),
+                PresetChoice("21:9", "simple.size.21-9", "simple.size.landscape"),
+                PresetChoice("3:2", "simple.size.3-2", "simple.size.landscape"),
+                PresetChoice("4:3", "simple.size.4-3", "simple.size.landscape"),
+                PresetChoice("1:1", "simple.size.1-1", "simple.size.square"),
+                PresetChoice("9:16", "simple.size.9-16", "simple.size.portrait"),
+                PresetChoice("2:3", "simple.size.2-3", "simple.size.portrait"),
+                PresetChoice("3:4", "simple.size.3-4", "simple.size.portrait"),
             ),
-            "square",
+            "1:1",
+        ),
+        PresetRow(
+            "output",
+            "simple.output",
+            (PresetChoice("standard", "simple.output.standard"), four_k),
+            "standard",
         ),
         PresetRow(
             "style",
             "simple.style",
             (
-                PresetChoice("none", "simple.style.none"),
                 PresetChoice("photo", "simple.style.photo"),
+                PresetChoice("cinematic", "simple.style.cinematic"),
+                PresetChoice("portrait", "simple.style.portrait"),
                 PresetChoice("illustration", "simple.style.illustration"),
                 PresetChoice("anime", "simple.style.anime"),
                 PresetChoice("3d", "simple.style.3d"),
+                PresetChoice("painting", "simple.style.painting"),
+                PresetChoice("sketch", "simple.style.sketch"),
             ),
-            "none",
+            "photo",
         ),
         PresetRow(
             "count",
@@ -328,11 +583,16 @@ class SimpleImageWidget:
     """Qt view of a :class:`SimpleImageLayout`. Construction imports PySide6.
 
     Enter in the prompt starts a picture. Shift+Enter inserts a line. Size,
-    style, and how many pictures stay on screen, with More like this, Save,
-    Open folder, and Use prompt again. Expert mode adds a side panel and
-    leaves every other control where it was. The history strip shows a
-    neutral gradient for each finished item. That gradient is a placeholder,
-    not a photograph. A problem is one plain sentence under the strip.
+    output size, style, and how many pictures stay on screen, with More like
+    this, Save, Open folder, and Use prompt again. Improve prompt, when the
+    app supplies it, replaces the text in that same box. Expert mode adds a
+    side panel and leaves every other control where it was. The history strip
+    shows a neutral gradient for each finished item. That gradient is a
+    placeholder, not a photograph. A blocked result and an unavailable feature
+    are plain sentences in the picture area. Manage models and an unavailable
+    chip's action call ``on_command``. Canvas runs
+    ``voxprint-mdl --gui --app canvas`` for Manage models. This widget does
+    not start that program.
     """
 
     def __init__(
@@ -342,16 +602,23 @@ class SimpleImageWidget:
         *,
         on_generate: Callable[[], None] | None = None,
         on_command: Callable[[str], None] | None = None,
+        on_improve: Callable[[str], str] | None = None,
+        on_history: Callable[[str, str], None] | None = None,
+        on_seed: Callable[[int], None] | None = None,
     ) -> None:
         """Build the screen.
 
         Args:
             layout: Headless state. The widget does not replace it.
-            settings: Expert settings go in the side panel. Plain settings are
-                not drawn here; everyday choices are preset chips.
+            settings: Expert settings the app supplied. They go in the side panel.
             on_generate: Called after a prompt starts a picture.
-            on_command: Called with a command id from Save, Open folder, or
-                Expert mode.
+            on_command: Called with a command id from Save, Open folder, Expert
+                mode, Manage models, or an unavailable-chip action.
+            on_improve: Replaces the prompt text in the same field. None hides
+                Improve prompt and Revert.
+            on_history: Called with an action id and a history item id. The
+                actions are ``open``, ``show_folder``, ``copy``, and ``use_input``.
+            on_seed: Called with the restored seed after Use prompt again.
         """
         core, gui, widgets = _qt()
         self._core = core
@@ -362,6 +629,10 @@ class SimpleImageWidget:
         self._settings = settings
         self._on_generate = on_generate
         self._on_command = on_command
+        self._on_improve = on_improve
+        self._on_history = on_history
+        self._on_seed = on_seed
+        self._previous_prompt: str | None = None
         self._handling_enter = False
         self._source: object | None = None
         self.root = widgets.QWidget()
@@ -424,25 +695,57 @@ class SimpleImageWidget:
         self._fill_history()
         busy = self._layout.phase is Phase.BUSY
         self._generate_button.setEnabled(not busy)  # type: ignore[attr-defined]
-        if self._layout.phase is Phase.EMPTY:
+        phase = self._layout.phase
+        if phase is Phase.EMPTY:
             self._stack.setCurrentIndex(0)  # type: ignore[attr-defined]
             return
-        if self._layout.phase is Phase.BUSY:
+        if phase is Phase.BUSY:
+            self._paint_progress()
             self._stack.setCurrentIndex(1)  # type: ignore[attr-defined]
             return
-        self._show_ready()
+        if phase is Phase.BLOCKED:
+            self._blocked.setText(self._layout.reason)  # type: ignore[attr-defined]
+            self._stack.setCurrentIndex(3)  # type: ignore[attr-defined]
+            return
+        if phase is Phase.UNAVAILABLE:
+            self._feature.setText(self._layout.reason)  # type: ignore[attr-defined]
+            self._stack.setCurrentIndex(4)  # type: ignore[attr-defined]
+            return
+        if phase is Phase.READY:
+            self._show_ready()
+            return
+        assert_never(phase)
 
-    def history_menu(self, item_id: str) -> object:
-        """Return the Save, Copy, and Use prompt again menu for ``item_id``.
+    def history_menu(self, item_id: str, *, confirming: bool = False) -> object:
+        """Return the history menu for ``item_id``.
+
+        Delete opens a second step in the same menu: the question, Delete, and
+        Keep. Nothing is removed until that second Delete.
 
         Args:
             item_id: History item the menu acts on.
+            confirming: True returns the confirm step.
         """
         widgets = self._widgets
         menu = widgets.QMenu(self.root)
-        menu.addAction(tr("simple.menu.save"), lambda: self._save(item_id))
+        if confirming:
+            question = menu.addAction(tr("simple.history.delete.confirm"))
+            question.setEnabled(False)
+            menu.addAction(tr("simple.history.delete"), lambda: self._delete(item_id))
+            menu.addAction(tr("simple.history.keep"))
+            return menu
+        menu.addAction(tr("simple.history.open"), lambda: self._notify_history("open", item_id))
+        menu.addAction(
+            tr("simple.history.show_folder"),
+            lambda: self._notify_history("show_folder", item_id),
+        )
         menu.addAction(tr("simple.menu.copy"), lambda: self._copy(item_id))
         menu.addAction(tr("simple.menu.use_prompt"), lambda: self._use(item_id))
+        menu.addAction(
+            tr("simple.history.use_input"),
+            lambda: self._notify_history("use_input", item_id),
+        )
+        menu.addAction(tr("simple.history.delete"), lambda: self._ask_delete(item_id))
         return menu
 
     def _build(self) -> None:
@@ -454,6 +757,13 @@ class SimpleImageWidget:
         self._top = widgets.QHBoxLayout()
         self._top.setSpacing(8)
         self._top.addStretch(1)
+        self._overflow = widgets.QPushButton(tr("shell.toolbar.overflow"))
+        self._overflow.setObjectName("overflow")
+        self._overflow.setAutoDefault(False)
+        overflow = widgets.QMenu(self.root)
+        overflow.addAction(tr("simple.menu.models"), lambda: self._command("models.manage"))
+        self._overflow.setMenu(overflow)
+        self._top.addWidget(self._overflow)
         self._expert_toggle = widgets.QPushButton(tr("command.view.toggle_expert_mode"))
         self._expert_toggle.setObjectName("expertToggle")
         self._expert_toggle.setAutoDefault(False)
@@ -466,12 +776,33 @@ class SimpleImageWidget:
         self._prompt.setObjectName("promptBox")
         self._prompt.setPlaceholderText(tr("shell.prompt.placeholder"))
         self._prompt.setMinimumHeight(96)
+        prompt_col = widgets.QVBoxLayout()
+        prompt_col.setSpacing(6)
+        prompt_col.addWidget(self._prompt, 1)
+        tools = widgets.QHBoxLayout()
+        tools.setSpacing(8)
+        self._improve = widgets.QPushButton(tr("simple.improve"))
+        self._improve.setObjectName("improvePrompt")
+        self._improve.setAutoDefault(False)
+        self._improve.clicked.connect(self._improve_prompt)
+        self._revert = widgets.QPushButton(tr("simple.revert"))
+        self._revert.setObjectName("revertPrompt")
+        self._revert.setAutoDefault(False)
+        self._revert.setEnabled(False)
+        self._revert.clicked.connect(self._revert_prompt)
+        tools.addWidget(self._improve)
+        tools.addWidget(self._revert)
+        tools.addStretch(1)
+        prompt_col.addLayout(tools)
+        if self._on_improve is None:
+            self._improve.hide()
+            self._revert.hide()
         self._generate_button = widgets.QPushButton(tr("simple.generate"))
         self._generate_button.setObjectName("generate")
         self._generate_button.setAutoDefault(False)
         self._generate_button.setMinimumSize(168, 96)
         self._generate_button.clicked.connect(self._generate)
-        prompt_row.addWidget(self._prompt, 1)
+        prompt_row.addLayout(prompt_col, 1)
         prompt_row.addWidget(self._generate_button)
         root.addLayout(prompt_row)
         self._preset_host = widgets.QWidget()
@@ -492,6 +823,8 @@ class SimpleImageWidget:
         self._stack.addWidget(self._empty_page())
         self._stack.addWidget(self._busy_page())
         self._stack.addWidget(self._ready_page())
+        self._blocked = self._reason_page("blockedText")
+        self._feature = self._reason_page("featureText")
         stage_layout.addWidget(self._stack, 1)
         stage_layout.addWidget(self._action_bar())
         centre.addWidget(self._stage, 1)
@@ -567,15 +900,17 @@ class SimpleImageWidget:
         text = widgets.QLabel(tr("simple.progress"))
         text.setObjectName("progressText")
         text.setAlignment(qt.AlignCenter)
+        text.setWordWrap(True)
+        self._progress_text = text
         layout.addWidget(text)
         bar_row = widgets.QHBoxLayout()
         bar_row.addStretch(1)
         bar = widgets.QProgressBar()
         bar.setObjectName("progress")
-        bar.setRange(0, 100)
-        bar.setValue(42)
+        bar.setRange(0, 0)
         bar.setTextVisible(False)
         bar.setFixedWidth(280)
+        self._progress_bar = bar
         bar_row.addWidget(bar)
         bar_row.addStretch(1)
         layout.addLayout(bar_row)
@@ -608,36 +943,74 @@ class SimpleImageWidget:
         self._picture.resizeEvent = _resized  # type: ignore[method-assign]
         return page
 
+    def _reason_page(self, name: str) -> object:
+        widgets = self._widgets
+        page = widgets.QWidget()
+        layout = widgets.QVBoxLayout(page)
+        label = widgets.QLabel()
+        label.setObjectName(name)
+        label.setAlignment(self._qt.AlignCenter)
+        label.setWordWrap(True)
+        layout.addStretch(1)
+        layout.addWidget(label)
+        layout.addStretch(1)
+        self._stack.addWidget(page)  # type: ignore[attr-defined]
+        return label
+
     def _fill_presets(self) -> None:
         widgets = self._widgets
         for row in self._layout.rows:
-            line = widgets.QHBoxLayout()
-            line.setSpacing(8)
-            label = widgets.QLabel(tr(row.label_key))
-            label.setObjectName(f"preset-{row.row_id}")
-            label.setProperty("presetLabel", "true")
-            label.setMinimumWidth(156)
-            line.addWidget(label)
             group = widgets.QButtonGroup(self.root)
             group.setExclusive(True)
-            for choice in row.choices:
-                button = widgets.QPushButton(tr(choice.label_key))
-                button.setObjectName(f"chip-{row.row_id}-{choice.value}")
-                button.setProperty("chip", "true")
-                button.setCheckable(True)
-                button.setAutoDefault(False)
-                button.setChecked(choice.value == self._layout.presets[row.row_id])
-                button.clicked.connect(
-                    lambda _checked=False, row_id=row.row_id, value=choice.value: self._choose(
-                        row_id, value
+            lines = _choice_groups(row.choices)
+            for index, (group_key, choices) in enumerate(lines):
+                line = widgets.QHBoxLayout()
+                line.setSpacing(8)
+                label = widgets.QLabel(tr(row.label_key) if index == 0 else "")
+                if index == 0:
+                    label.setObjectName(f"preset-{row.row_id}")
+                label.setProperty("presetLabel", "true")
+                label.setMinimumWidth(156)
+                line.addWidget(label)
+                if group_key:
+                    group_label = widgets.QLabel(tr(group_key))
+                    group_label.setProperty("presetLabel", "true")
+                    group_label.setMinimumWidth(96)
+                    line.addWidget(group_label)
+                for choice in choices:
+                    button = widgets.QPushButton(tr(choice.label_key))
+                    button.setObjectName(_chip_name(row.row_id, choice.value))
+                    button.setProperty("chip", "true")
+                    button.setAutoDefault(False)
+                    if choice.available:
+                        button.setCheckable(True)
+                        button.setChecked(choice.value == self._layout.presets[row.row_id])
+                        button.clicked.connect(
+                            lambda _checked=False, row_id=row.row_id, value=choice.value: (
+                                self._choose(row_id, value)
+                            )
+                        )
+                        group.addButton(button)
+                    else:
+                        button.setEnabled(False)
+                    line.addWidget(button)
+                    button.style().unpolish(button)
+                    button.style().polish(button)
+                    if choice.available:
+                        continue
+                    reason = widgets.QLabel(tr(choice.reason_key))
+                    reason.setObjectName(f"reason-{row.row_id}-{_safe_id(choice.value)}")
+                    reason.setProperty("presetLabel", "true")
+                    line.addWidget(reason)
+                    action = widgets.QPushButton(tr(choice.action_label_key))
+                    action.setObjectName(f"unavailable-{row.row_id}-{_safe_id(choice.value)}")
+                    action.setAutoDefault(False)
+                    action.clicked.connect(
+                        lambda _checked=False, command=choice.action_id: self._command(command)
                     )
-                )
-                group.addButton(button)
-                line.addWidget(button)
-                button.style().unpolish(button)
-                button.style().polish(button)
-            line.addStretch(1)
-            self._preset_rows.addLayout(line)
+                    line.addWidget(action)
+                line.addStretch(1)
+                self._preset_rows.addLayout(line)
 
     def _sync_presets(self) -> None:
         for row in self._layout.rows:
@@ -645,9 +1018,9 @@ class SimpleImageWidget:
             for choice in row.choices:
                 button = self.root.findChild(
                     self._widgets.QPushButton,
-                    f"chip-{row.row_id}-{choice.value}",
+                    _chip_name(row.row_id, choice.value),
                 )
-                if button is not None:
+                if button is not None and button.isCheckable():
                     button.setChecked(choice.value == selected)
 
     def _fill_history(self) -> None:
@@ -764,6 +1137,7 @@ class SimpleImageWidget:
             return
         if not self._layout.more_like():
             return
+        self._restore_seed()
         self.set_note("")
         self.refresh(prompt=True)
         if self._on_generate is not None:
@@ -780,6 +1154,7 @@ class SimpleImageWidget:
         if self._layout.use_prompt_again() is None:
             self.set_note(tr("simple.error.picture"))
             return
+        self._restore_seed()
         self.set_note("")
         self.refresh(prompt=True)
 
@@ -795,6 +1170,16 @@ class SimpleImageWidget:
         if self._layout.select(item_id) is None:
             return
         self.refresh()
+
+    def _paint_progress(self) -> None:
+        label = self._layout.stage_label or tr("simple.progress")
+        self._progress_text.setText(label)  # type: ignore[attr-defined]
+        total = self._layout.total
+        if total > 0:
+            self._progress_bar.setRange(0, total)  # type: ignore[attr-defined]
+            self._progress_bar.setValue(self._layout.step)  # type: ignore[attr-defined]
+            return
+        self._progress_bar.setRange(0, 0)  # type: ignore[attr-defined]
 
     def _show_ready(self) -> None:
         item = self._layout.item(self._layout.selected)
@@ -832,12 +1217,67 @@ class SimpleImageWidget:
         if item is None:
             return
         self._gui.QGuiApplication.clipboard().setText(item.prompt)
-        self.set_note(tr("simple.copied"))
+        self._notify_history("copy", item_id)
 
     def _use(self, item_id: str) -> None:
         if self._layout.use_prompt_again(item_id) is None:
             return
+        self._restore_seed()
         self.refresh(prompt=True)
+
+    def _improve_prompt(self) -> None:
+        if self._on_improve is None:
+            return
+        current = self._prompt.toPlainText()  # type: ignore[attr-defined]
+        if not current.strip():
+            self.set_note(tr("simple.error.prompt"))
+            return
+        improved = self._on_improve(current)
+        if improved == current:
+            return
+        self._previous_prompt = current
+        self._layout.set_prompt(improved)
+        self._prompt.setPlainText(improved)  # type: ignore[attr-defined]
+        self._revert.setEnabled(True)  # type: ignore[attr-defined]
+        self.set_note("")
+
+    def _revert_prompt(self) -> None:
+        if self._previous_prompt is None:
+            return
+        text = self._previous_prompt
+        self._previous_prompt = None
+        self._layout.set_prompt(text)
+        self._prompt.setPlainText(text)  # type: ignore[attr-defined]
+        self._revert.setEnabled(False)  # type: ignore[attr-defined]
+
+    def _restore_seed(self) -> None:
+        if self._on_seed is not None:
+            self._on_seed(self._layout.seed)
+
+    def _notify_history(self, action: str, item_id: str) -> None:
+        if self._layout.item(item_id) is None:
+            return
+        notes = {
+            "open": "simple.history.opened",
+            "show_folder": "simple.history.shown",
+            "copy": "simple.copied",
+            "use_input": "simple.history.using",
+        }
+        key = notes.get(action)
+        if key is not None:
+            self.set_note(tr(key))
+        if self._on_history is not None:
+            self._on_history(action, item_id)
+
+    def _ask_delete(self, item_id: str) -> None:
+        menu = self.history_menu(item_id, confirming=True)
+        menu.exec(self._gui.QCursor.pos())  # type: ignore[attr-defined]
+
+    def _delete(self, item_id: str) -> None:
+        if self._layout.delete(item_id) is None:
+            return
+        self.set_note("")
+        self.refresh()
 
     def _command(self, command_id: str) -> None:
         if self._on_command is not None:

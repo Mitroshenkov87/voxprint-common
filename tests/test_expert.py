@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 
 import pytest
 
 from voxprint_common.i18n import tr_lang
 from voxprint_common.suite_settings import expert_mode, file, set_ui_language
+from voxprint_common.ui import settings as settings_module
 from voxprint_common.ui.commands import CommandSpec, Registry, reference_commands
 from voxprint_common.ui.dock import (
     Float,
@@ -24,7 +26,6 @@ from voxprint_common.ui.dock import (
 from voxprint_common.ui.expert import ExpertMode, active_contexts
 from voxprint_common.ui.keymap import WHEN_EXPERT, KeyMap
 from voxprint_common.ui.settings import (
-    IMAGE_CONTENT_FILTER,
     Choice,
     Settings,
     SettingSpec,
@@ -83,35 +84,44 @@ def test_registry_hides_expert_commands_until_the_mode_is_on() -> None:
     assert toggle.title_key == "command.view.toggle_expert_mode"
 
 
-def test_settings_hide_expert_rows_and_content_filter_is_standard() -> None:
+def test_settings_hide_expert_rows_and_adult_content_is_app_owned() -> None:
     settings = reference_settings()
     simple = [item.setting_id for item in settings.visible(expert=False)]
     assert simple == []
     shown = [item.setting_id for item in settings.visible(expert=True)]
     assert shown == [
         "shell.steps",
-        "shell.sampler",
         "shell.guidance",
         "shell.seed",
-        "shell.lora",
+        "shell.sampler",
         "shell.negative",
-        "image.content_filter",
-        "shell.save_folder",
+        "shell.addons",
+        "shell.vram",
+        "image.adult_content",
     ]
     negative = settings.get("shell.negative")
     assert negative is not None and negative.type is SettingType.TEXT and negative.expert is True
-    assert IMAGE_CONTENT_FILTER.expert is True
-    assert IMAGE_CONTENT_FILTER.type is SettingType.BOOL
-    assert IMAGE_CONTENT_FILTER.default is True
-    assert IMAGE_CONTENT_FILTER.group == "image"
-    assert IMAGE_CONTENT_FILTER.setting_id == "image.content_filter"
+    adult = settings.get("image.adult_content")
+    assert adult is not None
+    assert adult.expert is True
+    assert adult.type is SettingType.BOOL
+    assert adult.default is False
+    assert adult.group == "image"
+    assert settings.get("image.content_filter") is None
     steps = settings.get("shell.steps")
     assert steps is not None and steps.expert is True and steps.type is SettingType.INT
     sampler = settings.get("shell.sampler")
     assert sampler is not None and sampler.type is SettingType.ENUM and sampler.expert is True
-    folder = settings.get("shell.save_folder")
-    assert folder is not None and folder.type is SettingType.PATH and folder.expert is True
+    addons = settings.get("shell.addons")
+    assert addons is not None and addons.type is SettingType.PATH and addons.expert is True
+    memory = settings.get("shell.vram")
+    assert memory is not None and memory.type is SettingType.ENUM and memory.default == "auto"
     assert settings.get("shell.pictures") is None
+    assert settings.get("shell.lora") is None
+    assert settings.get("shell.save_folder") is None
+    assert not hasattr(settings_module, "IMAGE_CONTENT_FILTER")
+    source = Path(settings_module.__file__).read_text(encoding="utf-8")
+    assert "disable_safety" not in source
     custom = Settings(
         [
             SettingSpec(

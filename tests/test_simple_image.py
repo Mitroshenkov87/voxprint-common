@@ -26,18 +26,50 @@ def test_defaults_are_plain_and_data_driven() -> None:
     assert layout.history == []
     assert layout.selected is None
     assert layout.full_layout is False
-    assert layout.presets == {"size": "square", "style": "none", "count": "1"}
-    assert [row.row_id for row in layout.rows] == ["size", "style", "count"]
+    assert layout.seed == 0
+    assert layout.presets == {
+        "size": "1:1",
+        "output": "standard",
+        "style": "photo",
+        "count": "1",
+    }
+    assert [row.row_id for row in layout.rows] == ["size", "output", "style", "count"]
     assert layout.batch_size() == 1
     layout.choose("count", "4")
     assert layout.batch_size() == 4
     size = layout.rows[0]
     assert [choice.value for choice in size.choices] == [
-        "square",
-        "portrait",
-        "landscape",
-        "wide",
+        "16:9",
+        "21:9",
+        "3:2",
+        "4:3",
+        "1:1",
+        "9:16",
+        "2:3",
+        "3:4",
     ]
+    assert [choice.group_key for choice in size.choices[:4]] == ["simple.size.landscape"] * 4
+    style = next(row for row in layout.rows if row.row_id == "style")
+    assert [choice.value for choice in style.choices] == [
+        "photo",
+        "cinematic",
+        "portrait",
+        "illustration",
+        "anime",
+        "3d",
+        "painting",
+        "sketch",
+    ]
+    prompt = "a red door"
+    layout.set_prompt(prompt)
+    layout.choose("style", "anime")
+    assert layout.prompt == prompt
+    assert layout.presets["style"] == "anime"
+    with pytest.raises(ValueError):
+        layout.choose("output", "4k")
+    installed = SimpleImageLayout(image_presets(enlarge_installed=True))
+    installed.choose("output", "4k")
+    assert installed.presets["output"] == "4k"
 
 
 def test_custom_rows_generate_cancel_and_history() -> None:
@@ -139,3 +171,83 @@ def test_invalid_presets_are_refused() -> None:
     layout.generate()
     with pytest.raises(ValueError):
         layout.finish("same")
+    with pytest.raises(ValueError):
+        PresetChoice("4k", "simple.output.4k", available=False)
+    with pytest.raises(ValueError):
+        PresetRow(
+            "output",
+            "simple.output",
+            (
+                PresetChoice(
+                    "4k",
+                    "simple.output.4k",
+                    available=False,
+                    reason_key="simple.output.4k.reason",
+                    action_label_key="simple.output.install",
+                    action_id="install.enlarge",
+                ),
+            ),
+            "4k",
+        )
+
+
+def test_progress_block_and_unavailable_return_to_idle() -> None:
+    layout = SimpleImageLayout(image_presets())
+    layout.set_prompt("a hill")
+    assert layout.generate() is True
+    with pytest.raises(ValueError):
+        layout.progress(2, 1, "Drawing")
+    with pytest.raises(ValueError):
+        layout.progress(0, 1, " ")
+    layout.progress(1, 4, " Drawing the picture ")
+    assert layout.step == 1
+    assert layout.total == 4
+    assert layout.stage_label == "Drawing the picture"
+    layout.cancel()
+    assert layout.phase is Phase.EMPTY
+    assert layout.stage_label == ""
+    with pytest.raises(ValueError):
+        layout.progress(1, 4, "Drawing")
+    with pytest.raises(ValueError):
+        layout.block("  ")
+    layout.block("  This picture was stopped. ")
+    assert layout.phase is Phase.BLOCKED
+    assert layout.reason == "This picture was stopped."
+    layout.cancel()
+    assert layout.phase is Phase.EMPTY
+    assert layout.reason == ""
+    layout.unavailable("That feature is turned off.")
+    assert layout.phase is Phase.UNAVAILABLE
+    assert layout.generate() is True
+    assert layout.phase is Phase.BUSY
+    assert layout.reason == ""
+
+
+def test_history_keeps_fifty_items_seed_and_survives_a_bad_file(tmp_path) -> None:
+    layout = SimpleImageLayout(image_presets(), state_dir=tmp_path)
+    layout.set_prompt("door")
+    layout.seed = 42
+    layout.choose("style", "sketch")
+    for index in range(55):
+        assert layout.generate() is True
+        layout.finish(f"id-{index}")
+    assert len(layout.history) == 50
+    assert layout.history[0].item_id == "id-54"
+    assert layout.history[0].seed == 42
+    assert layout.history[0].presets[2] == ("style", "sketch")
+    again = SimpleImageLayout(image_presets(), state_dir=tmp_path)
+    assert again.selected is None
+    assert again.phase is Phase.EMPTY
+    assert [item.item_id for item in again.history] == [f"id-{index}" for index in range(54, 4, -1)]
+    assert again.use_prompt_again(again.history[0].item_id) == "door"
+    assert again.seed == 42
+    assert again.presets["style"] == "sketch"
+    removed = again.delete("id-54")
+    assert removed is not None and removed.item_id == "id-54"
+    assert again.history[0].item_id == "id-53"
+    stored = SimpleImageLayout(image_presets(), state_dir=tmp_path)
+    assert stored.history[0].item_id == "id-53"
+    assert stored.delete("missing") is None
+    (tmp_path / "image-history.json").write_text("{", encoding="utf-8")
+    broken = SimpleImageLayout(image_presets(), state_dir=tmp_path)
+    assert broken.history == []

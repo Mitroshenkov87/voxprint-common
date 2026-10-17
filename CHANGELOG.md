@@ -2,9 +2,9 @@
 
 ## Unreleased
 
-Expert mode is one suite setting, `ui.expert_mode`, off by default. Commands, dock panels, and settings tagged expert stay hidden until it is on, and a hidden panel stays in the layout JSON. `view.toggle_expert_mode` is in the View menu and the command palette, with no default shortcut. Image apps share the expert content-filter setting.
+Expert mode is one suite setting, `ui.expert_mode`, off by default. Commands, dock panels, and settings tagged expert stay hidden until it is on, and a hidden panel stays in the layout JSON. `view.toggle_expert_mode` is in the View menu and the command palette, with no default shortcut. A minors-safety gate stays inside the app. The shared UI has no setting that turns that gate off. Adult content is an ordinary expert descriptor the app supplies.
 
-Image apps open on `SimpleImageLayout`: a prompt, size and style chips, a picture count of 1, 2, or 4, and More like this, Save, Open folder, and Use prompt again. Expert mode adds a side panel for steps, sampler, guidance, seed, LoRA, a negative prompt, the content filter, and the save folder, and leaves the rest of the screen where it is. The dock stays an API. A muted Expert chip shows while the mode is on.
+Image apps open on `SimpleImageLayout`. Canvas supplies grouped size ratios, Standard or 4K output, and style ids. 4K can sit on the row greyed out, with a plain reason and Install Enlarge, until Enlarge is present. Improve prompt rewrites the same field. History keeps the last 50 pictures in the app's State directory, including the prompt and the seed. Expert mode adds a side panel for steps, guidance, seed, sampler, a negative prompt, add-ons, a memory limit, and adult content, and leaves the rest of the screen where it is. The dock stays an API. A muted Expert chip shows while the mode is on. The overflow menu calls the app for Manage models. Canvas runs `voxprint-mdl --gui --app canvas`.
 
 The download window keeps a one-row card as tight as the others, fades the bottom of a list that still has more to scroll, and names the file that is downloading instead of a check happening beside it.
 

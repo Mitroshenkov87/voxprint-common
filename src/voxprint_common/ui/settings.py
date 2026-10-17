@@ -2,8 +2,9 @@
 
 A descriptor is the label, the help, the type, the default, the expert flag,
 and the group. It does not store a user's value and it does not import Qt.
-Image apps share :data:`IMAGE_CONTENT_FILTER`. This module does not classify
-pictures.
+A minors-safety gate stays inside the app. This module has no setting, hook,
+or function that turns that gate off. Adult content is an ordinary descriptor
+the app supplies.
 """
 
 from __future__ import annotations
@@ -14,7 +15,6 @@ from enum import StrEnum
 from typing import assert_never
 
 __all__ = [
-    "IMAGE_CONTENT_FILTER",
     "Choice",
     "SettingSpec",
     "SettingType",
@@ -145,26 +145,13 @@ class Settings:
         return tuple(spec for spec in self._specs.values() if expert or not spec.expert)
 
 
-# Adult-content filter for image apps. Expert only. The default keeps it on.
-# This is the descriptor only: there is no classifier and no extra flow.
-IMAGE_CONTENT_FILTER = SettingSpec(
-    "image.content_filter",
-    "setting.image.content_filter",
-    "setting.image.content_filter.help",
-    SettingType.BOOL,
-    True,
-    expert=True,
-    group="image",
-)
-
-
 def reference_settings() -> Settings:
     """Return the settings the reference shell shows.
 
     How many pictures is a preset chip on the image screen, not a setting.
-    The expert side panel adds steps, sampler, guidance, seed, a LoRA file,
-    a negative prompt, :data:`IMAGE_CONTENT_FILTER`, and the save folder.
-    A path field is expert: Open folder is the everyday action.
+    The expert side panel adds steps, guidance, seed, sampler, a negative
+    prompt, add-ons, a memory limit, and adult content. The app owns what
+    those values do. A path field is expert: Open folder is the everyday action.
     """
     return Settings(
         (
@@ -178,20 +165,6 @@ def reference_settings() -> Settings:
                 group="tuning",
                 minimum=1,
                 maximum=150,
-            ),
-            SettingSpec(
-                "shell.sampler",
-                "setting.shell.sampler",
-                "setting.shell.sampler.help",
-                SettingType.ENUM,
-                "euler",
-                expert=True,
-                group="tuning",
-                choices=(
-                    Choice("euler", "setting.shell.sampler.euler"),
-                    Choice("dpm", "setting.shell.sampler.dpm"),
-                    Choice("heun", "setting.shell.sampler.heun"),
-                ),
             ),
             SettingSpec(
                 "shell.guidance",
@@ -216,13 +189,18 @@ def reference_settings() -> Settings:
                 maximum=2_147_483_647,
             ),
             SettingSpec(
-                "shell.lora",
-                "setting.shell.lora",
-                "setting.shell.lora.help",
-                SettingType.PATH,
-                "",
+                "shell.sampler",
+                "setting.shell.sampler",
+                "setting.shell.sampler.help",
+                SettingType.ENUM,
+                "euler",
                 expert=True,
                 group="tuning",
+                choices=(
+                    Choice("euler", "setting.shell.sampler.euler"),
+                    Choice("dpm", "setting.shell.sampler.dpm"),
+                    Choice("heun", "setting.shell.sampler.heun"),
+                ),
             ),
             SettingSpec(
                 "shell.negative",
@@ -233,15 +211,39 @@ def reference_settings() -> Settings:
                 expert=True,
                 group="tuning",
             ),
-            IMAGE_CONTENT_FILTER,
             SettingSpec(
-                "shell.save_folder",
-                "setting.shell.save_folder",
-                "setting.shell.save_folder.help",
+                "shell.addons",
+                "setting.shell.addons",
+                "setting.shell.addons.help",
                 SettingType.PATH,
                 "",
                 expert=True,
-                group="picture",
+                group="tuning",
+            ),
+            SettingSpec(
+                "shell.vram",
+                "setting.shell.vram",
+                "setting.shell.vram.help",
+                SettingType.ENUM,
+                "auto",
+                expert=True,
+                group="tuning",
+                choices=(
+                    Choice("auto", "setting.shell.vram.auto"),
+                    Choice("8", "setting.shell.vram.8"),
+                    Choice("12", "setting.shell.vram.12"),
+                    Choice("16", "setting.shell.vram.16"),
+                    Choice("24", "setting.shell.vram.24"),
+                ),
+            ),
+            SettingSpec(
+                "image.adult_content",
+                "setting.image.adult_content",
+                "setting.image.adult_content.help",
+                SettingType.BOOL,
+                False,
+                expert=True,
+                group="image",
             ),
         )
     )

@@ -1,5 +1,5 @@
 # ui.settings
 
-Setting descriptors. `IMAGE_CONTENT_FILTER` is the shared expert bool for image apps. Qt is not imported.
+Setting descriptors. Adult content is an ordinary expert descriptor an app supplies. A minors-safety gate stays inside the app. Qt is not imported.
 
 ::: voxprint_common.ui.settings

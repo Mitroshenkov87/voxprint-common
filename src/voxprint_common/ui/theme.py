@@ -370,6 +370,9 @@ QPushButton[chip="true"]:checked {{
     background: {PRIMARY}; color: {TEXT_ON_PRIMARY};
     border-color: {PRIMARY_BORDER}; font-weight: 600;
 }}
+QPushButton[chip="true"]:disabled {{
+    background: {CONTROL_BG}; color: {TEXT_MUTED}; border-color: {CONTROL_BORDER};
+}}
 QPushButton[thumb="true"] {{ padding: 2px; border-radius: 8px; }}
 QPushButton[thumb="true"]:checked {{
     border: 2px solid {PRIMARY}; background: {CONTROL_BG};
@@ -378,7 +381,9 @@ QLabel#presetLabel, QLabel[presetLabel="true"], QLabel#emptyHint, QLabel#simpleN
     color: {TEXT_MUTED}; background: transparent;
 }}
 QLabel#emptyHint {{ font-size: 16px; }}
-QLabel#progressText {{ color: {TEXT}; font-size: 15px; background: transparent; }}
+QLabel#progressText, QLabel#blockedText, QLabel#featureText {{
+    color: {TEXT}; font-size: 15px; background: transparent;
+}}
 QLabel#result {{ background: transparent; }}
 QFrame#stage, QFrame#expertPanel, QFrame#settingsSheet {{
     background: {card_bg}; border: {density.border_px}px solid {CONTROL_BORDER};

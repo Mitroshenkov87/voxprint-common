@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import assert_never
 
 from voxprint_common.i18n import set_language, tr
+from voxprint_common.paths import state_dir as suite_state_dir
 from voxprint_common.suite_settings import set_expert_mode
 from voxprint_common.ui.commands import CommandSpec, Registry, reference_commands
 from voxprint_common.ui.dock import (
@@ -149,7 +150,11 @@ def grab_shell(
     _qt()
     widgets = _widgets()
     app = widgets.QApplication.instance() or widgets.QApplication([])
-    shell = ReferenceShell(glass=glass, full_layout=full_layout)
+    shell = ReferenceShell(
+        glass=glass,
+        full_layout=full_layout,
+        state_dir=path.parent / "state" / path.stem,
+    )
     shell.resize(1200, 900)
     shell.show()
     app.processEvents()
@@ -181,14 +186,29 @@ def grab_shell(
 class ReferenceShell:
     """The reference window. Construction imports PySide6."""
 
-    def __init__(self, *, glass: bool = False, full_layout: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        glass: bool = False,
+        full_layout: bool = False,
+        state_dir: Path | None = None,
+    ) -> None:
+        """Build the reference window.
+
+        Args:
+            glass: Use the translucent window background.
+            full_layout: Show the dock. This also turns Expert mode on.
+            state_dir: Directory for the picture history. None uses the Canvas
+                directory under the suite State dir.
+        """
         qt, gui, widgets = _qt()
         self._qt = qt
         self._gui = gui
         self._widgets = widgets
         self.history = DockHistory(reference_layout())
         self.expert = ExpertMode()
-        self.image = SimpleImageLayout(image_presets())
+        history_dir = suite_state_dir() / "canvas" if state_dir is None else state_dir
+        self.image = SimpleImageLayout(image_presets(), state_dir=history_dir)
         self._picture_count = 0
         self._stop_expert = lambda: None
         self.registry = Registry(reference_commands())
@@ -335,6 +355,14 @@ class ReferenceShell:
             self._status.setText(tr("simple.menu.open_folder"))
             self.simple.set_note(tr("simple.menu.open_folder"))
             return
+        if command_id == "models.manage":
+            self._status.setText(tr("simple.menu.models"))
+            self.simple.set_note(tr("simple.menu.models"))
+            return
+        if command_id == "install.enlarge":
+            self._status.setText(tr("simple.output.install"))
+            self.simple.set_note(tr("simple.output.install"))
+            return
         if command_id == "view.settings":
             if self.full_layout:
                 self.show_panel("settings")
@@ -393,9 +421,55 @@ class ReferenceShell:
     def _complete_picture(self) -> None:
         self._finish_batch("picture")
 
+    def _improve_prompt(self, text: str) -> str:
+        """Collapse repeated spaces in the same prompt field.
+
+        Args:
+            text: The words currently in the prompt box.
+        """
+        return " ".join(text.split())
+
+    def _on_history(self, action: str, _item_id: str) -> None:
+        """Record a history action on the status line.
+
+        Args:
+            action: ``open``, ``show_folder``, ``copy``, or ``use_input``.
+            _item_id: History item id. The widget already applied the action.
+        """
+        notes = {
+            "open": "simple.history.opened",
+            "show_folder": "simple.history.shown",
+            "copy": "simple.copied",
+            "use_input": "simple.history.using",
+        }
+        key = notes.get(action)
+        if key is None:
+            return
+        self._status.setText(tr(key))
+
+    def _apply_seed(self, seed: int) -> None:
+        """Put a restored seed into the expert field.
+
+        Args:
+            seed: The number copied from a history item.
+        """
+        self.image.seed = seed
+        self._write_seed()
+
+    def _read_seed(self) -> None:
+        spin = self.find("QSpinBox", "shell.seed")
+        if spin is not None and spin.isVisible():  # type: ignore[attr-defined]
+            self.image.seed = int(spin.value())  # type: ignore[attr-defined]
+
+    def _write_seed(self) -> None:
+        spin = self.find("QSpinBox", "shell.seed")
+        if spin is not None:
+            spin.setValue(int(self.image.seed))  # type: ignore[attr-defined]
+
     def _finish_batch(self, prefix: str) -> None:
         if self.image.phase is not Phase.BUSY:
             return
+        self._read_seed()
         total = self.image.batch_size()
         for index in range(total):
             if index > 0 and not self.image.generate():
@@ -437,6 +511,9 @@ class ReferenceShell:
             reference_settings(),
             on_generate=self._complete_picture,
             on_command=self.run,
+            on_improve=self._improve_prompt,
+            on_history=self._on_history,
+            on_seed=self._apply_seed,
         )
         root.addWidget(self.simple.root, 1)
         self._dock_host = widgets.QWidget()
@@ -479,6 +556,7 @@ class ReferenceShell:
             self.simple.place_chip(self._expert_chip)
         self._expert_chip.setText(tr("shell.status.expert"))
         self._expert_chip.setVisible(self.expert.enabled())
+        self._write_seed()
 
     def _fill_menus(self) -> None:
         self._file_menu.clear()

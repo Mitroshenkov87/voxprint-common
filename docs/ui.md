@@ -18,9 +18,9 @@ Tooltips are for expert items. A simple control is labelled clearly enough that 
 
 A keymap binding may use the context `expert` (`WHEN_EXPERT`). That binding runs only while Expert mode is on. `active_contexts(..., expert=True)` adds the context.
 
-### Content filter
+### Safety gates
 
-Image apps share one expert setting, `image.content_filter` (`IMAGE_CONTENT_FILTER`). It is a bool, `expert=True`, group `image`, and the default is on, so adult content stays hidden. Canvas, Enlarge, Clarity, and Lucent use this descriptor. This library stores the setting. It does not classify images and it does not add another flow.
+A minors-safety gate stays inside the app. The shared UI has no setting, hook, or function that turns that gate off. Adult content is an ordinary descriptor the app supplies. The reference shell shows it as `image.adult_content`, expert only, default off, with the help text "Pictures meant for adults." This library does not read that value and it does not classify pictures.
 
 ### Adoption checklist
 
@@ -34,7 +34,7 @@ Canvas adopts this first. Then Enlarge, Clarity, Audiobook Builder, Movie Dubber
 - [ ] Put `view.toggle_expert_mode` in the View menu and the command palette. Do not give it a default shortcut.
 - [ ] Show a muted Expert chip while the mode is on.
 - [ ] Put tooltips on expert items only.
-- [ ] Image apps include `IMAGE_CONTENT_FILTER` and do not add a classifier here.
+- [ ] Keep a minors-safety gate in the app. Do not add a shared control that turns that gate off. Adult content, when the app wants it, is one ordinary expert descriptor.
 - [ ] Image apps (Canvas, Enlarge, and the Lucent helper) open on the image-app pattern in `SimpleImageLayout`.
 - [ ] Keep Size, Style, Number of pictures, More like this, Save, Open folder, and Use prompt again on that screen.
 - [ ] Expert mode only adds the side panel. Leave the rest of the screen where it is. The dock stays an API, with no switch on the image screen.
@@ -45,7 +45,7 @@ Canvas adopts this first. Then Enlarge, Clarity, Audiobook Builder, Movie Dubber
 from voxprint_common.ui.dock import Layout, dump_layout, load_layout, visible_layout
 from voxprint_common.ui.commands import Registry, reference_commands
 from voxprint_common.ui.expert import ExpertMode, active_contexts
-from voxprint_common.ui.settings import IMAGE_CONTENT_FILTER, reference_settings
+from voxprint_common.ui.settings import reference_settings
 from voxprint_common.ui.simple_image import SimpleImageLayout, image_presets
 from voxprint_common.ui.keymap import WHEN_EXPERT, KeyMap, load_overrides, save_overrides
 from voxprint_common.ui.palette import score_text
@@ -86,16 +86,24 @@ Shared command ids are `file.save`, `edit.undo`, `edit.redo`, and `view.palette`
 
 Canvas, Enlarge, and the Lucent helper open on one screen: `SimpleImageLayout`. The level of complexity stays the same from an empty window, through progress, to a finished picture. There is no settings dialog and no jargon. A problem is one plain sentence, such as "Write a few words about the picture."
 
-The screen is a prompt and a yellow Generate button. Enter starts a picture. Shift+Enter adds a line. Under the prompt are plain chips: Size (Square, Portrait, Landscape, Wide), Style (None, Photo, Illustration, Anime, 3D), and Number of pictures (1, 2, 4). An app can pass its own rows. On the picture are More like this, Save, Open folder, and Use prompt again. A thumbnail shows that picture large. Right-click still offers Save, Copy, and Use prompt again.
+The screen is a prompt and a yellow Generate button. Enter starts a picture. Shift+Enter adds a line. Improve prompt, when the app supplies a callback, replaces the words in that same box, and Revert puts the previous words back. There is no second prompt field.
 
-Expert mode adds a side panel to the right of the picture and does not move or restyle the rest. The panel holds steps, sampler, guidance, seed, LoRA, a negative prompt, the content filter, and the save folder. A path field is expert because Open folder is the everyday action.
+The chips are data the app supplies. `image_presets` is Canvas's list. Size is grouped, with no orientation switch: Landscape is 16:9, 21:9, 3:2, and 4:3; Square is 1:1; Portrait is 9:16, 2:3, and 3:4. Output size is Standard or 4K. A choice can stay on the row and be unavailable, with a plain reason and an action button. When Enlarge is missing, 4K is grey and the button says Install Enlarge. Style is Photo, Cinematic, Portrait, Illustration, Anime, 3D render, Painting, and Sketch. The layout reports the chosen id. The app owns any words added to the prompt and any negative prompt. Number of pictures stays 1, 2, or 4. On the picture are More like this, Save, Open folder, and Use prompt again.
+
+`progress(step, total, stage_label)` updates the bar while a picture is running. `stage_label` is already translated. `cancel()` returns the screen to a clean idle state. `block(reason)` and `unavailable(reason)` show a localized plain sentence in the picture area.
+
+The history strip keeps the last 50 pictures in the app's State directory (`image-history.json`). The menu offers Open, Show in folder, Copy, Use prompt again (the words and the seed), Use as input picture, and Delete. Delete asks in that same menu before it removes the picture. The overflow menu has Manage models, which calls the app. Canvas runs `voxprint-mdl --gui --app canvas`. The reference shell records that choice and does not start the program.
+
+Expert mode adds a side panel to the right of the picture and does not move or restyle the rest. The panel holds the descriptors the app supplied. The reference list is Steps, Guidance (CFG), Seed, Sampler, Negative prompt, Add-ons, VRAM limit, and Adult content. A path field is expert because Open folder is the everyday action.
 
 The dock (`Layout`, and `ReferenceShell(full_layout=True)`) stays available as an API for tools that arrange panels. The image screen has no control that opens it.
 
 ```python
+from pathlib import Path
+
 from voxprint_common.ui.simple_image import SimpleImageLayout, image_presets
 
-layout = SimpleImageLayout(image_presets())
+layout = SimpleImageLayout(image_presets(), state_dir=Path("state") / "canvas")
 ```
 
 ## Reference window
