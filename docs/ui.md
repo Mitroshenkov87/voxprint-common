@@ -18,9 +18,11 @@ Tooltips are for expert items. A simple control is labelled clearly enough that 
 
 A keymap binding may use the context `expert` (`WHEN_EXPERT`). That binding runs only while Expert mode is on. `active_contexts(..., expert=True)` adds the context.
 
-### Safety gates
+### Adult content and the minors gate
 
-A minors-safety gate stays inside the app. The shared UI has no setting, hook, or function that turns that gate off. Adult content is an ordinary descriptor the app supplies. The reference shell shows it as `image.adult_content`, expert only, default off, with the help text "Pictures meant for adults." This library does not read that value and it does not classify pictures.
+Adult content (18+) is the expert setting `image.adult_content`, default off. On allows adult content and leaves the prompt neutral. Off adds a general-audience template and negatives. That is the whole effect of the setting.
+
+The minors gate is outside the settings state and outside presets. It is always on. The app implements `SafetyGate`, and the layout calls it before a picture starts and after each result. A refusal, a raised error, or a missing gate blocks the picture. Keys under `safety`, and keys whose segments are minor, age, or guard, are rejected. The library has no function that reads or writes a gate switch.
 
 ### Adoption checklist
 
@@ -34,7 +36,7 @@ Canvas adopts this first. Then Enlarge, Clarity, Audiobook Builder, Movie Dubber
 - [ ] Put `view.toggle_expert_mode` in the View menu and the command palette. Do not give it a default shortcut.
 - [ ] Show a muted Expert chip while the mode is on.
 - [ ] Put tooltips on expert items only.
-- [ ] Keep a minors-safety gate in the app. Do not add a shared control that turns that gate off. Adult content, when the app wants it, is one ordinary expert descriptor.
+- [ ] Keep the minors gate outside settings and presets. It is always on. Adult content (18+) only selects the prompt policy: a general-audience template and negatives when off, and a neutral prompt when on.
 - [ ] Image apps (Canvas, Enlarge, and the Lucent helper) open on the image-app pattern in `SimpleImageLayout`.
 - [ ] Drive the chips and the expert panel from one settings state. A preset file writes the values. Keep the chosen preset and any overrides in the app's State directory.
 - [ ] Keep Size, Style, Number of pictures, More like this, Save, Open folder, and Use prompt again on that screen.
@@ -47,6 +49,7 @@ from voxprint_common.ui.dock import Layout, dump_layout, load_layout, visible_la
 from voxprint_common.ui.commands import Registry, reference_commands
 from voxprint_common.ui.expert import ExpertMode, active_contexts
 from voxprint_common.ui.presets import reference_presets
+from voxprint_common.ui.safety import SafetyGate, adult_prompt_policy
 from voxprint_common.ui.settings import reference_settings
 from voxprint_common.ui.simple_image import SimpleImageLayout, image_presets
 from voxprint_common.ui.keymap import WHEN_EXPERT, KeyMap, load_overrides, save_overrides
@@ -110,9 +113,9 @@ Size is grouped, with no orientation switch: Landscape is 16:9, 21:9, 3:2, and 4
 
 The history strip keeps the last 50 pictures in the app's State directory (`image-history.json`). The menu offers Open, Show in folder, Copy, Use prompt again (the words and the seed), Use as input picture, and Delete. Delete asks in that same menu before it removes the picture. The overflow menu has Manage models, which calls the app. Canvas runs `voxprint-mdl --gui --app canvas`. The reference shell records that choice and does not start the program.
 
-Expert mode adds a side panel to the right of the picture and does not move or restyle the rest. The panel holds the live values. The reference list is Steps, Guidance (CFG), Seed, Sampler, Picture size, Output size, Negative prompt, Add-ons, Add-on strength, VRAM limit, and Adult content. A path field is expert because Open folder is the everyday action.
+Expert mode adds a side panel to the right of the picture and does not move or restyle the rest. The panel holds the live values. The reference list is Steps, Guidance (CFG), Seed, Sampler, Picture size, Output size, Negative prompt, Add-ons, Add-on strength, VRAM limit, and Adult content (18+). A path field is expert because Open folder is the everyday action. The adult-content value selects the prompt policy. The minors gate still reviews the prompt and the picture.
 
-The dock (`Layout`, and `ReferenceShell(full_layout=True)`) stays available as an API for tools that arrange panels. The image screen has no control that opens it.
+The dock (`Layout`, and `ReferenceShell(full_layout=True)`) stays available as an API for tools that arrange panels. The image screen has no control that opens it. Pass the app's `SafetyGate` as `gate`. Without that object, every picture is blocked.
 
 ```python
 from pathlib import Path
@@ -126,6 +129,7 @@ layout = SimpleImageLayout(
     presets=reference_presets(settings),
     settings=settings,
     state_dir=Path("state") / "canvas",
+    gate=app_gate,
 )
 ```
 

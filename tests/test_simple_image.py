@@ -16,12 +16,23 @@ from voxprint_common.ui.simple_image import (
 )
 
 
+class _Allow:
+    def review_prompt(self, prompt: str) -> str | None:
+        return None
+
+    def review_result(self, prompt: str, item_id: str) -> str | None:
+        return None
+
+
+_GATE = _Allow()
+
+
 def test_import_does_not_load_qt() -> None:
     assert "PySide6" not in sys.modules
 
 
 def test_defaults_are_plain_and_data_driven() -> None:
-    layout = SimpleImageLayout(image_presets())
+    layout = SimpleImageLayout(image_presets(), gate=_GATE)
     assert layout.phase is Phase.EMPTY
     assert layout.history == []
     assert layout.selected is None
@@ -76,7 +87,7 @@ def test_defaults_are_plain_and_data_driven() -> None:
     assert layout.presets["style"] == "anime"
     with pytest.raises(ValueError):
         layout.choose("output", "4k")
-    installed = SimpleImageLayout(image_presets(enlarge_installed=True))
+    installed = SimpleImageLayout(image_presets(enlarge_installed=True), gate=_GATE)
     installed.choose("output", "4k")
     assert installed.presets["output"] == "4k"
 
@@ -93,7 +104,8 @@ def test_custom_rows_generate_cancel_and_history() -> None:
                 ),
                 "wide",
             ),
-        )
+        ),
+        gate=_GATE,
     )
     assert layout.presets == {"size": "wide"}
     assert layout.generate() is False
@@ -134,7 +146,7 @@ def test_custom_rows_generate_cancel_and_history() -> None:
 
 
 def test_busy_cancel_returns_to_the_picture_on_screen() -> None:
-    layout = SimpleImageLayout(image_presets())
+    layout = SimpleImageLayout(image_presets(), gate=_GATE)
     layout.set_prompt("first")
     assert layout.generate() is True
     assert layout.finish("one") is not None
@@ -147,7 +159,7 @@ def test_busy_cancel_returns_to_the_picture_on_screen() -> None:
 
 
 def test_full_layout_requires_expert_mode() -> None:
-    layout = SimpleImageLayout(image_presets())
+    layout = SimpleImageLayout(image_presets(), gate=_GATE)
     assert layout.request_full_layout(True, expert=False) is False
     assert layout.dock_visible(expert=False) is False
     assert layout.dock_visible(expert=True) is False
@@ -168,7 +180,7 @@ def test_invalid_presets_are_refused() -> None:
             (PresetChoice("square", "simple.size.square"),),
             "wide",
         )
-    layout = SimpleImageLayout(image_presets())
+    layout = SimpleImageLayout(image_presets(), gate=_GATE)
     with pytest.raises(ValueError):
         layout.choose("size", "round")
     with pytest.raises(ValueError):
@@ -201,7 +213,7 @@ def test_invalid_presets_are_refused() -> None:
 
 
 def test_progress_block_and_unavailable_return_to_idle() -> None:
-    layout = SimpleImageLayout(image_presets())
+    layout = SimpleImageLayout(image_presets(), gate=_GATE)
     layout.set_prompt("a hill")
     assert layout.generate() is True
     with pytest.raises(ValueError):
@@ -233,7 +245,7 @@ def test_progress_block_and_unavailable_return_to_idle() -> None:
 
 
 def test_history_keeps_fifty_items_seed_and_survives_a_bad_file(tmp_path) -> None:
-    layout = SimpleImageLayout(image_presets(), state_dir=tmp_path)
+    layout = SimpleImageLayout(image_presets(), state_dir=tmp_path, gate=_GATE)
     layout.set_prompt("door")
     layout.seed = 42
     layout.choose("style", "sketch")
@@ -244,7 +256,7 @@ def test_history_keeps_fifty_items_seed_and_survives_a_bad_file(tmp_path) -> Non
     assert layout.history[0].item_id == "id-54"
     assert layout.history[0].seed == 42
     assert layout.history[0].presets[1] == ("style", "sketch")
-    again = SimpleImageLayout(image_presets(), state_dir=tmp_path)
+    again = SimpleImageLayout(image_presets(), state_dir=tmp_path, gate=_GATE)
     assert again.selected is None
     assert again.phase is Phase.EMPTY
     assert [item.item_id for item in again.history] == [f"id-{index}" for index in range(54, 4, -1)]
@@ -254,9 +266,9 @@ def test_history_keeps_fifty_items_seed_and_survives_a_bad_file(tmp_path) -> Non
     removed = again.delete("id-54")
     assert removed is not None and removed.item_id == "id-54"
     assert again.history[0].item_id == "id-53"
-    stored = SimpleImageLayout(image_presets(), state_dir=tmp_path)
+    stored = SimpleImageLayout(image_presets(), state_dir=tmp_path, gate=_GATE)
     assert stored.history[0].item_id == "id-53"
     assert stored.delete("missing") is None
     (tmp_path / "image-history.json").write_text("{", encoding="utf-8")
-    broken = SimpleImageLayout(image_presets(), state_dir=tmp_path)
+    broken = SimpleImageLayout(image_presets(), state_dir=tmp_path, gate=_GATE)
     assert broken.history == []

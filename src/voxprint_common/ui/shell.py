@@ -188,6 +188,27 @@ def grab_shell(
     app.processEvents()
 
 
+class _ReferenceReview:
+    """Review hook for the reference shell's placeholder pictures."""
+
+    def review_prompt(self, prompt: str) -> str | None:
+        """Allow the placeholder prompt.
+
+        Args:
+            prompt: The words in the prompt box.
+        """
+        return None
+
+    def review_result(self, prompt: str, item_id: str) -> str | None:
+        """Allow the placeholder picture.
+
+        Args:
+            prompt: The words that produced the picture.
+            item_id: The id assigned to the picture.
+        """
+        return None
+
+
 class ReferenceShell:
     """The reference window. Construction imports PySide6."""
 
@@ -218,7 +239,9 @@ class ReferenceShell:
             presets=reference_presets(self.settings),
             settings=self.settings,
             state_dir=history_dir,
+            gate=_ReferenceReview(),
         )
+        self.prompt_policy = self.image.prompt_policy()
         self._picture_count = 0
         self._stop_expert = lambda: None
         self.registry = Registry(reference_commands())
@@ -421,6 +444,7 @@ class ReferenceShell:
         """
         if pictures is not None and "count" in self.image.presets:
             self.image.choose("count", str(pictures))
+        self.prompt_policy = self.image.prompt_policy()
         self.simple.set_prompt_text(prompt)
         if self.image.phase is Phase.BUSY:
             self.image.cancel()
@@ -429,6 +453,7 @@ class ReferenceShell:
         self._finish_batch("preview")
 
     def _complete_picture(self) -> None:
+        self.prompt_policy = self.image.prompt_policy()
         self._finish_batch("picture")
 
     def _improve_prompt(self, text: str) -> str:
@@ -485,7 +510,8 @@ class ReferenceShell:
             if index > 0 and not self.image.generate():
                 break
             self._picture_count += 1
-            self.image.finish(f"{prefix}-{self._picture_count}")
+            if self.image.finish(f"{prefix}-{self._picture_count}") is None:
+                break
         self.simple.refresh(prompt=True)
 
     def rebuild(self) -> None:

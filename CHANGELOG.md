@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-Expert mode is one suite setting, `ui.expert_mode`, off by default. Commands, dock panels, and settings tagged expert stay hidden until it is on, and a hidden panel stays in the layout JSON. `view.toggle_expert_mode` is in the View menu and the command palette, with no default shortcut. A minors-safety gate stays inside the app. The shared UI has no setting that turns that gate off. Adult content is an ordinary expert descriptor the app supplies.
+Expert mode is one suite setting, `ui.expert_mode`, off by default. Commands, dock panels, and settings tagged expert stay hidden until it is on, and a hidden panel stays in the layout JSON. `view.toggle_expert_mode` is in the View menu and the command palette, with no default shortcut. Adult content (18+) selects a prompt policy: on allows adult content, and off adds a general-audience template and negatives. The minors gate is outside settings and presets. `SafetyGate` reviews the prompt and each result, and a refusal or a failure blocks the picture. Keys under `safety`, and keys for minor, age, or guard, are rejected.
 
 Simple mode and Expert mode are two views of one settings state per app. A preset file, schema `voxprint-presets/1`, writes concrete values in file order. A later group owns a key both groups write. A hand edit marks that group. The chip reads "Balanced + changes" while the stored preset is still close, or "Custom" when it is not. Reset restores that group. The choice and the overrides persist in `image-settings.json`. The reference file is `src/voxprint_common/ui/presets/canvas.json`.
 

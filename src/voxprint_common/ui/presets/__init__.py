@@ -36,6 +36,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import assert_never
 
+from voxprint_common.ui.safety import reject_reserved_key
 from voxprint_common.ui.settings import Settings, SettingSpec, SettingType
 
 __all__ = [
@@ -206,6 +207,7 @@ class SettingState:
             if option is None:
                 raise ValueError(f"preset {group.group_id} is missing its default")
             for key, value in option.values:
+                reject_reserved_key(key)
                 self.values[key] = value
         self._loaded = False
         self._load()
@@ -248,9 +250,10 @@ class SettingState:
             value: The new value.
 
         Raises:
-            ValueError: The value does not match the descriptor.
+            ValueError: The value does not match the descriptor, or the key is reserved.
             KeyError: The key is unknown.
         """
+        reject_reserved_key(key)
         if key not in self.values and self._settings.get(key) is None and self._owner(key) is None:
             raise KeyError(key)
         self.values[key] = _coerce(key, value, self._settings.get(key))
@@ -274,6 +277,7 @@ class SettingState:
         if not option.available:
             raise ValueError(f"preset {group_id}={option_id} is unavailable")
         for key, value in option.values:
+            reject_reserved_key(key)
             self.values[key] = value
         self.chosen[group_id] = option_id
         self.overrides[group_id] = set()
@@ -411,6 +415,7 @@ class SettingState:
         for key, raw in values.items():
             if not isinstance(key, str):
                 return
+            reject_reserved_key(key)
             try:
                 loaded[key] = _coerce(key, raw, self._settings.get(key))
             except ValueError:
@@ -420,6 +425,14 @@ class SettingState:
             option = None if not isinstance(option_id, str) else group.option(option_id)
             if option is None:
                 return
+        overrides = payload.get("overrides")
+        if isinstance(overrides, dict):
+            for keys in overrides.values():
+                if not isinstance(keys, list):
+                    continue
+                for key in keys:
+                    if isinstance(key, str):
+                        reject_reserved_key(key)
         self.values.update(loaded)
         for group in self._presets.groups:
             option_id = chosen[group.group_id]
@@ -565,6 +578,7 @@ def _option(raw: object, settings: Settings | None) -> PresetOption:
     for key, value in values.items():
         if not isinstance(key, str) or not key:
             raise ValueError(f"preset option {option_id} has a bad key")
+        reject_reserved_key(key)
         spec = None if settings is None else settings.get(key)
         coerced.append((key, _coerce(key, value, spec)))
     return PresetOption(

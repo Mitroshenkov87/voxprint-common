@@ -66,6 +66,7 @@ nav:
       - ui.commands: api/commands.md
       - ui.keymap: api/keymap.md
       - ui.expert: api/expert.md
+      - ui.safety: api/safety.md
       - ui.settings: api/settings.md
       - ui.presets: api/presets.md
       - ui.simple_image: api/simple-image.md

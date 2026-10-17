@@ -23,6 +23,7 @@ from voxprint_common.ui.presets import (
     SettingState,
     reference_presets,
 )
+from voxprint_common.ui.safety import AdultPromptPolicy, SafetyGate, adult_prompt_policy
 from voxprint_common.ui.settings import Settings, SettingSpec, SettingType, reference_settings
 
 __all__ = [
@@ -120,8 +121,10 @@ class SimpleImageLayout:
 
     Pass a preset file to share one settings state with Expert mode. The chips
     and the expert values read and write that state. Rows alone keep a chip
-    list. ``full_layout`` is a host API for a dock. It is off unless a caller
-    asks, and only while Expert mode is on. The widget does not draw that switch.
+    list. A :class:`~voxprint_common.ui.safety.SafetyGate` reviews the prompt
+    before a picture starts and the picture before it is kept. ``full_layout``
+    is a host API for a dock. It is off unless a caller asks, and only while
+    Expert mode is on. The widget does not draw that switch.
     """
 
     def __init__(
@@ -131,6 +134,7 @@ class SimpleImageLayout:
         presets: PresetFile | None = None,
         settings: Settings | None = None,
         state_dir: Path | None = None,
+        gate: SafetyGate | None = None,
     ) -> None:
         """Copy ``rows`` and select each row's default.
 
@@ -143,6 +147,8 @@ class SimpleImageLayout:
             settings: Descriptors for the shared state. Used with ``presets``.
             state_dir: The app's State directory. History and the settings
                 state are read and written there. None keeps both in memory.
+            gate: The app's review of the prompt and of each result. None
+                blocks every picture.
 
         Raises:
             ValueError: Two rows share an id.
@@ -154,6 +160,7 @@ class SimpleImageLayout:
         if len(ids) != len(set(ids)):
             raise ValueError("preset row ids must be unique")
         self._state_dir = state_dir
+        self._gate = gate
         self._state = (
             SettingState(presets, settings or reference_settings(), state_dir=state_dir)
             if presets is not None
@@ -291,6 +298,18 @@ class SimpleImageLayout:
             return None
         return self._state.status(row_id)
 
+    def prompt_policy(self) -> AdultPromptPolicy:
+        """Return the adult-content prompt policy for the current setting.
+
+        On allows adult content and returns a neutral policy. Off returns a
+        general-audience template and negatives. A layout with no shared state
+        uses the off policy. This value is not the minors gate.
+        """
+        allowed = False
+        if self._state is not None and self._state.has("image.adult_content"):
+            allowed = self._state.get("image.adult_content") is True
+        return adult_prompt_policy(allowed=allowed)
+
     def snapshot(self) -> dict[str, object]:
         """Return the shared values, or the chip selection when there is no state."""
         if self._state is None:
@@ -298,12 +317,16 @@ class SimpleImageLayout:
         return self._state.snapshot()
 
     def generate(self) -> bool:
-        """Start a picture when the prompt has words and nothing is running.
+        """Start a picture when the prompt has words and the gate allows it.
 
         Returns:
-            True when the phase changed to busy.
+            True when the phase changed to busy. False when the prompt is blank,
+            a picture is already running, or the gate blocks the prompt.
         """
-        if self.phase is Phase.BUSY or not self.prompt.strip():
+        prompt = self.prompt.strip()
+        if self.phase is Phase.BUSY or not prompt:
+            return False
+        if not self._review_prompt(prompt):
             return False
         self._clear_run()
         self.phase = Phase.BUSY
@@ -364,22 +387,24 @@ class SimpleImageLayout:
         """
         self._show_reason(reason, Phase.UNAVAILABLE)
 
-    def finish(self, item_id: str) -> GalleryItem:
+    def finish(self, item_id: str) -> GalleryItem | None:
         """Store a finished picture at the front of the history and show it.
 
         Args:
             item_id: Stable id for this picture. The caller chooses it.
 
         Returns:
-            The new history item.
+            The new history item, or None when the gate blocks the picture.
 
         Raises:
-            ValueError: Nothing is in progress, or ``item_id`` is already used.
+            ValueError: Nothing is in progress, or ``item_id`` is empty or already used.
         """
         if self.phase is not Phase.BUSY:
             raise ValueError("finish needs a picture that is in progress")
         if not item_id or any(item.item_id == item_id for item in self.history):
             raise ValueError(f"gallery id {item_id!r} is empty or already used")
+        if not self._review_result(self.prompt.strip(), item_id):
+            return None
         item = GalleryItem(
             item_id,
             self.prompt.strip(),
@@ -483,6 +508,37 @@ class SimpleImageLayout:
         if self.phase is Phase.BUSY or self.use_prompt_again(item_id) is None:
             return False
         return self.generate()
+
+    def _review_prompt(self, prompt: str) -> bool:
+        gate = self._gate
+        if gate is None:
+            self.block(tr("simple.blocked"))
+            return False
+        try:
+            reason = gate.review_prompt(prompt)
+        except Exception:
+            self.block(tr("simple.blocked"))
+            return False
+        return self._verdict(reason)
+
+    def _review_result(self, prompt: str, item_id: str) -> bool:
+        gate = self._gate
+        if gate is None:
+            self.block(tr("simple.blocked"))
+            return False
+        try:
+            reason = gate.review_result(prompt, item_id)
+        except Exception:
+            self.block(tr("simple.blocked"))
+            return False
+        return self._verdict(reason)
+
+    def _verdict(self, reason: object) -> bool:
+        if reason is None:
+            return True
+        text = reason.strip() if isinstance(reason, str) else ""
+        self.block(text or tr("simple.blocked"))
+        return False
 
     def batch_size(self) -> int:
         """Return how many pictures one Generate makes.
@@ -1278,6 +1334,7 @@ class SimpleImageWidget:
             self.set_note(tr("simple.error.picture"))
             return
         if not self._layout.more_like():
+            self.refresh()
             return
         self._restore_seed()
         self.set_note("")

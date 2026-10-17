@@ -2,9 +2,8 @@
 
 A descriptor is the label, the help, the type, the default, the expert flag,
 and the group. It does not store a user's value and it does not import Qt.
-A minors-safety gate stays inside the app. This module has no setting, hook,
-or function that turns that gate off. Adult content is an ordinary descriptor
-the app supplies.
+Adult content selects a prompt policy. The minors gate is not a descriptor.
+A reserved key is rejected.
 """
 
 from __future__ import annotations
@@ -13,6 +12,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import assert_never
+
+from voxprint_common.ui.safety import reject_reserved_key
 
 __all__ = [
     "Choice",
@@ -66,6 +67,7 @@ class SettingSpec:
         """Reject a default that does not match ``type``."""
         if not self.setting_id or not self.label_key or not self.help_key:
             raise ValueError("a setting needs an id, a label, and help")
+        reject_reserved_key(self.setting_id)
         kind = self.type
         if kind is SettingType.BOOL:
             if not isinstance(self.default, bool):
@@ -151,8 +153,9 @@ def reference_settings() -> Settings:
     How many pictures stays a preset chip. The expert side panel shows the
     live values: steps, guidance, seed, sampler, resolution, output size, a
     negative prompt, add-ons, add-on strength, a memory limit, and adult
-    content. The app owns what those values do. A path field is expert:
-    Open folder is the everyday action.
+    content. Adult content, when on, allows adult content and leaves the prompt
+    neutral. When off, the prompt policy adds a general-audience template and
+    negatives. A path field is expert: Open folder is the everyday action.
     """
     return Settings(
         (
