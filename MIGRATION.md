@@ -4,6 +4,10 @@ voxprint-common is a library. Each app bundles the wheel in its installer, or in
 
 Pin `voxprint-common==0.2.4`. The import package is `voxprint_common`. `voxprint_common.API` is `1`.
 
+## Changes in the next release
+
+`paths.home()` is `%LOCALAPPDATA%\VOXPrint AI Suite` on Windows and `$XDG_DATA_HOME/voxprint-ai-suite` (or `~/.local/share/voxprint-ai-suite`) on Linux. The first call moves an existing `%LOCALAPPDATA%\Voxprint` or `~/.local/share/voxprint` directory. A same-volume move is a rename. A copy is checked, and the old directory is renamed to `.migrated-<date>` instead of being deleted. If both directories exist, the new one is used and the old one is left alone. `VOXPRINT_HOME` still wins and is not moved. `read_home()` opens the new directory, or the old one through version 0.3, without moving it. Absolute paths in `shared/manifest.json` are rewritten to the new directory. Relative paths stay as they are. `trt_cache_dir()` does not follow this move.
+
 ## Changes in 0.2.4
 
 Call `release_component` to drop a shared ref. It will not delete the models root, the runtime, or any directory another app still lists in `models/.users.json`. `ready(app)` checks file sizes and does not trust `mdl-status.json` alone. `voxprint-mdl verify --repair` clears a bad manifest path without deleting files.
@@ -49,7 +53,7 @@ Call the functions below instead of the private copies. Leave app-specific behav
 
 ## paths
 
-`voxprint_common.paths` replaces the suite-directory helpers. `home()` is the old `voxprint_home()`. Nothing in this module creates directories.
+`voxprint_common.paths` replaces the suite-directory helpers. `home()` is the old `voxprint_home()`. It moves a legacy suite directory when one exists and does not create an empty directory. `read_home()` does not move or create directories.
 
 | App | Old module | What moves |
 |---|---|---|

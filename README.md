@@ -18,7 +18,7 @@ The docs site is [mitroshenkov87.github.io/voxprint-common](https://mitroshenkov
 
 | Module | What it does |
 |---|---|
-| `voxprint_common.paths` | Suite directories: `%LOCALAPPDATA%\Voxprint` and `~/.local/share/voxprint` |
+| `voxprint_common.paths` | Suite directories: `%LOCALAPPDATA%\VOXPrint AI Suite` and `~/.local/share/voxprint-ai-suite` |
 | `voxprint_common.atomic` | Temporary file, fsync, rename, and an exclusive file lock |
 | `voxprint_common.hashing` | Streaming SHA-256 |
 | `voxprint_common.buildinfo` | One `BUILD.json`: app, version, rc, build, codename |

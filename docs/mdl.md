@@ -60,7 +60,7 @@ Two apps that need the same sha256 share one download. The default is two files 
 
 ## How an app checks ready
 
-The status file is `<home>/state/mdl-status.json`. `<home>` is `VOXPRINT_HOME`, otherwise `%LOCALAPPDATA%\Voxprint` or `~/.local/share/voxprint`. The file is UTF-8 JSON, schema 1. `ready` is true only when `state` is `ready`. A missing file means idle, which is not ready. A damaged file is an error, not a success.
+The status file is `<home>/state/mdl-status.json`. `<home>` is `VOXPRINT_HOME`, otherwise `%LOCALAPPDATA%\VOXPrint AI Suite` or `~/.local/share/voxprint-ai-suite`. The file is UTF-8 JSON, schema 1. `ready` is true only when `state` is `ready`. A missing file means idle, which is not ready. A damaged file is an error, not a success.
 
 ```python
 from voxprint_common.mdl import ready
