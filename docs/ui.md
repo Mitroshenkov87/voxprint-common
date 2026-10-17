@@ -109,9 +109,11 @@ Choosing a chip writes that option's keys immediately and leaves every other gro
 
 Size is grouped, with no orientation switch: Landscape is 16:9, 21:9, 3:2, and 4:3; Square is 1:1; Portrait is 9:16, 2:3, and 3:4. A choice can stay on the row and be unavailable, with a plain reason and an action button. When Enlarge is missing, 4K is grey and the button says Install Enlarge. Style is Photo, Cinematic, Portrait, Illustration, Anime, 3D render, Painting, and Sketch. The layout reports the chosen id. The app owns any words added to the prompt and any negative prompt. On the picture are More like this, Save, Open folder, and Use prompt again.
 
-`progress(step, total, stage_label)` updates the bar while a picture is running. `stage_label` is already translated. `cancel()` returns the screen to a clean idle state. `block(reason)` and `unavailable(reason)` show a localized plain sentence in the picture area.
+`cancel()` returns the screen to a clean idle state. `block(reason)` and `unavailable(reason)` show a localized plain sentence in the picture area.
 
-The history strip keeps the last 50 pictures in the app's State directory (`image-history.json`). The menu offers Open, Show in folder, Copy, Use prompt again (the words and the seed), Use as input picture, and Delete. Delete asks in that same menu before it removes the picture. The overflow menu has Manage models, which calls the app. Canvas runs `voxprint-mdl --gui --app canvas`. The reference shell records that choice and does not start the program.
+The history strip keeps the last 50 pictures in the app's State directory (`image-history.json`). The menu offers Open, Show in folder, Copy, Use prompt again (the words and the seed), Use as input picture, and Delete. Delete asks in that same menu before it removes the picture. The overflow menu is Open folder, Manage models, Settings, and Expert mode. Manage models calls the app. Canvas runs `voxprint-mdl --gui --app canvas`. The reference shell records that choice and does not start the program.
+
+A long job uses one progress block: a stage label, a percent, an estimate of the time left, and Cancel. `progress(step, total, stage_label, eta_seconds=...)` fills it. `stage_label` is already translated. Omit `eta_seconds` to leave the estimate off.
 
 Expert mode adds a side panel to the right of the picture and does not move or restyle the rest. The panel holds the live values. The reference list is Steps, Guidance (CFG), Seed, Sampler, Picture size, Output size, Negative prompt, Add-ons, Add-on strength, VRAM limit, and Adult content (18+). A path field is expert because Open folder is the everyday action. The adult-content value selects the prompt policy. The minors gate still reviews the prompt and the picture.
 
@@ -132,6 +134,60 @@ layout = SimpleImageLayout(
     gate=app_gate,
 )
 ```
+
+## Variants
+
+`SimpleLayout` is the same screen for every app. A variant is a short configuration: the input, the primary action, the result, and a preset file. It does not add a second layout. Expert mode still only adds the side panel. The overflow menu stays Open folder, Manage models, Settings, and Expert mode.
+
+The code name is `SimpleLayout` / `SimpleWidget` in `voxprint_common.ui.simple_image`. `SimpleImageLayout` and `SimpleImageWidget` are the same classes. `surface_for(app_id)` in `voxprint_common.ui.variants` picks the configuration. `ReferenceShell(app="clarity")` draws that app.
+
+### Image
+
+Canvas, Enlarge, and the Lucent helper. Canvas and Lucent ask for a prompt and the action is Generate. Enlarge asks for a dropped picture and the action is Enlarge. The result is the picture. Presets are `presets/canvas.json` and `presets/enlarge.json`. Enlarge's 4x stays grey, with a reason and Install Enlarge, until Enlarge is present. The pictures below are Canvas.
+
+![English image screen](img/shell/image-simple.png)
+
+![English image screen, Expert mode](img/shell/image-expert.png)
+
+![Russian image screen](img/shell/ru-image-simple.png)
+
+![Russian image screen, Expert mode](img/shell/ru-image-expert.png)
+
+### Audio
+
+Audiobook Builder and Movie Dubber. The input is a book, a text file, or a video, plus a voice. The action is Create audiobook or Dub video. The result is a player with sound bars and chapters. History lists past jobs. The preset file is `presets/audio.json` (Pace). The expert panel adds the sample rate. The pictures below are Audiobook Builder.
+
+![English audio screen](img/shell/audio-simple.png)
+
+![English audio screen, Expert mode](img/shell/audio-expert.png)
+
+![Russian audio screen](img/shell/ru-audio-simple.png)
+
+![Russian audio screen, Expert mode](img/shell/ru-audio-expert.png)
+
+### Video
+
+Clarity. The input is a dropped video. The action is Improve video. The result is a before/after player with a slider. The preset file is `presets/video.json` (Strength). The expert panel adds Stabilize.
+
+![English video screen](img/shell/video-simple.png)
+
+![English video screen, Expert mode](img/shell/video-expert.png)
+
+### Text
+
+Plotweaver. The input is an idea or an outline. The action is Write. The result is a chapter document. The preset file is `presets/text.json` (Length). The expert panel adds Tone.
+
+![English text screen](img/shell/text-simple.png)
+
+![English text screen, Expert mode](img/shell/text-expert.png)
+
+### Tool
+
+Model Forge. The input is a model. The action is Prepare model. The result is a short status report. The preset file is `presets/tool.json` (Precision). The expert panel adds Device.
+
+![English tool screen](img/shell/tool-simple.png)
+
+![English tool screen, Expert mode](img/shell/tool-expert.png)
 
 ## Reference window
 

@@ -38,7 +38,8 @@ The docs site is [mitroshenkov87.github.io/voxprint-common](https://mitroshenkov
 | `voxprint_common.ui.commands` | Command ids, localised titles, and default chords |
 | `voxprint_common.ui.keymap` | Context, conflicts, and chord overrides in `suite.json` |
 | `voxprint_common.ui.expert` | Suite-wide Expert mode, off by default |
-| `voxprint_common.ui.simple_image` | Image-app screen for Canvas, Enlarge, and the Lucent helper |
+| `voxprint_common.ui.simple_image` | Shared simple screen. Image, audio, video, text, and tool are configurations |
+| `voxprint_common.ui.variants` | Per-app input, action, result, and preset file for that screen |
 | `voxprint_common.ui.safety` | Adult-content prompt policy and the reserved minors-gate keys |
 | `voxprint_common.ui.settings` | Setting descriptors. Adult content (18+) selects the prompt policy |
 | `voxprint_common.ui.presets` | Preset files, schema `voxprint-presets/1`, writing one shared settings state |

@@ -70,6 +70,25 @@ def test_offscreen_shell_screenshots(tmp_path: Path) -> None:
     russian_result = (tmp_path / "ru-simple-result.png").read_bytes()
     expert = (tmp_path / "en-expert.png").read_bytes()
     modified = (tmp_path / "en-expert-modified.png").read_bytes()
+    variants = {
+        name: (tmp_path / name).read_bytes()
+        for name in (
+            "image-simple.png",
+            "image-expert.png",
+            "audio-simple.png",
+            "audio-expert.png",
+            "video-simple.png",
+            "video-expert.png",
+            "text-simple.png",
+            "text-expert.png",
+            "tool-simple.png",
+            "tool-expert.png",
+            "ru-image-simple.png",
+            "ru-image-expert.png",
+            "ru-audio-simple.png",
+            "ru-audio-expert.png",
+        )
+    }
     pictures = (
         english,
         russian,
@@ -96,4 +115,8 @@ def test_offscreen_shell_screenshots(tmp_path: Path) -> None:
     assert result != expert
     assert expert != modified
     assert empty != english
+    for blob in variants.values():
+        assert blob.startswith(b"\x89PNG")
+        assert len(blob) > 1000
+    assert len(set(variants.values())) == len(variants)
     assert "PySide6" not in sys.modules

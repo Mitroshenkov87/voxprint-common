@@ -70,6 +70,7 @@ nav:
       - ui.settings: api/settings.md
       - ui.presets: api/presets.md
       - ui.simple_image: api/simple-image.md
+      - ui.variants: api/variants.md
       - ui.shell: api/shell.md
       - ui.splash: api/splash.md
       - provenance: api/provenance.md

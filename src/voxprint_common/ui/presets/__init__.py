@@ -183,6 +183,7 @@ class SettingState:
         settings: Settings,
         *,
         state_dir: Path | None = None,
+        state_name: str = _STATE_NAME,
     ) -> None:
         """Build the state from defaults, then the preset file, then overrides.
 
@@ -190,10 +191,13 @@ class SettingState:
             presets: Validated preset groups.
             settings: Descriptors for the values the expert panel shows.
             state_dir: The app's State directory. None keeps the state in memory.
+            state_name: File name inside ``state_dir``. Image apps use
+                ``image-settings.json``.
         """
         self._presets = presets
         self._settings = settings
         self._state_dir = state_dir
+        self._state_name = state_name or _STATE_NAME
         self.values: dict[str, Value] = {}
         for spec in settings.visible(expert=True):
             if isinstance(spec.default, bool | int | float | str):
@@ -400,7 +404,7 @@ class SettingState:
     def _load(self) -> None:
         if self._state_dir is None:
             return
-        path = self._state_dir / _STATE_NAME
+        path = self._state_dir / self._state_name
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except OSError, UnicodeError, json.JSONDecodeError:
@@ -445,7 +449,7 @@ class SettingState:
             return
         self._state_dir.mkdir(parents=True, exist_ok=True)
         payload = {"schema": _STATE_SCHEMA, **self.snapshot()}
-        path = self._state_dir / _STATE_NAME
+        path = self._state_dir / self._state_name
         path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 

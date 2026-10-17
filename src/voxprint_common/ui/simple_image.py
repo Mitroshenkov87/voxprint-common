@@ -1,9 +1,12 @@
-"""Image-app pattern: a prompt, plain presets, the picture, and a history strip.
+"""Shared simple screen for every VOXPrint app.
 
-Canvas, Enlarge, and the Lucent helper use this screen. :class:`SimpleImageLayout`
-is the headless description. :class:`SimpleImageWidget` is the Qt view. Importing
-this module does not import PySide6. Expert mode adds a side panel beside the
-picture. The dock stays a separate API and is not a control on this screen.
+:class:`SimpleLayout` is the headless description: an input, one primary
+action, a result, and a history strip. :class:`SimpleWidget` is the Qt view.
+Image, audio, video, text, and tool are thin configurations
+(:mod:`voxprint_common.ui.variants`), not separate layouts.
+:class:`SimpleImageLayout` and :class:`SimpleImageWidget` are the same classes.
+Importing this module does not import PySide6. Expert mode adds a side panel
+and does not move the rest. The dock stays a separate API.
 """
 
 from __future__ import annotations
@@ -25,6 +28,13 @@ from voxprint_common.ui.presets import (
 )
 from voxprint_common.ui.safety import AdultPromptPolicy, SafetyGate, adult_prompt_policy
 from voxprint_common.ui.settings import Settings, SettingSpec, SettingType, reference_settings
+from voxprint_common.ui.variants import (
+    AppSurface,
+    InputKind,
+    ResultKind,
+    VariantId,
+    surface_for,
+)
 
 __all__ = [
     "GalleryItem",
@@ -33,6 +43,8 @@ __all__ = [
     "PresetRow",
     "SimpleImageLayout",
     "SimpleImageWidget",
+    "SimpleLayout",
+    "SimpleWidget",
     "image_presets",
 ]
 
@@ -117,7 +129,7 @@ class GalleryItem:
 
 
 class SimpleImageLayout:
-    """Headless state for the simple image screen. Qt is not imported.
+    """Headless state for the shared simple screen. Qt is not imported.
 
     Pass a preset file to share one settings state with Expert mode. The chips
     and the expert values read and write that state. Rows alone keep a chip
@@ -135,6 +147,8 @@ class SimpleImageLayout:
         settings: Settings | None = None,
         state_dir: Path | None = None,
         gate: SafetyGate | None = None,
+        state_name: str = "image-settings.json",
+        history_name: str = _HISTORY_NAME,
     ) -> None:
         """Copy ``rows`` and select each row's default.
 
@@ -149,6 +163,8 @@ class SimpleImageLayout:
                 state are read and written there. None keeps both in memory.
             gate: The app's review of the prompt and of each result. None
                 blocks every picture.
+            state_name: Settings file name inside ``state_dir``.
+            history_name: History file name inside ``state_dir``.
 
         Raises:
             ValueError: Two rows share an id.
@@ -160,9 +176,15 @@ class SimpleImageLayout:
         if len(ids) != len(set(ids)):
             raise ValueError("preset row ids must be unique")
         self._state_dir = state_dir
+        self._history_name = history_name or _HISTORY_NAME
         self._gate = gate
         self._state = (
-            SettingState(presets, settings or reference_settings(), state_dir=state_dir)
+            SettingState(
+                presets,
+                settings or reference_settings(),
+                state_dir=state_dir,
+                state_name=state_name,
+            )
             if presets is not None
             else None
         )
@@ -172,6 +194,7 @@ class SimpleImageLayout:
         self.step = 0
         self.total = 0
         self.stage_label = ""
+        self.eta_seconds: int | None = None
         self.reason = ""
         self.presets = (
             dict(self._state.chosen)
@@ -332,27 +355,49 @@ class SimpleImageLayout:
         self.phase = Phase.BUSY
         return True
 
-    def progress(self, step: int, total: int, stage_label: str) -> None:
-        """Record how far the current picture has got.
+    @property
+    def percent(self) -> int:
+        """Return how much of the job is done, from 0 through 100."""
+        if self.total < 1:
+            return 0
+        return round(100 * self.step / self.total)
 
-        ``stage_label`` is already translated by the app.
+    def progress(
+        self,
+        step: int,
+        total: int,
+        stage_label: str,
+        *,
+        eta_seconds: int | None = None,
+    ) -> None:
+        """Record how far the current job has got.
+
+        ``stage_label`` is already translated by the app. The percent is
+        ``step`` divided by ``total``. ``eta_seconds`` is the remaining time.
+        Omit it to clear the estimate.
 
         Args:
             step: Finished steps, from zero through ``total``.
-            total: How many steps the picture takes.
+            total: How many steps the job takes.
             stage_label: Plain words for the current stage.
+            eta_seconds: Seconds still left, or None when there is no estimate.
 
         Raises:
             ValueError: Nothing is running, or the numbers do not fit.
         """
         if self.phase is not Phase.BUSY:
-            raise ValueError("progress needs a picture that is in progress")
+            raise ValueError("progress needs a job that is in progress")
         label = stage_label.strip()
         if total < 1 or step < 0 or step > total or not label:
             raise ValueError("progress needs a step inside the total and a stage label")
+        if eta_seconds is not None and (
+            isinstance(eta_seconds, bool) or not isinstance(eta_seconds, int) or eta_seconds < 0
+        ):
+            raise ValueError("eta needs a number of seconds")
         self.step = step
         self.total = total
         self.stage_label = label
+        self.eta_seconds = eta_seconds
 
     def cancel(self) -> None:
         """Return to a clean idle state.
@@ -592,6 +637,7 @@ class SimpleImageLayout:
         self.step = 0
         self.total = 0
         self.stage_label = ""
+        self.eta_seconds = None
         self.reason = ""
 
     def _show_reason(self, reason: str, phase: Phase) -> None:
@@ -605,7 +651,7 @@ class SimpleImageLayout:
     def _load_history(self) -> None:
         if self._state_dir is None:
             return
-        path = self._state_dir / _HISTORY_NAME
+        path = self._state_dir / self._history_name
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except OSError, UnicodeError, json.JSONDecodeError:
@@ -643,7 +689,7 @@ class SimpleImageLayout:
                 for item in self.history[:_HISTORY_LIMIT]
             ],
         }
-        path = self._state_dir / _HISTORY_NAME
+        path = self._state_dir / self._history_name
         path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
@@ -729,17 +775,18 @@ def _rows_from(document: PresetFile) -> tuple[PresetRow, ...]:
 class SimpleImageWidget:
     """Qt view of a :class:`SimpleImageLayout`. Construction imports PySide6.
 
-    Enter in the prompt starts a picture. Shift+Enter inserts a line. Size,
-    output size, style, and how many pictures stay on screen, with More like
-    this, Save, Open folder, and Use prompt again. Improve prompt, when the
-    app supplies it, replaces the text in that same box. Expert mode adds a
-    side panel and leaves every other control where it was. The history strip
-    shows a neutral gradient for each finished item. That gradient is a
-    placeholder, not a photograph. A blocked result and an unavailable feature
-    are plain sentences in the picture area. Manage models and an unavailable
-    chip's action call ``on_command``. Canvas runs
-    ``voxprint-mdl --gui --app canvas`` for Manage models. This widget does
-    not start that program.
+    The screen is an input, one primary action, a result, and a history strip.
+    The image configuration keeps a prompt. Enter starts a picture. Shift+Enter
+    inserts a line. Size, output size, style, and how many pictures stay on
+    screen, with More like this, Save, Open folder, and Use prompt again.
+    Improve prompt, when the app supplies it, replaces the text in that same
+    box. Expert mode adds a side panel and leaves every other control where it
+    was. A long job shows a stage, a percent, an estimate, and Cancel. The
+    history strip shows a neutral placeholder for each finished item, not a
+    photograph. The overflow menu is Open folder, Manage models, Settings, and
+    Expert mode. Those commands, and an unavailable chip's action, call
+    ``on_command``. Canvas runs ``voxprint-mdl --gui --app canvas`` for Manage
+    models. This widget does not start that program.
     """
 
     def __init__(
@@ -752,20 +799,22 @@ class SimpleImageWidget:
         on_improve: Callable[[str], str] | None = None,
         on_history: Callable[[str, str], None] | None = None,
         on_seed: Callable[[int], None] | None = None,
+        surface: AppSurface | None = None,
     ) -> None:
         """Build the screen.
 
         Args:
             layout: Headless state. The widget does not replace it.
             settings: Expert settings the app supplied. They go in the side panel.
-            on_generate: Called after a prompt starts a picture.
+            on_generate: Called after the primary action starts a job.
             on_command: Called with a command id from Save, Open folder, Expert
-                mode, Manage models, or an unavailable-chip action.
+                mode, Manage models, Settings, or an unavailable-chip action.
             on_improve: Replaces the prompt text in the same field. None hides
-                Improve prompt and Revert.
+                Improve prompt and Revert. File inputs hide them too.
             on_history: Called with an action id and a history item id. The
                 actions are ``open``, ``show_folder``, ``copy``, and ``use_input``.
             on_seed: Called with the restored seed after Use prompt again.
+            surface: Which app this screen is. None is Canvas.
         """
         core, gui, widgets = _qt()
         self._core = core
@@ -779,6 +828,16 @@ class SimpleImageWidget:
         self._on_improve = on_improve
         self._on_history = on_history
         self._on_seed = on_seed
+        self._surface = surface if surface is not None else surface_for("canvas")
+        self._drop: object | None = None
+        self._voice: object | None = None
+        self._model: object | None = None
+        self._player: object | None = None
+        self._chapters: object | None = None
+        self._before: object | None = None
+        self._after: object | None = None
+        self._document: object | None = None
+        self._report: object | None = None
         self._applying = False
         self._resets: dict[str, object] = {}
         self._customs: dict[str, object] = {}
@@ -832,13 +891,13 @@ class SimpleImageWidget:
         self._note.setVisible(bool(text))  # type: ignore[attr-defined]
 
     def set_prompt_text(self, text: str) -> None:
-        """Put ``text`` in the prompt box and the layout.
+        """Put ``text`` in the input and the layout.
 
         Args:
-            text: Prompt words.
+            text: Prompt words, a file name, or a model name.
         """
         self._layout.set_prompt(text)
-        self._prompt.setPlainText(text)  # type: ignore[attr-defined]
+        self._show_input(text)
 
     def refresh(self, *, prompt: bool = False) -> None:
         """Paint the current phase, chips, and history.
@@ -847,7 +906,7 @@ class SimpleImageWidget:
             prompt: Also copy the layout prompt into the box.
         """
         if prompt:
-            self._prompt.setPlainText(self._layout.prompt)  # type: ignore[attr-defined]
+            self._show_input(self._layout.prompt)
         self._sync_presets()
         self._paint_expert()
         self._fill_history()
@@ -886,8 +945,12 @@ class SimpleImageWidget:
         """
         widgets = self._widgets
         menu = widgets.QMenu(self.root)
+        image = self._surface.variant is VariantId.IMAGE
         if confirming:
-            question = menu.addAction(tr("simple.history.delete.confirm"))
+            question_key = (
+                "simple.history.delete.confirm" if image else "simple.history.delete.job"
+            )
+            question = menu.addAction(tr(question_key))
             question.setEnabled(False)
             menu.addAction(tr("simple.history.delete"), lambda: self._delete(item_id))
             menu.addAction(tr("simple.history.keep"))
@@ -898,11 +961,14 @@ class SimpleImageWidget:
             lambda: self._notify_history("show_folder", item_id),
         )
         menu.addAction(tr("simple.menu.copy"), lambda: self._copy(item_id))
-        menu.addAction(tr("simple.menu.use_prompt"), lambda: self._use(item_id))
-        menu.addAction(
-            tr("simple.history.use_input"),
-            lambda: self._notify_history("use_input", item_id),
-        )
+        if image:
+            menu.addAction(tr("simple.menu.use_prompt"), lambda: self._use(item_id))
+            menu.addAction(
+                tr("simple.history.use_input"),
+                lambda: self._notify_history("use_input", item_id),
+            )
+        else:
+            menu.addAction(tr("simple.menu.use_again"), lambda: self._use(item_id))
         menu.addAction(tr("simple.history.delete"), lambda: self._ask_delete(item_id))
         return menu
 
@@ -919,7 +985,16 @@ class SimpleImageWidget:
         self._overflow.setObjectName("overflow")
         self._overflow.setAutoDefault(False)
         overflow = widgets.QMenu(self.root)
+        overflow.addAction(
+            tr("simple.menu.open_folder"),
+            lambda: self._command("file.open_folder"),
+        )
         overflow.addAction(tr("simple.menu.models"), lambda: self._command("models.manage"))
+        overflow.addAction(tr("simple.menu.settings"), lambda: self._command("view.settings"))
+        overflow.addAction(
+            tr("command.view.toggle_expert_mode"),
+            lambda: self._command("view.toggle_expert_mode"),
+        )
         self._overflow.setMenu(overflow)
         self._top.addWidget(self._overflow)
         self._expert_toggle = widgets.QPushButton(tr("command.view.toggle_expert_mode"))
@@ -930,37 +1005,41 @@ class SimpleImageWidget:
         root.addLayout(self._top)
         prompt_row = widgets.QHBoxLayout()
         prompt_row.setSpacing(12)
-        self._prompt = widgets.QPlainTextEdit()
-        self._prompt.setObjectName("promptBox")
-        self._prompt.setPlaceholderText(tr("shell.prompt.placeholder"))
-        self._prompt.setMinimumHeight(96)
-        prompt_col = widgets.QVBoxLayout()
-        prompt_col.setSpacing(6)
-        prompt_col.addWidget(self._prompt, 1)
-        tools = widgets.QHBoxLayout()
-        tools.setSpacing(8)
-        self._improve = widgets.QPushButton(tr("simple.improve"))
-        self._improve.setObjectName("improvePrompt")
-        self._improve.setAutoDefault(False)
-        self._improve.clicked.connect(self._improve_prompt)
-        self._revert = widgets.QPushButton(tr("simple.revert"))
-        self._revert.setObjectName("revertPrompt")
-        self._revert.setAutoDefault(False)
-        self._revert.setEnabled(False)
-        self._revert.clicked.connect(self._revert_prompt)
-        tools.addWidget(self._improve)
-        tools.addWidget(self._revert)
-        tools.addStretch(1)
-        prompt_col.addLayout(tools)
-        if self._on_improve is None:
-            self._improve.hide()
-            self._revert.hide()
-        self._generate_button = widgets.QPushButton(tr("simple.generate"))
+        self._prompt = None
+        if self._surface.input_kind in {InputKind.PROMPT, InputKind.OUTLINE}:
+            self._prompt = widgets.QPlainTextEdit()
+            self._prompt.setObjectName("promptBox")
+            self._prompt.setPlaceholderText(tr(self._surface.placeholder_key))
+            self._prompt.setMinimumHeight(96)
+            prompt_col = widgets.QVBoxLayout()
+            prompt_col.setSpacing(6)
+            prompt_col.addWidget(self._prompt, 1)
+            tools = widgets.QHBoxLayout()
+            tools.setSpacing(8)
+            self._improve = widgets.QPushButton(tr("simple.improve"))
+            self._improve.setObjectName("improvePrompt")
+            self._improve.setAutoDefault(False)
+            self._improve.clicked.connect(self._improve_prompt)
+            self._revert = widgets.QPushButton(tr("simple.revert"))
+            self._revert.setObjectName("revertPrompt")
+            self._revert.setAutoDefault(False)
+            self._revert.setEnabled(False)
+            self._revert.clicked.connect(self._revert_prompt)
+            tools.addWidget(self._improve)
+            tools.addWidget(self._revert)
+            tools.addStretch(1)
+            prompt_col.addLayout(tools)
+            if self._on_improve is None or self._surface.input_kind is not InputKind.PROMPT:
+                self._improve.hide()
+                self._revert.hide()
+            prompt_row.addLayout(prompt_col, 1)
+        else:
+            prompt_row.addLayout(self._source_column(), 1)
+        self._generate_button = widgets.QPushButton(tr(self._surface.action_key))
         self._generate_button.setObjectName("generate")
         self._generate_button.setAutoDefault(False)
         self._generate_button.setMinimumSize(168, 96)
         self._generate_button.clicked.connect(self._generate)
-        prompt_row.addLayout(prompt_col, 1)
         prompt_row.addWidget(self._generate_button)
         root.addLayout(prompt_row)
         self._preset_host = widgets.QWidget()
@@ -1040,7 +1119,7 @@ class SimpleImageWidget:
         widgets = self._widgets
         page = widgets.QWidget()
         layout = widgets.QVBoxLayout(page)
-        hint = widgets.QLabel(tr("simple.empty"))
+        hint = widgets.QLabel(tr(self._surface.empty_key))
         hint.setObjectName("emptyHint")
         hint.setAlignment(self._qt.AlignCenter)
         hint.setWordWrap(True)
@@ -1061,6 +1140,17 @@ class SimpleImageWidget:
         text.setWordWrap(True)
         self._progress_text = text
         layout.addWidget(text)
+        percent = widgets.QLabel()
+        percent.setObjectName("progressPercent")
+        percent.setAlignment(qt.AlignCenter)
+        self._percent_label = percent
+        layout.addWidget(percent)
+        eta = widgets.QLabel()
+        eta.setObjectName("progressEta")
+        eta.setAlignment(qt.AlignCenter)
+        eta.hide()
+        self._eta_label = eta
+        layout.addWidget(eta)
         bar_row = widgets.QHBoxLayout()
         bar_row.addStretch(1)
         bar = widgets.QProgressBar()
@@ -1085,6 +1175,20 @@ class SimpleImageWidget:
         return page
 
     def _ready_page(self) -> object:
+        kind = self._surface.result_kind
+        if kind is ResultKind.PICTURE:
+            return self._picture_page()
+        if kind is ResultKind.PLAYER:
+            return self._player_page()
+        if kind is ResultKind.COMPARE:
+            return self._compare_page()
+        if kind is ResultKind.DOCUMENT:
+            return self._document_page()
+        if kind is ResultKind.REPORT:
+            return self._report_page()
+        assert_never(kind)
+
+    def _picture_page(self) -> object:
         widgets = self._widgets
         page = widgets.QWidget()
         layout = widgets.QVBoxLayout(page)
@@ -1099,6 +1203,76 @@ class SimpleImageWidget:
             self._rescale()
 
         self._picture.resizeEvent = _resized  # type: ignore[method-assign]
+        return page
+
+    def _player_page(self) -> object:
+        widgets = self._widgets
+        page = widgets.QWidget()
+        layout = widgets.QVBoxLayout(page)
+        layout.setContentsMargins(16, 16, 16, 12)
+        layout.setSpacing(10)
+        player = widgets.QLabel()
+        player.setObjectName("player")
+        player.setAlignment(self._qt.AlignCenter)
+        player.setMinimumHeight(160)
+        self._player = player
+        layout.addWidget(player, 1)
+        chapters = widgets.QLabel()
+        chapters.setObjectName("chapters")
+        chapters.setAlignment(self._qt.AlignLeft | self._qt.AlignTop)
+        chapters.setWordWrap(True)
+        self._chapters = chapters
+        layout.addWidget(chapters)
+        return page
+
+    def _compare_page(self) -> object:
+        widgets = self._widgets
+        page = widgets.QWidget()
+        layout = widgets.QVBoxLayout(page)
+        layout.setContentsMargins(16, 16, 16, 12)
+        layout.setSpacing(10)
+        row = widgets.QHBoxLayout()
+        row.setSpacing(12)
+        before = widgets.QLabel()
+        before.setObjectName("compareBefore")
+        before.setAlignment(self._qt.AlignCenter)
+        after = widgets.QLabel()
+        after.setObjectName("compareAfter")
+        after.setAlignment(self._qt.AlignCenter)
+        self._before = before
+        self._after = after
+        row.addWidget(before, 1)
+        row.addWidget(after, 1)
+        layout.addLayout(row, 1)
+        slider = widgets.QSlider(self._qt.Horizontal)
+        slider.setObjectName("compareSlider")
+        slider.setRange(0, 100)
+        slider.setValue(50)
+        layout.addWidget(slider)
+        return page
+
+    def _document_page(self) -> object:
+        widgets = self._widgets
+        page = widgets.QWidget()
+        layout = widgets.QVBoxLayout(page)
+        layout.setContentsMargins(12, 12, 12, 12)
+        document = widgets.QPlainTextEdit()
+        document.setObjectName("documentView")
+        document.setReadOnly(True)
+        self._document = document
+        layout.addWidget(document, 1)
+        return page
+
+    def _report_page(self) -> object:
+        widgets = self._widgets
+        page = widgets.QWidget()
+        layout = widgets.QVBoxLayout(page)
+        report = widgets.QLabel()
+        report.setObjectName("reportView")
+        report.setAlignment(self._qt.AlignCenter)
+        report.setWordWrap(True)
+        self._report = report
+        layout.addWidget(report, 1)
         return page
 
     def _reason_page(self, name: str) -> object:
@@ -1228,15 +1402,19 @@ class SimpleImageWidget:
         group = widgets.QButtonGroup(self.root)
         group.setExclusive(True)
         self._thumb_group = group
-        for item in self._layout.history:
+        for index, item in enumerate(self._layout.history, start=1):
             button = widgets.QPushButton()
             button.setObjectName(f"thumb-{item.item_id}")
             button.setProperty("thumb", "true")
             button.setCheckable(True)
             button.setAutoDefault(False)
             button.setFixedSize(88, 88)
-            button.setIcon(self._gui.QIcon(_placeholder(self._gui, item.item_id, 168, 168)))
-            button.setIconSize(self._core.QSize(80, 80))
+            if self._surface.result_kind is ResultKind.PICTURE:
+                button.setIcon(self._gui.QIcon(_placeholder(self._gui, item.item_id, 168, 168)))
+                button.setIconSize(self._core.QSize(80, 80))
+            else:
+                button.setText(str(index))
+                button.setToolTip(item.prompt)
             button.setChecked(item.item_id == self._layout.selected)
             button.setContextMenuPolicy(qt.CustomContextMenu)
             button.clicked.connect(
@@ -1258,19 +1436,22 @@ class SimpleImageWidget:
         row = widgets.QHBoxLayout(bar)
         row.setContentsMargins(12, 0, 12, 12)
         row.setSpacing(8)
-        self._more = self._action_button("moreLike", "simple.more", self._more_like)
         self._save = self._action_button("savePicture", "simple.menu.save", self._save_current)
         self._open = self._action_button(
             "openFolder",
             "simple.menu.open_folder",
             lambda: self._command("file.open_folder"),
         )
-        self._use_button = self._action_button(
-            "usePrompt",
-            "simple.menu.use_prompt",
-            self._use_current,
-        )
-        for button in (self._more, self._save, self._open, self._use_button):
+        buttons = [self._save, self._open]
+        if self._surface.variant is VariantId.IMAGE:
+            self._more = self._action_button("moreLike", "simple.more", self._more_like)
+            self._use_button = self._action_button(
+                "usePrompt",
+                "simple.menu.use_prompt",
+                self._use_current,
+            )
+            buttons = [self._more, self._save, self._open, self._use_button]
+        for button in buttons:
             row.addWidget(button)
         row.addStretch(1)
         return bar
@@ -1286,6 +1467,8 @@ class SimpleImageWidget:
     def _install_keys(self) -> None:
         core = self._core
         edit = self._prompt
+        if edit is None:
+            return
 
         class _Keys(core.QObject):
             def eventFilter(_self: object, _watched: object, event: object) -> bool:
@@ -1315,10 +1498,116 @@ class SimpleImageWidget:
         finally:
             self._handling_enter = False
 
+    def _source_column(self) -> object:
+        widgets = self._widgets
+        column = widgets.QVBoxLayout()
+        column.setSpacing(8)
+        kind = self._surface.input_kind
+        if kind is InputKind.MODEL:
+            label = widgets.QLabel(tr("simple.drop.model"))
+            label.setObjectName("modelLabel")
+            column.addWidget(label)
+            model = widgets.QComboBox()
+            model.setObjectName("modelPicker")
+            model.addItem(tr("simple.model.standard"))
+            model.addItem(tr("simple.model.large"))
+            self._model = model
+            column.addWidget(model)
+            column.addStretch(1)
+            return column
+        if kind is InputKind.FILE or kind is InputKind.MEDIA_VOICE:
+            return self._file_column(column, kind)
+        assert_never(kind)
+
+    def _file_column(self, column: object, kind: InputKind) -> object:
+        widgets = self._widgets
+        drop = widgets.QLabel(tr(self._surface.drop_key))
+        drop.setObjectName("fileDrop")
+        drop.setAlignment(self._qt.AlignCenter)
+        drop.setWordWrap(True)
+        drop.setMinimumHeight(96)
+        drop.setAcceptDrops(True)
+        self._drop = drop
+        self._install_drop(drop)
+        column.addWidget(drop, 1)
+        if kind is InputKind.MEDIA_VOICE:
+            row = widgets.QHBoxLayout()
+            row.setSpacing(8)
+            voice_label = widgets.QLabel(tr("simple.voice"))
+            voice_label.setObjectName("voiceLabel")
+            voice = widgets.QComboBox()
+            voice.setObjectName("voicePicker")
+            voice.addItem(tr("simple.voice.warm"))
+            voice.addItem(tr("simple.voice.clear"))
+            voice.addItem(tr("simple.voice.low"))
+            self._voice = voice
+            row.addWidget(voice_label)
+            row.addWidget(voice, 1)
+            column.addLayout(row)
+        return column
+
+    def _install_drop(self, label: object) -> None:
+        core = self._core
+
+        class _Drop(core.QObject):
+            def eventFilter(_self: object, _watched: object, event: object) -> bool:
+                kind = event.type()  # type: ignore[attr-defined]
+                if kind == core.QEvent.Type.DragEnter:
+                    if event.mimeData().hasUrls():  # type: ignore[attr-defined]
+                        event.acceptProposedAction()  # type: ignore[attr-defined]
+                        return True
+                    return False
+                if kind == core.QEvent.Type.Drop:
+                    urls = event.mimeData().urls()  # type: ignore[attr-defined]
+                    if not urls:
+                        return False
+                    path = urls[0].toLocalFile() or urls[0].toString()
+                    name = Path(path).name or path
+                    self.set_prompt_text(name)
+                    event.acceptProposedAction()  # type: ignore[attr-defined]
+                    return True
+                return False
+
+        watcher = _Drop(label)
+        label.installEventFilter(watcher)  # type: ignore[attr-defined]
+        self._drop_filter = watcher
+
+    def _show_input(self, text: str) -> None:
+        if self._prompt is not None:
+            self._prompt.setPlainText(text)  # type: ignore[attr-defined]
+        if self._drop is not None and text.strip():
+            self._drop.setText(text)  # type: ignore[attr-defined]
+        if self._model is None or not text.strip():
+            return
+        index = self._model.findText(text)  # type: ignore[attr-defined]
+        if index >= 0:
+            self._model.setCurrentIndex(index)  # type: ignore[attr-defined]
+
+    def _input_text(self) -> str:
+        kind = self._surface.input_kind
+        if kind is InputKind.PROMPT or kind is InputKind.OUTLINE:
+            return self._prompt.toPlainText()  # type: ignore[attr-defined]
+        if kind is InputKind.MODEL:
+            return str(self._model.currentText())  # type: ignore[attr-defined]
+        if kind is InputKind.FILE or kind is InputKind.MEDIA_VOICE:
+            if self._drop is not None and self._drop.text() == tr(self._surface.drop_key):  # type: ignore[attr-defined]
+                return ""
+            text = self._layout.prompt.strip()
+            if kind is InputKind.MEDIA_VOICE and text and self._voice is not None:
+                return f"{text} · {self._voice.currentText()}"  # type: ignore[attr-defined]
+            return text
+        assert_never(kind)
+
     def _generate(self) -> None:
-        self._layout.set_prompt(self._prompt.toPlainText())  # type: ignore[attr-defined]
+        self._layout.set_prompt(self._input_text())
         if not self._layout.prompt.strip():
-            self.set_note(tr("simple.error.prompt"))
+            kind = self._surface.input_kind
+            key = (
+                "simple.error.prompt"
+                if kind in {InputKind.PROMPT, InputKind.OUTLINE}
+                else "simple.error.input"
+            )
+            self.set_note(tr(key))
             self.refresh()
             return
         if not self._layout.generate():
@@ -1402,22 +1691,60 @@ class SimpleImageWidget:
         label = self._layout.stage_label or tr("simple.progress")
         self._progress_text.setText(label)  # type: ignore[attr-defined]
         total = self._layout.total
+        percent = self._percent_label
+        eta = self._eta_label
         if total > 0:
+            percent.setText(tr("simple.progress.percent", percent=self._layout.percent))  # type: ignore[attr-defined]
+            percent.show()  # type: ignore[attr-defined]
             self._progress_bar.setRange(0, total)  # type: ignore[attr-defined]
             self._progress_bar.setValue(self._layout.step)  # type: ignore[attr-defined]
+        else:
+            percent.hide()  # type: ignore[attr-defined]
+            self._progress_bar.setRange(0, 0)  # type: ignore[attr-defined]
+        seconds = self._layout.eta_seconds
+        if seconds is None:
+            eta.hide()  # type: ignore[attr-defined]
             return
-        self._progress_bar.setRange(0, 0)  # type: ignore[attr-defined]
+        if seconds >= 60:
+            minutes = max(1, round(seconds / 60))
+            eta.setText(tr("simple.progress.eta_minutes", minutes=minutes))  # type: ignore[attr-defined]
+        else:
+            eta.setText(tr("simple.progress.eta_seconds", seconds=seconds))  # type: ignore[attr-defined]
+        eta.show()  # type: ignore[attr-defined]
 
     def _show_ready(self) -> None:
         item = self._layout.item(self._layout.selected)
         if item is None:
             self._stack.setCurrentIndex(0)  # type: ignore[attr-defined]
             return
-        self._source = _placeholder(self._gui, item.item_id, 960, 640)
+        kind = self._surface.result_kind
+        if kind is ResultKind.PICTURE:
+            self._source = _placeholder(self._gui, item.item_id, 960, 640)
+            self._stack.setCurrentIndex(2)  # type: ignore[attr-defined]
+            self._rescale()
+            return
+        if kind is ResultKind.PLAYER:
+            self._player.setPixmap(_bars(self._gui, item.item_id, 880, 180))  # type: ignore[attr-defined]
+            self._chapters.setText(_chapters())  # type: ignore[attr-defined]
+        elif kind is ResultKind.COMPARE:
+            align = int(self._qt.AlignCenter)
+            self._before.setPixmap(  # type: ignore[attr-defined]
+                _swatch(self._gui, 420, 240, tr("simple.compare.before"), True, align)
+            )
+            self._after.setPixmap(  # type: ignore[attr-defined]
+                _swatch(self._gui, 420, 240, tr("simple.compare.after"), False, align)
+            )
+        elif kind is ResultKind.DOCUMENT:
+            self._document.setPlainText(_chapter_text(item.prompt))  # type: ignore[attr-defined]
+        elif kind is ResultKind.REPORT:
+            self._report.setText(_report_text())  # type: ignore[attr-defined]
+        else:
+            assert_never(kind)
         self._stack.setCurrentIndex(2)  # type: ignore[attr-defined]
-        self._rescale()
 
     def _rescale(self) -> None:
+        if self._surface.result_kind is not ResultKind.PICTURE:
+            return
         if self._source is None or self._layout.phase is not Phase.READY:
             return
         size = self._picture.size()  # type: ignore[attr-defined]
@@ -1453,7 +1780,7 @@ class SimpleImageWidget:
         self.refresh(prompt=True)
 
     def _improve_prompt(self) -> None:
-        if self._on_improve is None:
+        if self._on_improve is None or self._prompt is None:
             return
         current = self._prompt.toPlainText()  # type: ignore[attr-defined]
         if not current.strip():
@@ -1469,7 +1796,7 @@ class SimpleImageWidget:
         self.set_note("")
 
     def _revert_prompt(self) -> None:
-        if self._previous_prompt is None:
+        if self._previous_prompt is None or self._prompt is None:
             return
         text = self._previous_prompt
         self._previous_prompt = None
@@ -1683,6 +2010,81 @@ def _clear(layout: object) -> None:
             widget.deleteLater()
 
 
+def _chapters() -> str:
+    return "\n".join(
+        (
+            tr("simple.player.chapters"),
+            tr("simple.chapter.1"),
+            tr("simple.chapter.2"),
+        )
+    )
+
+
+def _chapter_text(prompt: str) -> str:
+    title = prompt.strip() or tr("simple.chapter.1")
+    return "\n\n".join(
+        (
+            title,
+            tr("simple.document.opening"),
+            tr("simple.chapter.2"),
+            tr("simple.document.closing"),
+        )
+    )
+
+
+def _report_text() -> str:
+    return "\n\n".join((tr("simple.report.ready"), tr("simple.report.body")))
+
+
+def _bars(gui: object, item_id: str, width: int, height: int) -> object:
+    """Return neutral sound bars. They are not a recording."""
+    image = gui.QImage(  # type: ignore[attr-defined]
+        max(width, 1),
+        max(height, 1),
+        gui.QImage.Format.Format_RGB32,  # type: ignore[attr-defined]
+    )
+    image.fill(gui.QColor(28, 34, 46))  # type: ignore[attr-defined]
+    painter = gui.QPainter(image)  # type: ignore[attr-defined]
+    shift = sum(ord(char) for char in item_id) % 12
+    count = 48
+    gap = 4
+    bar_width = max(2, (width - gap * (count + 1)) // count)
+    for index in range(count):
+        level = 28 + ((index * 17 + shift) % 58)
+        bar_height = int(height * level / 100)
+        x = gap + index * (bar_width + gap)
+        y = (height - bar_height) // 2
+        painter.fillRect(x, y, bar_width, bar_height, gui.QColor(186, 168, 120))  # type: ignore[attr-defined]
+    painter.end()
+    return gui.QPixmap.fromImage(image)  # type: ignore[attr-defined]
+
+
+def _swatch(
+    gui: object,
+    width: int,
+    height: int,
+    label: str,
+    cool: bool,
+    align: int,
+) -> object:
+    """Return a flat colour with a word. It is not a video frame."""
+    image = gui.QImage(  # type: ignore[attr-defined]
+        max(width, 1),
+        max(height, 1),
+        gui.QImage.Format.Format_RGB32,  # type: ignore[attr-defined]
+    )
+    color = gui.QColor(46, 62, 84) if cool else gui.QColor(92, 78, 64)  # type: ignore[attr-defined]
+    image.fill(color)
+    painter = gui.QPainter(image)  # type: ignore[attr-defined]
+    painter.setPen(gui.QColor(232, 226, 214))  # type: ignore[attr-defined]
+    font = painter.font()
+    font.setPointSize(18)
+    painter.setFont(font)
+    painter.drawText(image.rect(), align, label)
+    painter.end()
+    return gui.QPixmap.fromImage(image)  # type: ignore[attr-defined]
+
+
 def _placeholder(gui: object, item_id: str, width: int, height: int) -> object:
     """Return a neutral gradient. It is not a photograph."""
     image = gui.QImage(  # type: ignore[attr-defined]
@@ -1700,6 +2102,10 @@ def _placeholder(gui: object, item_id: str, width: int, height: int) -> object:
     painter.fillRect(image.rect(), gradient)
     painter.end()
     return gui.QPixmap.fromImage(image)  # type: ignore[attr-defined]
+
+
+SimpleLayout = SimpleImageLayout
+SimpleWidget = SimpleImageWidget
 
 
 def _qt() -> tuple[object, object, object]:

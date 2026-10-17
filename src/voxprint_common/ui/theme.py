@@ -381,9 +381,17 @@ QLabel#presetLabel, QLabel[presetLabel="true"], QLabel#emptyHint, QLabel#simpleN
     color: {TEXT_MUTED}; background: transparent;
 }}
 QLabel#emptyHint {{ font-size: 16px; }}
-QLabel#progressText, QLabel#blockedText, QLabel#featureText {{
+QLabel#progressText, QLabel#blockedText, QLabel#featureText,
+QLabel#progressPercent, QLabel#progressEta, QLabel#chapters, QLabel#reportView {{
     color: {TEXT}; font-size: 15px; background: transparent;
 }}
+QLabel#fileDrop {{
+    color: {TEXT_MUTED}; background: {CONTROL_BG};
+    border: {density.border_px}px dashed {CONTROL_BORDER};
+    border-radius: {radius}px; padding: 16px; font-size: 15px;
+}}
+QLabel#player, QLabel#compareBefore, QLabel#compareAfter {{ background: transparent; }}
+QPlainTextEdit#documentView {{ font-size: 16px; padding: 16px 18px; }}
 QLabel#result {{ background: transparent; }}
 QFrame#stage, QFrame#expertPanel, QFrame#settingsSheet {{
     background: {card_bg}; border: {density.border_px}px solid {CONTROL_BORDER};

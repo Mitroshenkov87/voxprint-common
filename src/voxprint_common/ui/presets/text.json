@@ -1,0 +1,33 @@
+{
+  "schema": "voxprint-presets/1",
+  "groups": [
+    {
+      "id": "length",
+      "label_key": "simple.preset.length",
+      "default": "chapter",
+      "options": [
+        {
+          "id": "short",
+          "label_key": "simple.preset.length.short",
+          "values": {
+            "text.length": "short"
+          }
+        },
+        {
+          "id": "chapter",
+          "label_key": "simple.preset.length.chapter",
+          "values": {
+            "text.length": "chapter"
+          }
+        },
+        {
+          "id": "long",
+          "label_key": "simple.preset.length.long",
+          "values": {
+            "text.length": "long"
+          }
+        }
+      ]
+    }
+  ]
+}

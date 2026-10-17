@@ -1,0 +1,33 @@
+{
+  "schema": "voxprint-presets/1",
+  "groups": [
+    {
+      "id": "pace",
+      "label_key": "simple.preset.pace",
+      "default": "natural",
+      "options": [
+        {
+          "id": "calm",
+          "label_key": "simple.preset.pace.calm",
+          "values": {
+            "audio.pace": "calm"
+          }
+        },
+        {
+          "id": "natural",
+          "label_key": "simple.preset.pace.natural",
+          "values": {
+            "audio.pace": "natural"
+          }
+        },
+        {
+          "id": "brisk",
+          "label_key": "simple.preset.pace.brisk",
+          "values": {
+            "audio.pace": "brisk"
+          }
+        }
+      ]
+    }
+  ]
+}

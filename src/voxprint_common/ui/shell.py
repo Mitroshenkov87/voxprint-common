@@ -50,7 +50,6 @@ from voxprint_common.ui.keymap import (
     load_overrides,
 )
 from voxprint_common.ui.palette import score_text
-from voxprint_common.ui.presets import reference_presets
 from voxprint_common.ui.settings import SettingSpec, SettingType, reference_settings
 from voxprint_common.ui.simple_image import (
     Phase,
@@ -58,6 +57,7 @@ from voxprint_common.ui.simple_image import (
     SimpleImageWidget,
 )
 from voxprint_common.ui.theme import PRIMARY, TEXT, TEXT_MUTED, TEXT_ON_ACCENT, build_shell_style
+from voxprint_common.ui.variants import settings_for, state_names, surface_for, variant_presets
 
 __all__ = [
     "ADOPTION",
@@ -128,6 +128,7 @@ def grab_shell(
     result: bool = False,
     modified: bool = False,
     prompt: str = "A quiet hill at dusk",
+    app_id: str = "canvas",
 ) -> None:
     """Paint the reference shell and save a PNG.
 
@@ -145,7 +146,8 @@ def grab_shell(
         full_layout: Show the dock. This also turns Expert mode on.
         result: Show four neutral gradients as finished pictures.
         modified: Hand-edit steps so Quality shows a changed chip and Reset.
-        prompt: Words placed in the prompt when ``result`` is true.
+        prompt: Words placed in the input when ``result`` is true.
+        app_id: Which app surface to draw. ``canvas`` is the image screen.
     """
     set_language(language)
     set_expert_mode(expert or full_layout)
@@ -156,6 +158,7 @@ def grab_shell(
         glass=glass,
         full_layout=full_layout,
         state_dir=path.parent / "state" / path.stem,
+        app=app_id,
     )
     shell.resize(1200, 900)
     shell.show()
@@ -218,14 +221,16 @@ class ReferenceShell:
         glass: bool = False,
         full_layout: bool = False,
         state_dir: Path | None = None,
+        app: str = "canvas",
     ) -> None:
         """Build the reference window.
 
         Args:
             glass: Use the translucent window background.
             full_layout: Show the dock. This also turns Expert mode on.
-            state_dir: Directory for the picture history. None uses the Canvas
-                directory under the suite State dir.
+            state_dir: Directory for the history. None uses the app directory
+                under the suite State dir.
+            app: Which simple screen to show. ``canvas`` is the image screen.
         """
         qt, gui, widgets = _qt()
         self._qt = qt
@@ -233,13 +238,17 @@ class ReferenceShell:
         self._widgets = widgets
         self.history = DockHistory(reference_layout())
         self.expert = ExpertMode()
-        history_dir = suite_state_dir() / "canvas" if state_dir is None else state_dir
-        self.settings = reference_settings()
+        self.surface = surface_for(app)
+        history_dir = suite_state_dir() / self.surface.app_id if state_dir is None else state_dir
+        self.settings = settings_for(self.surface)
+        settings_file, history_file = state_names(self.surface)
         self.image = SimpleImageLayout(
-            presets=reference_presets(self.settings),
+            presets=variant_presets(self.surface, self.settings),
             settings=self.settings,
             state_dir=history_dir,
             gate=_ReferenceReview(),
+            state_name=settings_file,
+            history_name=history_file,
         )
         self.prompt_policy = self.image.prompt_policy()
         self._picture_count = 0
@@ -399,6 +408,9 @@ class ReferenceShell:
         if command_id == "view.settings":
             if self.full_layout:
                 self.show_panel("settings")
+                return
+            self._status.setText(tr("simple.menu.settings"))
+            self.simple.set_note(tr("simple.menu.settings"))
             return
 
     def show_panel(self, panel: str) -> None:
@@ -450,7 +462,8 @@ class ReferenceShell:
             self.image.cancel()
         if not self.image.generate():
             return
-        self._finish_batch("preview")
+        extra = pictures if pictures is not None and "count" not in self.image.presets else None
+        self._finish_batch("preview", total=extra)
 
     def _complete_picture(self) -> None:
         self.prompt_policy = self.image.prompt_policy()
@@ -501,11 +514,12 @@ class ReferenceShell:
         if spin is not None:
             spin.setValue(int(self.image.seed))  # type: ignore[attr-defined]
 
-    def _finish_batch(self, prefix: str) -> None:
+    def _finish_batch(self, prefix: str, *, total: int | None = None) -> None:
         if self.image.phase is not Phase.BUSY:
             return
         self._read_seed()
-        total = self.image.batch_size()
+        count = self.image.batch_size() if total is None else total
+        total = count
         for index in range(total):
             if index > 0 and not self.image.generate():
                 break
@@ -550,6 +564,7 @@ class ReferenceShell:
             on_improve=self._improve_prompt,
             on_history=self._on_history,
             on_seed=self._apply_seed,
+            surface=self.surface,
         )
         root.addWidget(self.simple.root, 1)
         self._dock_host = widgets.QWidget()

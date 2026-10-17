@@ -1,5 +1,5 @@
 # ui.simple_image
 
-Image-app pattern for Canvas, Enlarge, and the Lucent helper. The headless description and the Qt widget stay separate. Importing the module does not import PySide6. Expert mode adds a side panel. The dock is an API, not a control on this screen.
+Shared simple screen. `SimpleLayout` and `SimpleWidget` are the headless description and the Qt view. Image, audio, video, text, and tool are configurations in `voxprint_common.ui.variants`. Importing this module does not import PySide6. Expert mode adds a side panel. The dock is an API, not a control on this screen.
 
 ::: voxprint_common.ui.simple_image

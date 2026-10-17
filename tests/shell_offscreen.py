@@ -87,6 +87,7 @@ def main() -> None:
 
     _check_expert(app)
     _check_simple(app, Qt, QTest)
+    _check_variants(app, out)
     grab_shell(out / "en-shell.png", language="en", full_layout=True)
     grab_shell(out / "ru-shell.png", language="ru", full_layout=True)
     grab_shell(out / "de-shell.png", language="de", full_layout=True, reveal_close=True)
@@ -121,6 +122,193 @@ def main() -> None:
         result=True,
         modified=True,
     )
+    grab_shell(out / "image-simple.png", language="en", result=True, app_id="canvas")
+    grab_shell(out / "image-expert.png", language="en", expert=True, result=True, app_id="canvas")
+    grab_shell(
+        out / "audio-simple.png",
+        language="en",
+        result=True,
+        app_id="audiobook-builder",
+        prompt="A quiet chapter",
+    )
+    grab_shell(
+        out / "audio-expert.png",
+        language="en",
+        expert=True,
+        result=True,
+        app_id="audiobook-builder",
+        prompt="A quiet chapter",
+    )
+    grab_shell(
+        out / "video-simple.png",
+        language="en",
+        result=True,
+        app_id="clarity",
+        prompt="A quiet clip",
+    )
+    grab_shell(
+        out / "video-expert.png",
+        language="en",
+        expert=True,
+        result=True,
+        app_id="clarity",
+        prompt="A quiet clip",
+    )
+    grab_shell(
+        out / "text-simple.png",
+        language="en",
+        result=True,
+        app_id="plotweaver",
+        prompt="A quiet hill at dusk",
+    )
+    grab_shell(
+        out / "text-expert.png",
+        language="en",
+        expert=True,
+        result=True,
+        app_id="plotweaver",
+        prompt="A quiet hill at dusk",
+    )
+    grab_shell(
+        out / "tool-simple.png",
+        language="en",
+        result=True,
+        app_id="model-forge",
+        prompt="Standard",
+    )
+    grab_shell(
+        out / "tool-expert.png",
+        language="en",
+        expert=True,
+        result=True,
+        app_id="model-forge",
+        prompt="Standard",
+    )
+    grab_shell(
+        out / "ru-image-simple.png",
+        language="ru",
+        result=True,
+        app_id="canvas",
+        prompt="Тихий холм в сумерках",
+    )
+    grab_shell(
+        out / "ru-image-expert.png",
+        language="ru",
+        expert=True,
+        result=True,
+        app_id="canvas",
+        prompt="Тихий холм в сумерках",
+    )
+    grab_shell(
+        out / "ru-audio-simple.png",
+        language="ru",
+        result=True,
+        app_id="audiobook-builder",
+        prompt="Тихая глава",
+    )
+    grab_shell(
+        out / "ru-audio-expert.png",
+        language="ru",
+        expert=True,
+        result=True,
+        app_id="audiobook-builder",
+        prompt="Тихая глава",
+    )
+
+
+def _overflow_labels() -> list[str]:
+    from voxprint_common.i18n import tr
+
+    return [
+        tr("simple.menu.open_folder"),
+        tr("simple.menu.models"),
+        tr("simple.menu.settings"),
+        tr("command.view.toggle_expert_mode"),
+    ]
+
+
+def _check_variants(app: object, out: Path) -> None:
+    from voxprint_common.i18n import set_language, tr
+    from voxprint_common.suite_settings import set_expert_mode
+    from voxprint_common.ui.shell import ReferenceShell
+    from voxprint_common.ui.simple_image import Phase
+
+    set_language("en")
+    set_expert_mode(False)
+    cases = (
+        ("canvas", "simple.generate", "promptBox", "result"),
+        ("enlarge", "simple.action.enlarge", "fileDrop", "result"),
+        ("lucent", "simple.generate", "promptBox", "result"),
+        ("audiobook-builder", "simple.action.audiobook", "voicePicker", "player"),
+        ("movie-dubber", "simple.action.dub", "fileDrop", "player"),
+        ("clarity", "simple.action.improve_video", "fileDrop", "compareSlider"),
+        ("plotweaver", "simple.action.write", "promptBox", "documentView"),
+        ("model-forge", "simple.action.prepare", "modelPicker", "reportView"),
+    )
+    prompts = {
+        "canvas": "A quiet hill at dusk",
+        "enlarge": "hill.png",
+        "lucent": "A quiet hill at dusk",
+        "audiobook-builder": "A quiet chapter",
+        "movie-dubber": "A quiet clip",
+        "clarity": "A quiet clip",
+        "plotweaver": "A quiet hill at dusk",
+        "model-forge": "Standard",
+    }
+    for app_id, action_key, source_name, result_name in cases:
+        shell = ReferenceShell(app=app_id, state_dir=out / "variant-state" / app_id)
+        shell.resize(1200, 900)
+        shell.show()
+        app.processEvents()  # type: ignore[attr-defined]
+        button = shell.find("QPushButton", "generate")
+        assert button is not None and button.text() == tr(action_key)  # type: ignore[attr-defined]
+        found = (
+            shell.find("QPlainTextEdit", source_name)
+            or shell.find("QLabel", source_name)
+            or shell.find("QComboBox", source_name)
+            or shell.find("QSlider", source_name)
+        )
+        assert found is not None, source_name
+        overflow = shell.find("QPushButton", "overflow")
+        labels = [action.text() for action in overflow.menu().actions()]  # type: ignore[attr-defined]
+        assert labels == _overflow_labels()
+        shell.show_result(prompts[app_id], pictures=1)
+        app.processEvents()  # type: ignore[attr-defined]
+        result = (
+            shell.find("QLabel", result_name)
+            or shell.find("QSlider", result_name)
+            or shell.find("QPlainTextEdit", result_name)
+        )
+        assert result is not None and result.isVisible()  # type: ignore[attr-defined]
+        shell.close()
+        app.processEvents()  # type: ignore[attr-defined]
+
+    audio = ReferenceShell(app="audiobook-builder", state_dir=out / "variant-state" / "progress")
+    audio.resize(900, 700)
+    audio.show()
+    app.processEvents()  # type: ignore[attr-defined]
+    audio.simple.set_prompt_text("A quiet chapter")
+    assert audio.image.generate() is True
+    audio.image.progress(1, 4, tr("simple.progress"), eta_seconds=45)
+    audio.simple.refresh()
+    app.processEvents()  # type: ignore[attr-defined]
+    assert audio.image.phase is Phase.BUSY
+    percent = audio.find("QLabel", "progressPercent")
+    eta = audio.find("QLabel", "progressEta")
+    cancel = audio.find("QPushButton", "cancel")
+    assert percent is not None and percent.text() == tr("simple.progress.percent", percent=25)  # type: ignore[attr-defined]
+    assert eta is not None and eta.text() == tr("simple.progress.eta_seconds", seconds=45)  # type: ignore[attr-defined]
+    assert cancel is not None and cancel.isVisible()  # type: ignore[attr-defined]
+    cancel.click()  # type: ignore[attr-defined]
+    app.processEvents()  # type: ignore[attr-defined]
+    assert audio.image.phase is Phase.EMPTY
+    audio.run("view.toggle_expert_mode")
+    app.processEvents()  # type: ignore[attr-defined]
+    rate = audio.find("QComboBox", "audio.sample_rate")
+    assert rate is not None and rate.isVisible()  # type: ignore[attr-defined]
+    assert audio.find("QFrame", "expertPanel").isVisible()  # type: ignore[attr-defined]
+    audio.close()
+    app.processEvents()  # type: ignore[attr-defined]
 
 
 def _check_simple(app: object, qt: object, test: object) -> None:
@@ -171,8 +359,13 @@ def _check_simple(app: object, qt: object, test: object) -> None:
     overflow = shell.find("QPushButton", "overflow")
     assert overflow is not None  # type: ignore[attr-defined]
     overflow_labels = [action.text() for action in overflow.menu().actions()]  # type: ignore[attr-defined]
-    assert overflow_labels == [tr("simple.menu.models")]
-    overflow.menu().actions()[0].trigger()  # type: ignore[attr-defined]
+    assert overflow_labels == _overflow_labels()
+    models = next(
+        action
+        for action in overflow.menu().actions()  # type: ignore[attr-defined]
+        if action.text() == tr("simple.menu.models")
+    )
+    models.trigger()
     app.processEvents()  # type: ignore[attr-defined]
     assert shell.find("QLabel", "simpleNote").text() == tr("simple.menu.models")  # type: ignore[attr-defined]
     improve = shell.find("QPushButton", "improvePrompt")
@@ -532,7 +725,7 @@ def _check_expert(app: object) -> None:
         overflow = local.find("QPushButton", "overflow")
         assert overflow is not None  # type: ignore[attr-defined]
         overflow_labels = [action.text() for action in overflow.menu().actions()]  # type: ignore[attr-defined]
-        assert overflow_labels == [tr("simple.menu.models")]
+        assert overflow_labels == _overflow_labels()
         toggle = local.find("QPushButton", "expertToggle")
         assert toggle is not None  # type: ignore[attr-defined]
         assert toggle.text() == tr("command.view.toggle_expert_mode")  # type: ignore[attr-defined]

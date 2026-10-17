@@ -1,0 +1,26 @@
+{
+  "schema": "voxprint-presets/1",
+  "groups": [
+    {
+      "id": "precision",
+      "label_key": "simple.preset.precision",
+      "default": "careful",
+      "options": [
+        {
+          "id": "fast",
+          "label_key": "simple.preset.precision.fast",
+          "values": {
+            "tool.precision": "fast"
+          }
+        },
+        {
+          "id": "careful",
+          "label_key": "simple.preset.precision.careful",
+          "values": {
+            "tool.precision": "careful"
+          }
+        }
+      ]
+    }
+  ]
+}
