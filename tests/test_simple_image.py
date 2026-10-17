@@ -28,16 +28,25 @@ def test_defaults_are_plain_and_data_driven() -> None:
     assert layout.full_layout is False
     assert layout.seed == 0
     assert layout.presets == {
+        "quality": "balanced",
+        "style": "photo",
         "size": "1:1",
         "output": "standard",
-        "style": "photo",
+        "detail": "medium",
         "count": "1",
     }
-    assert [row.row_id for row in layout.rows] == ["size", "output", "style", "count"]
+    assert [row.row_id for row in layout.rows] == [
+        "quality",
+        "style",
+        "size",
+        "output",
+        "detail",
+        "count",
+    ]
     assert layout.batch_size() == 1
     layout.choose("count", "4")
     assert layout.batch_size() == 4
-    size = layout.rows[0]
+    size = next(row for row in layout.rows if row.row_id == "size")
     assert [choice.value for choice in size.choices] == [
         "16:9",
         "21:9",
@@ -234,7 +243,7 @@ def test_history_keeps_fifty_items_seed_and_survives_a_bad_file(tmp_path) -> Non
     assert len(layout.history) == 50
     assert layout.history[0].item_id == "id-54"
     assert layout.history[0].seed == 42
-    assert layout.history[0].presets[2] == ("style", "sketch")
+    assert layout.history[0].presets[1] == ("style", "sketch")
     again = SimpleImageLayout(image_presets(), state_dir=tmp_path)
     assert again.selected is None
     assert again.phase is Phase.EMPTY

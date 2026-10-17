@@ -94,8 +94,11 @@ def test_settings_hide_expert_rows_and_adult_content_is_app_owned() -> None:
         "shell.guidance",
         "shell.seed",
         "shell.sampler",
+        "shell.resolution",
+        "shell.output",
         "shell.negative",
         "shell.addons",
+        "shell.lora_weight",
         "shell.vram",
         "image.adult_content",
     ]

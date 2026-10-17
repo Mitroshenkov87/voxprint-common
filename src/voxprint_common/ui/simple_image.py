@@ -16,7 +16,14 @@ from pathlib import Path
 from typing import assert_never
 
 from voxprint_common.i18n import tr
-from voxprint_common.ui.settings import Settings, SettingSpec, SettingType
+from voxprint_common.ui.presets import (
+    PresetFile,
+    PresetMatch,
+    PresetStatus,
+    SettingState,
+    reference_presets,
+)
+from voxprint_common.ui.settings import Settings, SettingSpec, SettingType, reference_settings
 
 __all__ = [
     "GalleryItem",
@@ -111,36 +118,59 @@ class GalleryItem:
 class SimpleImageLayout:
     """Headless state for the simple image screen. Qt is not imported.
 
-    Apps supply preset rows. Size, style, and how many pictures are the
-    reference rows from :func:`image_presets`. ``full_layout`` is a host API
-    for a dock. It is off unless a caller asks, and only while Expert mode
-    is on. The widget does not draw that switch.
+    Pass a preset file to share one settings state with Expert mode. The chips
+    and the expert values read and write that state. Rows alone keep a chip
+    list. ``full_layout`` is a host API for a dock. It is off unless a caller
+    asks, and only while Expert mode is on. The widget does not draw that switch.
     """
 
-    def __init__(self, rows: Iterable[PresetRow] = (), *, state_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        rows: Iterable[PresetRow] = (),
+        *,
+        presets: PresetFile | None = None,
+        settings: Settings | None = None,
+        state_dir: Path | None = None,
+    ) -> None:
         """Copy ``rows`` and select each row's default.
 
+        Pass ``presets`` to drive the chips and the expert values from one
+        state. ``rows`` alone keeps the older chip list with no shared values.
+
         Args:
-            rows: Preset rows. Ids must be unique.
-            state_dir: The app's State directory. History is read and written
-                there. None keeps the strip in memory.
+            rows: Preset rows. Ids must be unique. Ignored when ``presets`` is set.
+            presets: Validated preset file. Its groups become the rows.
+            settings: Descriptors for the shared state. Used with ``presets``.
+            state_dir: The app's State directory. History and the settings
+                state are read and written there. None keeps both in memory.
 
         Raises:
             ValueError: Two rows share an id.
         """
+        if presets is not None:
+            rows = _rows_from(presets)
         self._rows = tuple(rows)
         ids = [row.row_id for row in self._rows]
         if len(ids) != len(set(ids)):
             raise ValueError("preset row ids must be unique")
         self._state_dir = state_dir
+        self._state = (
+            SettingState(presets, settings or reference_settings(), state_dir=state_dir)
+            if presets is not None
+            else None
+        )
         self.prompt = ""
-        self.seed = 0
+        self._seed = 0
         self.phase = Phase.EMPTY
         self.step = 0
         self.total = 0
         self.stage_label = ""
         self.reason = ""
-        self.presets = {row.row_id: row.default for row in self._rows}
+        self.presets = (
+            dict(self._state.chosen)
+            if self._state is not None
+            else {row.row_id: row.default for row in self._rows}
+        )
         self.history: list[GalleryItem] = []
         self.selected: str | None = None
         self.full_layout = False
@@ -150,6 +180,36 @@ class SimpleImageLayout:
     def rows(self) -> tuple[PresetRow, ...]:
         """Return the preset rows in order."""
         return self._rows
+
+    @property
+    def state(self) -> SettingState | None:
+        """Return the shared settings state, or None when only rows were given."""
+        return self._state
+
+    @property
+    def seed(self) -> int:
+        """Return the seed stored in the shared state."""
+        if self._state is not None and self._state.has("shell.seed"):
+            value = self._state.get("shell.seed")
+            if isinstance(value, int) and not isinstance(value, bool):
+                return value
+        return self._seed
+
+    @seed.setter
+    def seed(self, value: int) -> None:
+        """Store ``value`` in the shared state.
+
+        Args:
+            value: Seed number.
+        """
+        number = int(value)
+        self._seed = number
+        if (
+            self._state is not None
+            and self._state.has("shell.seed")
+            and self._state.get("shell.seed") != number
+        ):
+            self._state.set_value("shell.seed", number)
 
     def set_prompt(self, text: str) -> None:
         """Replace the prompt text.
@@ -169,6 +229,10 @@ class SimpleImageLayout:
         Raises:
             ValueError: The row or the value is unknown.
         """
+        if self._state is not None:
+            self._state.choose(row_id, value)
+            self.presets = dict(self._state.chosen)
+            return
         row = self._row(row_id)
         choice = None if row is None else self._choice(row, value)
         if choice is None:
@@ -176,6 +240,62 @@ class SimpleImageLayout:
         if not choice.available:
             raise ValueError(f"preset {row_id}={value} is unavailable")
         self.presets[row_id] = value
+
+    def get(self, key: str) -> object:
+        """Return a live setting value.
+
+        Args:
+            key: Setting id.
+
+        Raises:
+            ValueError: This layout has no shared state.
+            KeyError: The key is unknown.
+        """
+        if self._state is None:
+            raise ValueError("this layout has no shared settings state")
+        return self._state.get(key)
+
+    def set_value(self, key: str, value: object) -> None:
+        """Hand-edit a live setting value.
+
+        Args:
+            key: Setting id.
+            value: The new value.
+
+        Raises:
+            ValueError: This layout has no shared state, or the value is invalid.
+        """
+        if self._state is None:
+            raise ValueError("this layout has no shared settings state")
+        self._state.set_value(key, value)
+        self.presets = dict(self._state.chosen)
+
+    def reset_group(self, group_id: str) -> None:
+        """Restore one preset group's values.
+
+        Args:
+            group_id: Preset group id.
+        """
+        if self._state is None:
+            raise ValueError("this layout has no shared settings state")
+        self._state.reset_group(group_id)
+        self.presets = dict(self._state.chosen)
+
+    def preset_status(self, row_id: str) -> PresetStatus | None:
+        """Return the chip status for ``row_id``.
+
+        Args:
+            row_id: Preset group id.
+        """
+        if self._state is None or self._state.presets.group(row_id) is None:
+            return None
+        return self._state.status(row_id)
+
+    def snapshot(self) -> dict[str, object]:
+        """Return the shared values, or the chip selection when there is no state."""
+        if self._state is None:
+            return {"presets": dict(self.presets), "seed": self.seed}
+        return self._state.snapshot()
 
     def generate(self) -> bool:
         """Start a picture when the prompt has words and nothing is running.
@@ -314,12 +434,18 @@ class SimpleImageLayout:
         if item is None:
             return None
         self.prompt = item.prompt
-        self.seed = item.seed
         for row_id, value in item.presets:
             row = self._row(row_id)
             choice = None if row is None else self._choice(row, value)
-            if choice is not None and choice.available:
+            if choice is None or not choice.available:
+                continue
+            if self._state is not None:
+                self._state.choose(row_id, value)
+            else:
                 self.presets[row_id] = value
+        if self._state is not None:
+            self.presets = dict(self._state.chosen)
+        self.seed = item.seed
         return item.prompt
 
     def delete(self, item_id: str) -> GalleryItem | None:
@@ -364,6 +490,10 @@ class SimpleImageLayout:
         The ``count`` preset is the source. A missing or non-numeric value
         means one picture.
         """
+        if self._state is not None and self._state.has("shell.count"):
+            stored = self._state.get("shell.count")
+            if isinstance(stored, int) and not isinstance(stored, bool) and stored >= 1:
+                return stored
         raw = self.presets.get("count", "1")
         if raw.isdigit() and int(raw) >= 1:
             return int(raw)
@@ -508,75 +638,36 @@ def _choice_groups(
 
 
 def image_presets(*, enlarge_installed: bool = False) -> tuple[PresetRow, ...]:
-    """Return Canvas's size, output, style, and picture-count rows.
+    """Return the reference preset rows from the Canvas preset file.
 
-    The style value is only an id. The app owns any words added to the prompt.
-    ``enlarge_installed`` marks 4K available. When it is false, 4K stays on the
-    row, greyed out, with a reason and an install action.
+    The rows are Quality, Style, Size, Output size, Detail, and Number of
+    pictures. Style writes a negative template into the shared state and does
+    not change the prompt. ``enlarge_installed`` marks 4K available. When it
+    is false, 4K stays on the row, greyed out, with a reason and an install action.
 
     Args:
         enlarge_installed: True when Enlarge can make a 4K picture.
     """
-    four_k = (
-        PresetChoice("4k", "simple.output.4k")
-        if enlarge_installed
-        else PresetChoice(
-            "4k",
-            "simple.output.4k",
-            available=False,
-            reason_key="simple.output.4k.reason",
-            action_label_key="simple.output.install",
-            action_id="install.enlarge",
+    return _rows_from(reference_presets(reference_settings(), enlarge_installed=enlarge_installed))
+
+
+def _rows_from(document: PresetFile) -> tuple[PresetRow, ...]:
+    rows: list[PresetRow] = []
+    for group in document.groups:
+        choices = tuple(
+            PresetChoice(
+                option.option_id,
+                option.label_key,
+                option.group_key,
+                option.available,
+                option.reason_key,
+                option.action_label_key,
+                option.action_id,
+            )
+            for option in group.options
         )
-    )
-    return (
-        PresetRow(
-            "size",
-            "simple.size",
-            (
-                PresetChoice("16:9", "simple.size.16-9", "simple.size.landscape"),
-                PresetChoice("21:9", "simple.size.21-9", "simple.size.landscape"),
-                PresetChoice("3:2", "simple.size.3-2", "simple.size.landscape"),
-                PresetChoice("4:3", "simple.size.4-3", "simple.size.landscape"),
-                PresetChoice("1:1", "simple.size.1-1", "simple.size.square"),
-                PresetChoice("9:16", "simple.size.9-16", "simple.size.portrait"),
-                PresetChoice("2:3", "simple.size.2-3", "simple.size.portrait"),
-                PresetChoice("3:4", "simple.size.3-4", "simple.size.portrait"),
-            ),
-            "1:1",
-        ),
-        PresetRow(
-            "output",
-            "simple.output",
-            (PresetChoice("standard", "simple.output.standard"), four_k),
-            "standard",
-        ),
-        PresetRow(
-            "style",
-            "simple.style",
-            (
-                PresetChoice("photo", "simple.style.photo"),
-                PresetChoice("cinematic", "simple.style.cinematic"),
-                PresetChoice("portrait", "simple.style.portrait"),
-                PresetChoice("illustration", "simple.style.illustration"),
-                PresetChoice("anime", "simple.style.anime"),
-                PresetChoice("3d", "simple.style.3d"),
-                PresetChoice("painting", "simple.style.painting"),
-                PresetChoice("sketch", "simple.style.sketch"),
-            ),
-            "photo",
-        ),
-        PresetRow(
-            "count",
-            "simple.count",
-            (
-                PresetChoice("1", "simple.count.1"),
-                PresetChoice("2", "simple.count.2"),
-                PresetChoice("4", "simple.count.4"),
-            ),
-            "1",
-        ),
-    )
+        rows.append(PresetRow(group.group_id, group.label_key, choices, group.default))
+    return tuple(rows)
 
 
 class SimpleImageWidget:
@@ -632,6 +723,10 @@ class SimpleImageWidget:
         self._on_improve = on_improve
         self._on_history = on_history
         self._on_seed = on_seed
+        self._applying = False
+        self._resets: dict[str, object] = {}
+        self._customs: dict[str, object] = {}
+        self._chip_groups: dict[str, object] = {}
         self._previous_prompt: str | None = None
         self._handling_enter = False
         self._source: object | None = None
@@ -662,7 +757,13 @@ class SimpleImageWidget:
         _clear(self._expert_form)
         if enabled:
             specs = tuple(spec for spec in self._settings.visible(expert=True) if spec.expert)
-            _fill_form(self._widgets, self._expert_form, specs)
+            _fill_form(
+                self._widgets,
+                self._expert_form,
+                specs,
+                values=_live_values(self._layout, specs),
+                on_change=self._on_expert_edit,
+            )
             self._expert_form.addStretch(1)  # type: ignore[attr-defined]
 
     def set_note(self, text: str) -> None:
@@ -692,6 +793,7 @@ class SimpleImageWidget:
         if prompt:
             self._prompt.setPlainText(self._layout.prompt)  # type: ignore[attr-defined]
         self._sync_presets()
+        self._paint_expert()
         self._fill_history()
         busy = self._layout.phase is Phase.BUSY
         self._generate_button.setEnabled(not busy)  # type: ignore[attr-defined]
@@ -962,6 +1064,7 @@ class SimpleImageWidget:
         for row in self._layout.rows:
             group = widgets.QButtonGroup(self.root)
             group.setExclusive(True)
+            self._chip_groups[row.row_id] = group
             lines = _choice_groups(row.choices)
             for index, (group_key, choices) in enumerate(lines):
                 line = widgets.QHBoxLayout()
@@ -1009,19 +1112,58 @@ class SimpleImageWidget:
                         lambda _checked=False, command=choice.action_id: self._command(command)
                     )
                     line.addWidget(action)
+                if index == 0 and self._layout.state is not None:
+                    custom = widgets.QPushButton(tr("simple.preset.custom"))
+                    custom.setObjectName(f"chip-{row.row_id}-custom")
+                    custom.setProperty("chip", "true")
+                    custom.setCheckable(True)
+                    custom.setAutoDefault(False)
+                    custom.hide()
+                    custom.clicked.connect(
+                        lambda _checked=False, row_id=row.row_id: self._sync_presets()
+                    )
+                    self._customs[row.row_id] = custom
+                    line.addWidget(custom)
+                    reset = widgets.QPushButton(tr("simple.preset.reset", name=""))
+                    reset.setObjectName(f"reset-{row.row_id}")
+                    reset.setAutoDefault(False)
+                    reset.hide()
+                    reset.clicked.connect(
+                        lambda _checked=False, row_id=row.row_id: self._reset_group(row_id)
+                    )
+                    self._resets[row.row_id] = reset
+                    line.addWidget(reset)
                 line.addStretch(1)
                 self._preset_rows.addLayout(line)
 
     def _sync_presets(self) -> None:
         for row in self._layout.rows:
+            status = self._layout.preset_status(row.row_id)
             selected = self._layout.presets[row.row_id]
+            kind = None if status is None else status.kind
+            group = self._chip_groups.get(row.row_id)
+            if group is not None and kind is PresetMatch.CUSTOM:
+                group.setExclusive(False)  # type: ignore[attr-defined]
             for choice in row.choices:
                 button = self.root.findChild(
                     self._widgets.QPushButton,
                     _chip_name(row.row_id, choice.value),
                 )
-                if button is not None and button.isCheckable():
-                    button.setChecked(choice.value == selected)
+                if button is None or not button.isCheckable():
+                    continue
+                button.setText(_chip_text(choice.label_key, selected, choice.value, kind))
+                button.setChecked(_chip_checked(selected, choice.value, kind))
+            if group is not None and kind is not PresetMatch.CUSTOM:
+                group.setExclusive(True)  # type: ignore[attr-defined]
+            custom = self._customs.get(row.row_id)
+            if custom is not None:
+                custom.setVisible(kind is PresetMatch.CUSTOM)  # type: ignore[attr-defined]
+                custom.setChecked(kind is PresetMatch.CUSTOM)  # type: ignore[attr-defined]
+            reset = self._resets.get(row.row_id)
+            if reset is None or status is None:
+                continue
+            reset.setVisible(kind is not PresetMatch.EXACT)  # type: ignore[attr-defined]
+            reset.setText(tr("simple.preset.reset", name=tr(status.label_key)))  # type: ignore[attr-defined]
 
     def _fill_history(self) -> None:
         widgets = self._widgets
@@ -1165,6 +1307,34 @@ class SimpleImageWidget:
     def _choose(self, row_id: str, value: str) -> None:
         self._layout.choose(row_id, value)
         self._sync_presets()
+        self._paint_expert()
+
+    def _reset_group(self, row_id: str) -> None:
+        self._layout.reset_group(row_id)
+        self._sync_presets()
+        self._paint_expert()
+
+    def _on_expert_edit(self, setting_id: str, value: object) -> None:
+        if self._applying or self._layout.state is None:
+            return
+        self._layout.set_value(setting_id, value)
+        self._sync_presets()
+
+    def _paint_expert(self) -> None:
+        if self._layout.state is None or not self._expert_panel.isVisible():  # type: ignore[attr-defined]
+            return
+        specs = tuple(spec for spec in self._settings.visible(expert=True) if spec.expert)
+        self._applying = True
+        try:
+            for spec in specs:
+                control = self.root.findChild(self._widgets.QWidget, spec.setting_id)
+                if control is None:
+                    continue
+                control.blockSignals(True)
+                _write_control(control, spec, self._layout.get(spec.setting_id))
+                control.blockSignals(False)
+        finally:
+            self._applying = False
 
     def _select(self, item_id: str) -> None:
         if self._layout.select(item_id) is None:
@@ -1284,7 +1454,14 @@ class SimpleImageWidget:
             self._on_command(command_id)
 
 
-def _fill_form(widgets: object, form: object, specs: tuple[SettingSpec, ...]) -> None:
+def _fill_form(
+    widgets: object,
+    form: object,
+    specs: tuple[SettingSpec, ...],
+    *,
+    values: dict[str, object] | None = None,
+    on_change: Callable[[str, object], None] | None = None,
+) -> None:
     group = ""
     for spec in specs:
         if spec.group != group:
@@ -1292,7 +1469,10 @@ def _fill_form(widgets: object, form: object, specs: tuple[SettingSpec, ...]) ->
             heading = widgets.QLabel(tr(f"setting.group.{group}"))  # type: ignore[attr-defined]
             heading.setObjectName("settingGroup")
             form.addWidget(heading)  # type: ignore[attr-defined]
-        control = _control(widgets, spec)
+        current = spec.default if values is None else values.get(spec.setting_id, spec.default)
+        control = _control(widgets, spec, current)
+        if on_change is not None:
+            _watch(control, spec, on_change)
         if spec.type is not SettingType.BOOL:
             label = widgets.QLabel(tr(spec.label_key))  # type: ignore[attr-defined]
             label.setObjectName("panel")
@@ -1300,12 +1480,12 @@ def _fill_form(widgets: object, form: object, specs: tuple[SettingSpec, ...]) ->
         form.addWidget(control)  # type: ignore[attr-defined]
 
 
-def _control(widgets: object, spec: SettingSpec) -> object:
+def _control(widgets: object, spec: SettingSpec, value: object) -> object:
     kind = spec.type
     if kind is SettingType.BOOL:
         box = widgets.QCheckBox(tr(spec.label_key))  # type: ignore[attr-defined]
         box.setObjectName(spec.setting_id)
-        box.setChecked(spec.default is True)
+        box.setChecked(value is True)
         control = box
     elif kind is SettingType.ENUM:
         combo = widgets.QComboBox()  # type: ignore[attr-defined]
@@ -1313,7 +1493,7 @@ def _control(widgets: object, spec: SettingSpec) -> object:
         selected = 0
         for index, choice in enumerate(spec.choices):
             combo.addItem(tr(choice.label_key), choice.value)
-            if choice.value == spec.default:
+            if choice.value == value:
                 selected = index
         combo.setCurrentIndex(selected)
         control = combo
@@ -1321,7 +1501,7 @@ def _control(widgets: object, spec: SettingSpec) -> object:
         spin = widgets.QSpinBox()  # type: ignore[attr-defined]
         spin.setObjectName(spec.setting_id)
         spin.setRange(int(spec.minimum or 0), int(spec.maximum or 0))
-        spin.setValue(int(spec.default) if isinstance(spec.default, int) else 0)
+        spin.setValue(int(value) if isinstance(value, int) and not isinstance(value, bool) else 0)
         control = spin
     elif kind is SettingType.FLOAT:
         spin = widgets.QDoubleSpinBox()  # type: ignore[attr-defined]
@@ -1329,17 +1509,20 @@ def _control(widgets: object, spec: SettingSpec) -> object:
         spin.setDecimals(1)
         spin.setRange(float(spec.minimum or 0), float(spec.maximum or 0))
         spin.setSingleStep(0.5)
-        spin.setValue(float(spec.default) if isinstance(spec.default, int | float) else 0.0)
+        number = (
+            float(value) if isinstance(value, int | float) and not isinstance(value, bool) else 0.0
+        )
+        spin.setValue(number)
         control = spin
     elif kind is SettingType.PATH:
         edit = widgets.QLineEdit()  # type: ignore[attr-defined]
         edit.setObjectName(spec.setting_id)
-        edit.setText(spec.default if isinstance(spec.default, str) else "")
+        edit.setText(value if isinstance(value, str) else "")
         control = edit
     elif kind is SettingType.TEXT:
         edit = widgets.QPlainTextEdit()  # type: ignore[attr-defined]
         edit.setObjectName(spec.setting_id)
-        edit.setPlainText(spec.default if isinstance(spec.default, str) else "")
+        edit.setPlainText(value if isinstance(value, str) else "")
         edit.setFixedHeight(64)
         control = edit
     else:
@@ -1347,6 +1530,90 @@ def _control(widgets: object, spec: SettingSpec) -> object:
     if spec.expert:
         control.setToolTip(tr(spec.help_key))  # type: ignore[attr-defined]
     return control
+
+
+def _watch(control: object, spec: SettingSpec, on_change: Callable[[str, object], None]) -> None:
+    kind = spec.type
+    setting_id = spec.setting_id
+
+    def emit(*_args: object) -> None:
+        on_change(setting_id, _read_control(control, spec))
+
+    if kind is SettingType.BOOL:
+        control.toggled.connect(emit)  # type: ignore[attr-defined]
+    elif kind is SettingType.ENUM:
+        control.currentIndexChanged.connect(emit)  # type: ignore[attr-defined]
+    elif kind is SettingType.INT or kind is SettingType.FLOAT:
+        control.valueChanged.connect(emit)  # type: ignore[attr-defined]
+    elif kind is SettingType.PATH or kind is SettingType.TEXT:
+        control.textChanged.connect(emit)  # type: ignore[attr-defined]
+    else:
+        assert_never(kind)
+
+
+def _read_control(control: object, spec: SettingSpec) -> object:
+    kind = spec.type
+    if kind is SettingType.BOOL:
+        return control.isChecked()  # type: ignore[attr-defined]
+    if kind is SettingType.ENUM:
+        return control.currentData()  # type: ignore[attr-defined]
+    if kind is SettingType.INT or kind is SettingType.FLOAT:
+        return control.value()  # type: ignore[attr-defined]
+    if kind is SettingType.PATH:
+        return control.text()  # type: ignore[attr-defined]
+    if kind is SettingType.TEXT:
+        return control.toPlainText()  # type: ignore[attr-defined]
+    assert_never(kind)
+
+
+def _write_control(control: object, spec: SettingSpec, value: object) -> None:
+    kind = spec.type
+    if kind is SettingType.BOOL:
+        control.setChecked(value is True)  # type: ignore[attr-defined]
+        return
+    if kind is SettingType.ENUM:
+        index = control.findData(value)  # type: ignore[attr-defined]
+        if index >= 0:
+            control.setCurrentIndex(index)  # type: ignore[attr-defined]
+        return
+    if kind is SettingType.INT:
+        if isinstance(value, int) and not isinstance(value, bool):
+            control.setValue(value)  # type: ignore[attr-defined]
+        return
+    if kind is SettingType.FLOAT:
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            control.setValue(float(value))  # type: ignore[attr-defined]
+        return
+    if kind is SettingType.PATH:
+        control.setText(value if isinstance(value, str) else "")  # type: ignore[attr-defined]
+        return
+    if kind is SettingType.TEXT:
+        control.setPlainText(value if isinstance(value, str) else "")  # type: ignore[attr-defined]
+        return
+    assert_never(kind)
+
+
+def _live_values(layout: SimpleImageLayout, specs: tuple[SettingSpec, ...]) -> dict[str, object]:
+    if layout.state is None:
+        return {spec.setting_id: spec.default for spec in specs}
+    return {spec.setting_id: layout.get(spec.setting_id) for spec in specs}
+
+
+def _chip_text(label_key: str, selected: str, value: str, kind: PresetMatch | None) -> str:
+    label = tr(label_key)
+    if kind is None or kind is PresetMatch.EXACT or kind is PresetMatch.CUSTOM:
+        return label
+    if kind is PresetMatch.MODIFIED:
+        if value == selected:
+            return tr("simple.preset.changed", name=label)
+        return label
+    assert_never(kind)
+
+
+def _chip_checked(selected: str, value: str, kind: PresetMatch | None) -> bool:
+    if kind is PresetMatch.CUSTOM:
+        return False
+    return value == selected
 
 
 def _clear(layout: object) -> None:

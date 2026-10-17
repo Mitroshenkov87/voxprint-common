@@ -50,12 +50,12 @@ from voxprint_common.ui.keymap import (
     load_overrides,
 )
 from voxprint_common.ui.palette import score_text
+from voxprint_common.ui.presets import reference_presets
 from voxprint_common.ui.settings import SettingSpec, SettingType, reference_settings
 from voxprint_common.ui.simple_image import (
     Phase,
     SimpleImageLayout,
     SimpleImageWidget,
-    image_presets,
 )
 from voxprint_common.ui.theme import PRIMARY, TEXT, TEXT_MUTED, TEXT_ON_ACCENT, build_shell_style
 
@@ -126,6 +126,7 @@ def grab_shell(
     expert: bool = False,
     full_layout: bool = False,
     result: bool = False,
+    modified: bool = False,
     prompt: str = "A quiet hill at dusk",
 ) -> None:
     """Paint the reference shell and save a PNG.
@@ -143,6 +144,7 @@ def grab_shell(
         expert: Turn Expert mode on before the grab.
         full_layout: Show the dock. This also turns Expert mode on.
         result: Show four neutral gradients as finished pictures.
+        modified: Hand-edit steps so Quality shows a changed chip and Reset.
         prompt: Words placed in the prompt when ``result`` is true.
     """
     set_language(language)
@@ -165,6 +167,9 @@ def grab_shell(
             shell.run("view.settings")
     if result and not shell.full_layout:
         shell.show_result(prompt, pictures=4)
+    if modified and not shell.full_layout:
+        shell.image.set_value("shell.steps", 24)
+        shell.simple.refresh()
     app.processEvents()
     if show_palette:
         shell.open_palette()
@@ -208,7 +213,12 @@ class ReferenceShell:
         self.history = DockHistory(reference_layout())
         self.expert = ExpertMode()
         history_dir = suite_state_dir() / "canvas" if state_dir is None else state_dir
-        self.image = SimpleImageLayout(image_presets(), state_dir=history_dir)
+        self.settings = reference_settings()
+        self.image = SimpleImageLayout(
+            presets=reference_presets(self.settings),
+            settings=self.settings,
+            state_dir=history_dir,
+        )
         self._picture_count = 0
         self._stop_expert = lambda: None
         self.registry = Registry(reference_commands())
@@ -508,7 +518,7 @@ class ReferenceShell:
         root.setSpacing(0)
         self.simple = SimpleImageWidget(
             self.image,
-            reference_settings(),
+            self.settings,
             on_generate=self._complete_picture,
             on_command=self.run,
             on_improve=self._improve_prompt,

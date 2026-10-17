@@ -181,6 +181,37 @@ def test_unknown_prefix_and_missing_locale_fail(tmp_path: Path) -> None:
     assert any("locale file missing" in error for error in missing.errors)
 
 
+def test_preset_json_keys_count_as_used(tmp_path: Path) -> None:
+    package = tmp_path / "pkg"
+    package.mkdir()
+    (package / "ui.py").write_text("def build():\n    return tr('menu.open')\n", encoding="utf-8")
+    (package / "presets.json").write_text(
+        json.dumps(
+            {
+                "groups": [
+                    {
+                        "label_key": "simple.quality",
+                        "options": [{"label_key": "simple.quality.fast", "group_key": ""}],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    payloads = {
+        code: {
+            "menu.open": "Open",
+            "simple.quality": "Quality",
+            "simple.quality.fast": "Fast",
+            "menu.old": "Old",
+        }
+        for code in LANGS
+    }
+    result = check_tree(package, _catalogs(tmp_path / "locales", payloads), LANGS)
+    assert result.errors == ()
+    assert result.warnings == ("unused key 'menu.old'",)
+
+
 def test_package_window_and_splash_pass() -> None:
     result = check_tree(_ROOT, _LOCALES, ("en", "ru", "de", "uk", "lv"))
     assert result.errors == ()

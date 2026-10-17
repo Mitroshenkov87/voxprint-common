@@ -314,7 +314,7 @@ Apps open in simple mode. `state/suite.json` key `ui.expert_mode` is false until
 
 `view.toggle_expert_mode` has no default chord. Put it in the View menu and the command palette. A keymap `when` of `expert` runs only while the mode is on.
 
-Image apps (Canvas, Enlarge, and the Lucent helper) open on `SimpleImageLayout` (`voxprint_common.ui.simple_image`). Pass preset rows, or use `image_presets` for Canvas's size, output, style, and count. Expert mode adds a side panel and does not move the rest of that screen. The dock remains an API (`ReferenceShell(full_layout=True)`). The image screen has no control that opens it. History is the last 50 items in the app's State directory.
+Image apps (Canvas, Enlarge, and the Lucent helper) open on `SimpleImageLayout` (`voxprint_common.ui.simple_image`). Pass a preset file (`voxprint-presets/1`) so the chips and the expert panel share one settings state. `reference_presets` loads the Canvas example: Quality, Style, Size, Output size, Detail, and Number of pictures. Groups merge in file order. A later group owns a shared key. The app's State directory keeps `image-settings.json` (values, the chosen preset, and overrides) and `image-history.json` (the last 50 pictures). Expert mode adds a side panel and does not move the rest of that screen. The dock remains an API (`ReferenceShell(full_layout=True)`). The image screen has no control that opens it.
 
 A minors-safety gate stays inside the app. The shared UI has no setting, hook, or function that turns that gate off. Adult content is an ordinary descriptor the app supplies. The reference shell shows `image.adult_content` in the expert panel, default off. This library does not read that value and it does not classify pictures.
 

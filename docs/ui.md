@@ -36,6 +36,7 @@ Canvas adopts this first. Then Enlarge, Clarity, Audiobook Builder, Movie Dubber
 - [ ] Put tooltips on expert items only.
 - [ ] Keep a minors-safety gate in the app. Do not add a shared control that turns that gate off. Adult content, when the app wants it, is one ordinary expert descriptor.
 - [ ] Image apps (Canvas, Enlarge, and the Lucent helper) open on the image-app pattern in `SimpleImageLayout`.
+- [ ] Drive the chips and the expert panel from one settings state. A preset file writes the values. Keep the chosen preset and any overrides in the app's State directory.
 - [ ] Keep Size, Style, Number of pictures, More like this, Save, Open folder, and Use prompt again on that screen.
 - [ ] Expert mode only adds the side panel. Leave the rest of the screen where it is. The dock stays an API, with no switch on the image screen.
 
@@ -45,6 +46,7 @@ Canvas adopts this first. Then Enlarge, Clarity, Audiobook Builder, Movie Dubber
 from voxprint_common.ui.dock import Layout, dump_layout, load_layout, visible_layout
 from voxprint_common.ui.commands import Registry, reference_commands
 from voxprint_common.ui.expert import ExpertMode, active_contexts
+from voxprint_common.ui.presets import reference_presets
 from voxprint_common.ui.settings import reference_settings
 from voxprint_common.ui.simple_image import SimpleImageLayout, image_presets
 from voxprint_common.ui.keymap import WHEN_EXPERT, KeyMap, load_overrides, save_overrides
@@ -88,22 +90,43 @@ Canvas, Enlarge, and the Lucent helper open on one screen: `SimpleImageLayout`. 
 
 The screen is a prompt and a yellow Generate button. Enter starts a picture. Shift+Enter adds a line. Improve prompt, when the app supplies a callback, replaces the words in that same box, and Revert puts the previous words back. There is no second prompt field.
 
-The chips are data the app supplies. `image_presets` is Canvas's list. Size is grouped, with no orientation switch: Landscape is 16:9, 21:9, 3:2, and 4:3; Square is 1:1; Portrait is 9:16, 2:3, and 3:4. Output size is Standard or 4K. A choice can stay on the row and be unavailable, with a plain reason and an action button. When Enlarge is missing, 4K is grey and the button says Install Enlarge. Style is Photo, Cinematic, Portrait, Illustration, Anime, 3D render, Painting, and Sketch. The layout reports the chosen id. The app owns any words added to the prompt and any negative prompt. Number of pictures stays 1, 2, or 4. On the picture are More like this, Save, Open folder, and Use prompt again.
+Simple mode and Expert mode are two views of one settings state per app. The state file is `image-settings.json` in the app's State directory. It stores the live values, the chosen preset in each group, and the keys a hand edit overrode.
+
+A preset file is schema `voxprint-presets/1`. The reference file is `src/voxprint_common/ui/presets/canvas.json`. Groups stay in file order: Quality (Fast, Balanced, Best), Style, Size, Output size, Detail (Light, Medium, Strong), and Number of pictures. Each option writes concrete values. Quality writes steps, guidance, and sampler. Style writes a negative template and leaves the prompt alone. Size writes a resolution. Output size writes Standard or 4K. Detail writes add-on strength. Number of pictures writes the count.
+
+Merge order, applied when the state is first built:
+
+1. Start from each setting's default.
+2. Walk the groups in file order.
+3. Write the chosen option's keys in the order they appear on that option.
+4. When two groups write the same key, the later group in the file wins and owns that key.
+5. Apply stored overrides last. An override stays until that group is reset or the live values match a preset exactly.
+
+Choosing a chip writes that option's keys immediately and leaves every other group's keys alone. The expert panel shows the live values at once. A hand edit marks the group that owns the key. The chip reads "Balanced + changes" while the stored preset is still close: the number of owned keys that differ is greater than zero and no more than half of those keys, rounded down. Reset writes that option's values and leaves keys the option does not write as they are. When the stored preset is not close, and no available option matches exactly, the chip reads "Custom". The stored choice stays, so Reset can still restore it. Turning Expert mode on or off leaves the values, the chosen presets, and the overrides where they are.
+
+Size is grouped, with no orientation switch: Landscape is 16:9, 21:9, 3:2, and 4:3; Square is 1:1; Portrait is 9:16, 2:3, and 3:4. A choice can stay on the row and be unavailable, with a plain reason and an action button. When Enlarge is missing, 4K is grey and the button says Install Enlarge. Style is Photo, Cinematic, Portrait, Illustration, Anime, 3D render, Painting, and Sketch. The layout reports the chosen id. The app owns any words added to the prompt and any negative prompt. On the picture are More like this, Save, Open folder, and Use prompt again.
 
 `progress(step, total, stage_label)` updates the bar while a picture is running. `stage_label` is already translated. `cancel()` returns the screen to a clean idle state. `block(reason)` and `unavailable(reason)` show a localized plain sentence in the picture area.
 
 The history strip keeps the last 50 pictures in the app's State directory (`image-history.json`). The menu offers Open, Show in folder, Copy, Use prompt again (the words and the seed), Use as input picture, and Delete. Delete asks in that same menu before it removes the picture. The overflow menu has Manage models, which calls the app. Canvas runs `voxprint-mdl --gui --app canvas`. The reference shell records that choice and does not start the program.
 
-Expert mode adds a side panel to the right of the picture and does not move or restyle the rest. The panel holds the descriptors the app supplied. The reference list is Steps, Guidance (CFG), Seed, Sampler, Negative prompt, Add-ons, VRAM limit, and Adult content. A path field is expert because Open folder is the everyday action.
+Expert mode adds a side panel to the right of the picture and does not move or restyle the rest. The panel holds the live values. The reference list is Steps, Guidance (CFG), Seed, Sampler, Picture size, Output size, Negative prompt, Add-ons, Add-on strength, VRAM limit, and Adult content. A path field is expert because Open folder is the everyday action.
 
 The dock (`Layout`, and `ReferenceShell(full_layout=True)`) stays available as an API for tools that arrange panels. The image screen has no control that opens it.
 
 ```python
 from pathlib import Path
 
-from voxprint_common.ui.simple_image import SimpleImageLayout, image_presets
+from voxprint_common.ui.presets import reference_presets
+from voxprint_common.ui.settings import reference_settings
+from voxprint_common.ui.simple_image import SimpleImageLayout
 
-layout = SimpleImageLayout(image_presets(), state_dir=Path("state") / "canvas")
+settings = reference_settings()
+layout = SimpleImageLayout(
+    presets=reference_presets(settings),
+    settings=settings,
+    state_dir=Path("state") / "canvas",
+)
 ```
 
 ## Reference window
@@ -133,3 +156,7 @@ Simple mode is the picture screen. Expert mode keeps that screen and adds the si
 ![Russian simple mode, with a picture](img/shell/ru-simple-result.png)
 
 ![English Expert mode](img/shell/en-expert.png)
+
+The result picture and the Expert picture share one state. The modified picture is that state after Steps is edited: Quality reads "Balanced + changes", and Reset to Balanced is on that row.
+
+![English Expert mode, with a change](img/shell/en-expert-modified.png)

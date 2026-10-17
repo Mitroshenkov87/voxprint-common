@@ -148,10 +148,11 @@ class Settings:
 def reference_settings() -> Settings:
     """Return the settings the reference shell shows.
 
-    How many pictures is a preset chip on the image screen, not a setting.
-    The expert side panel adds steps, guidance, seed, sampler, a negative
-    prompt, add-ons, a memory limit, and adult content. The app owns what
-    those values do. A path field is expert: Open folder is the everyday action.
+    How many pictures stays a preset chip. The expert side panel shows the
+    live values: steps, guidance, seed, sampler, resolution, output size, a
+    negative prompt, add-ons, add-on strength, a memory limit, and adult
+    content. The app owns what those values do. A path field is expert:
+    Open folder is the everyday action.
     """
     return Settings(
         (
@@ -203,6 +204,28 @@ def reference_settings() -> Settings:
                 ),
             ),
             SettingSpec(
+                "shell.resolution",
+                "setting.shell.resolution",
+                "setting.shell.resolution.help",
+                SettingType.TEXT,
+                "1024x1024",
+                expert=True,
+                group="tuning",
+            ),
+            SettingSpec(
+                "shell.output",
+                "setting.shell.output",
+                "setting.shell.output.help",
+                SettingType.ENUM,
+                "standard",
+                expert=True,
+                group="tuning",
+                choices=(
+                    Choice("standard", "simple.output.standard"),
+                    Choice("4k", "simple.output.4k"),
+                ),
+            ),
+            SettingSpec(
                 "shell.negative",
                 "setting.shell.negative",
                 "setting.shell.negative.help",
@@ -219,6 +242,17 @@ def reference_settings() -> Settings:
                 "",
                 expert=True,
                 group="tuning",
+            ),
+            SettingSpec(
+                "shell.lora_weight",
+                "setting.shell.lora_weight",
+                "setting.shell.lora_weight.help",
+                SettingType.FLOAT,
+                0.7,
+                expert=True,
+                group="tuning",
+                minimum=0.0,
+                maximum=2.0,
             ),
             SettingSpec(
                 "shell.vram",

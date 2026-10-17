@@ -114,6 +114,13 @@ def main() -> None:
         prompt="Тихий холм в сумерках",
     )
     grab_shell(out / "en-expert.png", language="en", expert=True, result=True)
+    grab_shell(
+        out / "en-expert-modified.png",
+        language="en",
+        expert=True,
+        result=True,
+        modified=True,
+    )
 
 
 def _check_simple(app: object, qt: object, test: object) -> None:
@@ -144,6 +151,11 @@ def _check_simple(app: object, qt: object, test: object) -> None:
     generate = shell.find("QPushButton", "generate")
     assert generate is not None and generate.text() == tr("simple.generate")  # type: ignore[attr-defined]
     assert shell.find("QLabel", "emptyHint").text() == tr("simple.empty")  # type: ignore[attr-defined]
+    balanced = shell.find("QPushButton", "chip-quality-balanced")
+    assert balanced is not None and balanced.isChecked() is True  # type: ignore[attr-defined]
+    assert shell.find("QPushButton", "chip-detail-medium").isChecked() is True  # type: ignore[attr-defined]
+    hidden_reset = shell.find("QPushButton", "reset-quality")
+    assert hidden_reset is not None and hidden_reset.isVisible() is False  # type: ignore[attr-defined]
     assert shell.find("QPushButton", "chip-size-1-1").isChecked() is True  # type: ignore[attr-defined]
     assert shell.find("QPushButton", "chip-style-photo").isChecked() is True  # type: ignore[attr-defined]
     assert shell.find("QPushButton", "chip-output-standard").isChecked() is True  # type: ignore[attr-defined]
@@ -294,6 +306,13 @@ def _check_simple(app: object, qt: object, test: object) -> None:
     app.processEvents()  # type: ignore[attr-defined]
     assert len(shell.image.history) == 9
     assert shell.image.prompt == "four hills"
+    saved = shell.image.snapshot()
+    shell.run("view.toggle_expert_mode")
+    app.processEvents()  # type: ignore[attr-defined]
+    shell.run("view.toggle_expert_mode")
+    app.processEvents()  # type: ignore[attr-defined]
+    assert shell.expert.enabled() is False
+    assert shell.image.snapshot() == saved
     before = layout_json(shell.history.layout)
     steady = (
         ("QPlainTextEdit", "promptBox"),
@@ -350,6 +369,51 @@ def _check_simple(app: object, qt: object, test: object) -> None:
     assert shell.find("QCheckBox", "image.content_filter") is None
     assert shell.find("QLineEdit", "shell.lora") is None
     assert shell.find("QLineEdit", "shell.save_folder") is None
+    steps = shell.find("QSpinBox", "shell.steps")
+    guidance = shell.find("QDoubleSpinBox", "shell.guidance")
+    sampler = shell.find("QComboBox", "shell.sampler")
+    resolution = shell.find("QPlainTextEdit", "shell.resolution")
+    assert steps is not None and steps.value() == 20  # type: ignore[attr-defined]
+    assert guidance is not None and guidance.value() == 7.0  # type: ignore[attr-defined]
+    assert sampler is not None and sampler.currentData() == "euler"  # type: ignore[attr-defined]
+    assert resolution is not None and resolution.toPlainText() == "1024x1024"  # type: ignore[attr-defined]
+    negative = shell.image.get("shell.negative")
+    shell.find("QPushButton", "chip-quality-fast").click()  # type: ignore[attr-defined]
+    app.processEvents()  # type: ignore[attr-defined]
+    assert shell.image.get("shell.steps") == 12
+    assert shell.image.get("shell.guidance") == 5.0
+    assert shell.image.get("shell.sampler") == "euler"
+    assert steps.value() == 12  # type: ignore[attr-defined]
+    assert guidance.value() == 5.0  # type: ignore[attr-defined]
+    assert shell.image.get("shell.negative") == negative
+    shell.find("QPushButton", "chip-quality-balanced").click()  # type: ignore[attr-defined]
+    app.processEvents()  # type: ignore[attr-defined]
+    assert steps.value() == 20  # type: ignore[attr-defined]
+    steps.setValue(24)  # type: ignore[attr-defined]
+    app.processEvents()  # type: ignore[attr-defined]
+    changed = tr("simple.preset.changed", name=tr("simple.quality.balanced"))
+    assert balanced.text() == changed  # type: ignore[attr-defined]
+    reset = shell.find("QPushButton", "reset-quality")
+    assert reset is not None and reset.isVisible() is True  # type: ignore[attr-defined]
+    assert reset.text() == tr("simple.preset.reset", name=tr("simple.quality.balanced"))  # type: ignore[attr-defined]
+    reset.click()  # type: ignore[attr-defined]
+    app.processEvents()  # type: ignore[attr-defined]
+    assert steps.value() == 20  # type: ignore[attr-defined]
+    assert shell.image.get("shell.negative") == negative
+    assert balanced.text() == tr("simple.quality.balanced")  # type: ignore[attr-defined]
+    assert reset.isVisible() is False  # type: ignore[attr-defined]
+    steps.setValue(24)  # type: ignore[attr-defined]
+    guidance.setValue(3.0)  # type: ignore[attr-defined]
+    app.processEvents()  # type: ignore[attr-defined]
+    custom = shell.find("QPushButton", "chip-quality-custom")
+    assert custom is not None and custom.isVisible() is True and custom.isChecked() is True  # type: ignore[attr-defined]
+    assert custom.text() == tr("simple.preset.custom")  # type: ignore[attr-defined]
+    assert balanced.isChecked() is False  # type: ignore[attr-defined]
+    reset.click()  # type: ignore[attr-defined]
+    app.processEvents()  # type: ignore[attr-defined]
+    assert custom.isVisible() is False  # type: ignore[attr-defined]
+    assert balanced.isChecked() is True  # type: ignore[attr-defined]
+    assert steps.value() == 20  # type: ignore[attr-defined]
     shell.find("QSpinBox", "shell.seed").setValue(11)  # type: ignore[attr-defined]
     prompt.setPlainText("seeded hill")  # type: ignore[attr-defined]
     test.keyClick(prompt, qt.Key_Return)  # type: ignore[attr-defined]

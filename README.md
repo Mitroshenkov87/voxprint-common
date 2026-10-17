@@ -40,6 +40,7 @@ The docs site is [mitroshenkov87.github.io/voxprint-common](https://mitroshenkov
 | `voxprint_common.ui.expert` | Suite-wide Expert mode, off by default |
 | `voxprint_common.ui.simple_image` | Image-app screen for Canvas, Enlarge, and the Lucent helper |
 | `voxprint_common.ui.settings` | Setting descriptors. Adult content is an app-supplied expert setting |
+| `voxprint_common.ui.presets` | Preset files, schema `voxprint-presets/1`, writing one shared settings state |
 | `voxprint_common.ui.shell` | Reference window. PySide6 loads only when the window is built |
 | `voxprint_common.ui.splash` | 960×540 splash. PySide6 loads only when a splash is shown |
 | `voxprint_common.i18n` | JSON catalogs. English, German, Russian, Ukrainian, Latvian |

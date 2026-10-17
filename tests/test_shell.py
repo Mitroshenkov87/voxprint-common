@@ -69,6 +69,7 @@ def test_offscreen_shell_screenshots(tmp_path: Path) -> None:
     result = (tmp_path / "en-simple-result.png").read_bytes()
     russian_result = (tmp_path / "ru-simple-result.png").read_bytes()
     expert = (tmp_path / "en-expert.png").read_bytes()
+    modified = (tmp_path / "en-expert-modified.png").read_bytes()
     pictures = (
         english,
         russian,
@@ -80,6 +81,7 @@ def test_offscreen_shell_screenshots(tmp_path: Path) -> None:
         result,
         russian_result,
         expert,
+        modified,
     )
     for blob in pictures:
         assert blob.startswith(b"\x89PNG")
@@ -92,5 +94,6 @@ def test_offscreen_shell_screenshots(tmp_path: Path) -> None:
     assert empty != result
     assert result != russian_result
     assert result != expert
+    assert expert != modified
     assert empty != english
     assert "PySide6" not in sys.modules
