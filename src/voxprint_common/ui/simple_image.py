@@ -2522,6 +2522,19 @@ def _combo_usable_width(combo: object) -> int:
     return max(int(rect.width()) - 2, 0)
 
 
+def _clip_with_ellipsis(metrics: object, text: str, usable: int) -> str:
+    """Shorten ``text`` until it and an ellipsis fit in ``usable`` pixels."""
+    mark = "…"
+    mark_width = int(metrics.horizontalAdvance(mark))  # type: ignore[attr-defined]
+    if mark_width >= usable:
+        return mark
+    kept = text
+    limit = usable - mark_width
+    while kept and int(metrics.horizontalAdvance(kept)) > limit:  # type: ignore[attr-defined]
+        kept = kept[:-1]
+    return kept.rstrip() + mark
+
+
 def _note_combo_fit(combo: object) -> None:
     """Remember the elided label, and put the full value on the tooltip."""
     text = str(combo.currentText())  # type: ignore[attr-defined]
@@ -2531,9 +2544,15 @@ def _note_combo_fit(combo: object) -> None:
         return
     core, gui, _widgets = _qt()
     metrics = gui.QFontMetrics(combo.font())  # type: ignore[attr-defined]
-    fitted = str(
-        metrics.elidedText(text, core.Qt.TextElideMode.ElideRight, usable)  # type: ignore[attr-defined]
-    )
+    advance = int(metrics.horizontalAdvance(text))  # type: ignore[attr-defined]
+    if advance <= usable:
+        fitted = text
+    else:
+        fitted = str(
+            metrics.elidedText(text, core.Qt.TextElideMode.ElideRight, usable)  # type: ignore[attr-defined]
+        )
+        if not fitted.endswith("…"):
+            fitted = _clip_with_ellipsis(metrics, text, usable)
     combo.setProperty("fittedText", fitted)  # type: ignore[attr-defined]
     help_tip = combo.property("helpTip")  # type: ignore[attr-defined]
     help_text = help_tip if isinstance(help_tip, str) else ""
