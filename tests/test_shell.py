@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from voxprint_common.ui.shell import ADOPTION, reference_layout
-from voxprint_common.ui.theme import build_shell_style
+from voxprint_common.ui.theme import build_shell_style, palette_colors
 from voxprint_common.ui.tokens import SCHEMA, load
 
 
@@ -44,11 +44,22 @@ def test_headless_layout_and_adoption() -> None:
     assert tokens.density.chip_pad_px == 16
     style = build_shell_style(False)
     assert f"padding: 2px {tokens.density.chip_pad_px}px" in style
-    assert "QScrollArea#expertScroll QScrollBar:vertical" in style
+    assert "QScrollArea > QWidget > QWidget" in style
+    assert "QAbstractScrollArea QScrollBar:vertical" in style
+    assert "QScrollArea#expertScroll QScrollBar:horizontal" in style
     handle = f"QScrollBar::handle:vertical {{\n    background: {tokens.colors['CONTROL_BORDER']}"
     groove = f"QScrollBar::groove:vertical {{\n    background: {tokens.colors['CARD_PLAIN']}"
     assert handle in style
     assert groove in style
+    dark = palette_colors()
+    light = palette_colors(light=True)
+    assert dark["Base"] == tokens.colors["CARD_PLAIN"]
+    assert dark["Window"] == tokens.colors["ROOT_PLAIN"]
+    assert dark["Text"] == tokens.colors["TEXT"]
+    assert dark["AlternateBase"] == tokens.colors["CONTROL_BG"]
+    assert light["Base"] == tokens.light["Base"]
+    assert dark["Base"] != "#efefef"
+    assert light["Base"] != "#efefef"
     assert f"QPushButton:focus {{\n    border: {tokens.density.focus_ring_px}px solid" in style
     assert tokens.identity["audiobook-builder"] == "#f5d76e"
     assert tokens.identity["movie-dubber"] == "#b98cff"

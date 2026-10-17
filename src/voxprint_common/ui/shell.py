@@ -58,7 +58,14 @@ from voxprint_common.ui.simple_image import (
     SimpleImageLayout,
     SimpleImageWidget,
 )
-from voxprint_common.ui.theme import PRIMARY, TEXT, TEXT_MUTED, TEXT_ON_ACCENT, build_shell_style
+from voxprint_common.ui.theme import (
+    PRIMARY,
+    TEXT,
+    TEXT_MUTED,
+    TEXT_ON_ACCENT,
+    apply_shell_palette,
+    build_shell_style,
+)
 from voxprint_common.ui.variants import (
     WINDOW_HEIGHT,
     WINDOW_WIDTH,
@@ -362,6 +369,8 @@ class ReferenceShell:
         self.widget.setFocusPolicy(qt.StrongFocus)
         self.widget.setAttribute(qt.WA_StyledBackground, True)
         self.widget.setStyleSheet(build_shell_style(glass))
+        apply_shell_palette(widgets.QApplication.instance() or self.widget)
+        apply_shell_palette(self.widget)
         self.widget.setWindowTitle(tr("shell.window.title"))
         self._status = widgets.QLabel(tr("shell.status.ready"))
         self._status.setObjectName("status")

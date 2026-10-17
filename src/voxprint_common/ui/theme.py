@@ -13,13 +13,18 @@ map.
 The splash bar is not one of these tokens. Each app passes its own identity
 colour to :class:`voxprint_common.ui.splash.Splash`. Identity colours for the
 apps that have one are ``identity`` in ``tokens.json``.
+
+Qt fills a scroll area's viewport from ``QPalette.Base``, and a stylesheet
+background does not paint that viewport. :func:`apply_shell_palette` sets the
+application or shell palette from these tokens for the dark theme and the
+light theme, so every viewport an app creates is covered.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from voxprint_common.ui.tokens import color_map, load
+from voxprint_common.ui.tokens import PALETTE_ROLES, color_map, load
 
 __all__ = [
     "ACCENT",
@@ -57,9 +62,11 @@ __all__ = [
     "TEXT_ON_ACCENT",
     "TEXT_ON_PRIMARY",
     "TOKENS",
+    "apply_shell_palette",
     "build_shell_style",
     "build_style",
     "contrast_ratio",
+    "palette_colors",
     "tokens_path",
 ]
 
@@ -229,6 +236,89 @@ CONTRAST_PAIRS: list[tuple[str, str]] = [
     (TEXT_ON_PRIMARY, PRIMARY_HOVER),
     (PRIMARY_DISABLED_TEXT, PRIMARY_DISABLED_BG),
 ]
+
+
+def palette_colors(*, light: bool = False) -> dict[str, str]:
+    """Return ``QPalette`` role names and colours for one theme.
+
+    ``Base`` is the colour Qt uses to fill a scroll-area viewport. The dark
+    theme takes it from the suite tokens. The light theme takes every role
+    from the ``light`` block in ``tokens.json``. Neither base is Qt's
+    ``#efefef``.
+
+    Args:
+        light: True selects the light theme. False selects the dark tokens.
+
+    Returns:
+        Role name to ``#rrggbb``. ``DisabledText`` is included for the
+        disabled colour group and is not itself a palette role.
+    """
+    if light:
+        colors = dict(load().light)
+        colors["DisabledText"] = colors["PlaceholderText"]
+        return colors
+    return {
+        "Window": ROOT_PLAIN,
+        "WindowText": TEXT,
+        "Base": CARD_PLAIN,
+        "AlternateBase": CONTROL_BG,
+        "ToolTipBase": MENU_BG,
+        "ToolTipText": TEXT,
+        "Text": TEXT,
+        "Button": CONTROL_BG,
+        "ButtonText": TEXT,
+        "BrightText": TEXT,
+        "Link": ACCENT,
+        "LinkVisited": ACCENT,
+        "Highlight": MENU_SELECTION,
+        "HighlightedText": TEXT,
+        "PlaceholderText": TEXT_MUTED,
+        "Light": CONTROL_HOVER,
+        "Midlight": CONTROL_BG,
+        "Mid": CONTROL_BORDER,
+        "Dark": ROOT_PLAIN,
+        "Shadow": ROOT_PLAIN,
+        "Accent": ACCENT,
+        "DisabledText": TEXT_DISABLED,
+    }
+
+
+def apply_shell_palette(target: object, *, light: bool = False) -> None:
+    """Set ``target``'s palette from the suite tokens.
+
+    ``target`` is the ``QApplication`` or the shell window. Call this when the
+    shell applies its theme. A scroll area created afterwards, including one
+    an app creates itself, fills its viewport from this palette.
+
+    Args:
+        target: ``QApplication`` or ``QWidget``.
+        light: True selects the light theme. False selects the dark tokens.
+
+    The Qt import stays inside this function so importing the theme module
+    does not load PySide6.
+    """
+    gui = _theme_gui()
+    palette = gui.QPalette()
+    role = gui.QPalette.ColorRole
+    group = gui.QPalette.ColorGroup
+    colors = palette_colors(light=light)
+    for name in PALETTE_ROLES:
+        palette.setColor(getattr(role, name), gui.QColor(colors[name]))
+    muted = gui.QColor(colors["DisabledText"])
+    for name in ("WindowText", "Text", "ButtonText"):
+        palette.setColor(group.Disabled, getattr(role, name), muted)
+    target.setPalette(palette)  # type: ignore[attr-defined]
+
+
+def _theme_gui() -> object:
+    """Import ``PySide6.QtGui``.
+
+    The import stays inside this function so a headless caller can import the
+    theme module without the ``ui`` extra.
+    """
+    from PySide6 import QtGui
+
+    return QtGui
 
 
 def build_shell_style(glass: bool, *, more: bool = False) -> str:
@@ -425,6 +515,12 @@ QFrame#stage, QFrame#expertPanel, QFrame#settingsSheet {{
     background: {card_bg}; border: {density.border_px}px solid {CONTROL_BORDER};
     border-radius: 8px;
 }}
+QScrollArea {{
+    background: {card_bg}; border: none;
+}}
+QScrollArea > QWidget > QWidget {{
+    background: {card_bg}; color: {TEXT};
+}}
 QScrollArea#historyStrip, QScrollArea#expertScroll {{
     background: {card_bg}; border: none;
 }}
@@ -433,28 +529,52 @@ QScrollArea#expertScroll > QWidget > QWidget,
 QWidget#historyRow, QWidget#expertForm {{
     background: {card_bg}; color: {TEXT};
 }}
-QScrollArea#expertScroll QScrollBar:vertical {{
+QAbstractScrollArea QScrollBar:vertical {{
     background: {card_bg}; width: 8px; margin: 0; border: none;
 }}
-QScrollArea#expertScroll QScrollBar::groove:vertical {{
+QAbstractScrollArea QScrollBar::groove:vertical {{
     background: {card_bg}; border: none; width: 8px;
 }}
-QScrollArea#expertScroll QScrollBar::handle:vertical {{
+QAbstractScrollArea QScrollBar::handle:vertical {{
     background: {CONTROL_BORDER}; min-height: 24px; border: none; border-radius: 4px;
 }}
-QScrollArea#expertScroll QScrollBar::handle:vertical:hover {{
+QAbstractScrollArea QScrollBar::handle:vertical:hover {{
     background: {TEXT_FAINT};
 }}
-QScrollArea#expertScroll QScrollBar::add-line:vertical,
-QScrollArea#expertScroll QScrollBar::sub-line:vertical {{
+QAbstractScrollArea QScrollBar::add-line:vertical,
+QAbstractScrollArea QScrollBar::sub-line:vertical {{
     height: 0; width: 0; background: {card_bg}; border: none;
 }}
-QScrollArea#expertScroll QScrollBar::up-arrow:vertical,
-QScrollArea#expertScroll QScrollBar::down-arrow:vertical {{
+QAbstractScrollArea QScrollBar::up-arrow:vertical,
+QAbstractScrollArea QScrollBar::down-arrow:vertical {{
     width: 0; height: 0; background: {card_bg}; border: none;
 }}
-QScrollArea#expertScroll QScrollBar::add-page:vertical,
-QScrollArea#expertScroll QScrollBar::sub-page:vertical {{
+QAbstractScrollArea QScrollBar::add-page:vertical,
+QAbstractScrollArea QScrollBar::sub-page:vertical {{
+    background: {card_bg}; border: none;
+}}
+QAbstractScrollArea QScrollBar:horizontal {{
+    background: {card_bg}; height: 8px; margin: 0; border: none;
+}}
+QAbstractScrollArea QScrollBar::groove:horizontal {{
+    background: {card_bg}; border: none; height: 8px;
+}}
+QAbstractScrollArea QScrollBar::handle:horizontal {{
+    background: {CONTROL_BORDER}; min-width: 24px; border: none; border-radius: 4px;
+}}
+QAbstractScrollArea QScrollBar::handle:horizontal:hover {{
+    background: {TEXT_FAINT};
+}}
+QAbstractScrollArea QScrollBar::add-line:horizontal,
+QAbstractScrollArea QScrollBar::sub-line:horizontal {{
+    height: 0; width: 0; background: {card_bg}; border: none;
+}}
+QAbstractScrollArea QScrollBar::left-arrow:horizontal,
+QAbstractScrollArea QScrollBar::right-arrow:horizontal {{
+    width: 0; height: 0; background: {card_bg}; border: none;
+}}
+QAbstractScrollArea QScrollBar::add-page:horizontal,
+QAbstractScrollArea QScrollBar::sub-page:horizontal {{
     background: {card_bg}; border: none;
 }}
 QScrollArea#expertScroll QScrollBar:horizontal {{

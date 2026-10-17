@@ -1411,6 +1411,42 @@ def _combo_usable_width(combo: object) -> int:
     return max(rect.width() - 2, 0)
 
 
+def _check_viewports(shell: object) -> None:
+    """A scroll area the app creates uses the token palette, not Qt's grey base."""
+    from PySide6.QtGui import QColor, QPalette
+    from PySide6.QtWidgets import QApplication, QScrollArea, QWidget
+
+    from voxprint_common.ui.theme import TEXT_DISABLED, apply_shell_palette, palette_colors
+
+    role = QPalette.ColorRole
+    group = QPalette.ColorGroup
+    area = QScrollArea(shell.widget)  # type: ignore[attr-defined]
+    area.setObjectName("appScroll")
+    host = QWidget()
+    area.setWidget(host)
+    QApplication.processEvents()
+    dark = palette_colors()
+    base = area.viewport().palette().color(role.Base).name()
+    assert base == QColor(dark["Base"]).name()
+    assert base != "#efefef"
+    application = QApplication.palette()
+    assert application.color(role.Window).name() == QColor(dark["Window"]).name()
+    assert application.color(role.Text).name() == QColor(dark["Text"]).name()
+    disabled = application.color(group.Disabled, role.Text).name()
+    assert disabled == QColor(TEXT_DISABLED).name()
+    loose = QWidget()
+    apply_shell_palette(loose, light=True)
+    light_area = QScrollArea(loose)
+    light_area.setWidget(QWidget())
+    light_base = light_area.viewport().palette().color(role.Base).name()
+    assert light_base == QColor(palette_colors(light=True)["Base"]).name()
+    assert light_base != "#efefef"
+    top = QScrollArea()
+    top.setWidget(QWidget())
+    top_base = top.viewport().palette().color(role.Base).name()
+    assert top_base == QColor(dark["Base"]).name()
+
+
 def _check_chip_fit(app: object) -> None:
     """Labels stay inside chips, the expert toggle, buttons, and combos.
 
@@ -1450,6 +1486,8 @@ def _check_chip_fit(app: object) -> None:
             app.processEvents()  # type: ignore[attr-defined]
             assert shell.widget.width() == 1200, (language, app_id, shell.widget.width())
             assert shell.widget.height() == 900, (language, app_id, shell.widget.height())
+            if language == "en" and app_id == "plotweaver":
+                _check_viewports(shell)
             for button in shell.widget.findChildren(QPushButton):
                 if not button.isVisible():
                     continue

@@ -1,9 +1,11 @@
 """Versioned suite tokens.
 
 The file beside this module is the language-neutral copy of the suite
-palette: a schema number, a colour map, editor density, and the per-app
-splash colours. :mod:`voxprint_common.ui.theme` reads the same colour map
-for the wizard stylesheet. This module does not import Qt.
+palette: a schema number, a colour map, the light-theme palette roles,
+editor density, and the per-app splash colours.
+:mod:`voxprint_common.ui.theme` reads the same colour map for the wizard
+stylesheet and builds the Qt palette from these roles. This module does not
+import Qt.
 
 ``schema`` is 1. A file with another schema is refused so an older build
 does not paint with colours it does not know.
@@ -17,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 __all__ = [
+    "PALETTE_ROLES",
     "SCHEMA",
     "TOKEN_NAMES",
     "Density",
@@ -74,6 +77,29 @@ _DENSITY = (
     "chip_pad_px",
 )
 _IDENTITY = ("audiobook-builder", "movie-dubber", "enlarge", "clarity")
+PALETTE_ROLES = (
+    "Window",
+    "WindowText",
+    "Base",
+    "AlternateBase",
+    "ToolTipBase",
+    "ToolTipText",
+    "Text",
+    "Button",
+    "ButtonText",
+    "BrightText",
+    "Link",
+    "LinkVisited",
+    "Highlight",
+    "HighlightedText",
+    "PlaceholderText",
+    "Light",
+    "Midlight",
+    "Mid",
+    "Dark",
+    "Shadow",
+    "Accent",
+)
 
 
 @dataclass(frozen=True)
@@ -98,6 +124,7 @@ class TokenSet:
     colors: Mapping[str, str]
     density: Density
     identity: Mapping[str, str]
+    light: Mapping[str, str]
 
 
 def tokens_path() -> Path:
@@ -129,12 +156,14 @@ def load() -> TokenSet:
         raise ValueError("tokens.json density must be an object")
     density_values = [_positive(density_raw.get(key), key) for key in _DENSITY]
     identity = _strings(payload.get("identity"), _IDENTITY, "identity")
+    light = _strings(payload.get("light"), PALETTE_ROLES, "light")
     return TokenSet(
         schema=SCHEMA,
         name=name,
         colors=colors,
         density=Density(*density_values),
         identity=identity,
+        light=light,
     )
 
 
