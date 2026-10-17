@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+The bundled model index is the 17-row snapshot `d2325ed` (sha256 `8a98babc1133d540229273d0a51df43c2e85dca33c50c7affd435ee78ede25b9`). A remote index is used when its detached Ed25519 signature verifies and its `serial`, or `generated_at` when serial is absent, is at least the bundled pin. Otherwise the log and `voxprint-mdl --check` name the fallback. `voxprint-mdl index sign` and `index verify` write and check `index.json.sig`. Model documents may set `mirror_policy` to `race` or `strict-priority`, and a file or `file_groups` entry may set `sources`. `strict-priority` keeps the first source until it returns 404, stays unavailable after its own retries, or the hash does not match. A 404 skips that source immediately in both policies.
+
 ## 0.2.5 (Yitro) - 2026-10-17
 
 The shared simple and Expert shell for every VOXPrint app (UI codename Yitro).

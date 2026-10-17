@@ -32,11 +32,13 @@ from typing import assert_never
 from voxprint_common.download import DownloadError, huggingface_url, modelscope_url
 from voxprint_common.gpu_probe import VramTier
 from voxprint_common.hashing import HASH_RE
+from voxprint_common.licence import is_allowed
 from voxprint_common.mdl.descriptor import (
     APP_SCHEMA,
     AppModels,
     Descriptor,
     DescriptorError,
+    MirrorRef,
     PostInstall,
     parse_app_manifest,
     parse_post_install,
@@ -169,6 +171,7 @@ class ModelFile:
     size: int
     sha256: str
     urls: tuple[str, ...]
+    mirror_policy: str = "race"
 
 
 @dataclass(frozen=True)
@@ -219,6 +222,7 @@ class PlannedFile:
     display_name: str = ""
     model_id: str = ""
     hooks: tuple[HookPlan, ...] = ()
+    mirror_policy: str = "race"
 
     @property
     def label(self) -> str:
@@ -412,6 +416,7 @@ def plan_files(
                         display_name=label,
                         model_id=model.id,
                         hooks=_hook_plans(prepared, model),
+                        mirror_policy=item.mirror_policy,
                     )
                     buckets[item.sha256] = planned
                     order.append(item.sha256)
@@ -436,6 +441,8 @@ def plan_files(
                     if url not in merged:
                         merged.append(url)
                 current.urls = tuple(merged)
+                if "strict-priority" in {current.mirror_policy, item.mirror_policy}:
+                    current.mirror_policy = "strict-priority"
     return [buckets[key] for key in order]
 
 
@@ -754,6 +761,7 @@ def _model_from_descriptor(descriptor: Descriptor, tier: ModelTier, *, optional:
             item.size,
             item.sha256,
             _descriptor_urls(descriptor, item.path),
+            descriptor.policy_for(item.path),
         )
         for item in descriptor.files
     )
@@ -771,14 +779,51 @@ def _model_from_descriptor(descriptor: Descriptor, tier: ModelTier, *, optional:
 
 
 def _descriptor_urls(descriptor: Descriptor, filename: str) -> tuple[str, ...]:
+    mirrors = descriptor.mirrors_for(filename)
+    _check_licence_split(descriptor, mirrors)
     urls = tuple(
         _descriptor_mirror(
             mirror.kind, mirror.ref, mirror.revision, filename, len(descriptor.files)
         )
-        for mirror in descriptor.mirrors
+        for mirror in mirrors
     )
     _reject_gated(descriptor.id, urls)
     return urls
+
+
+def _check_licence_split(descriptor: Descriptor, mirrors: tuple[MirrorRef, ...]) -> None:
+    """Keep a restrictive licence on the author's own source.
+
+    Args:
+        descriptor: The model document.
+        mirrors: Sources that would be used for one file.
+
+    Raises:
+        CatalogError: The model is not an optional plug-in, or it lists a
+            suite mirror or more than one source.
+    """
+    if is_allowed(descriptor.license):
+        return
+    if not descriptor.on_demand:
+        raise CatalogError(
+            f"model {descriptor.id} has a restrictive licence and must be an optional plug-in"
+        )
+    if len(mirrors) != 1 or _suite_ref(mirrors[0]):
+        raise CatalogError(
+            f"model {descriptor.id} has a restrictive licence; "
+            "use the official source only, with no mirror"
+        )
+
+
+def _suite_ref(mirror: MirrorRef) -> bool:
+    """Return whether ``mirror`` is a suite copy rather than the author's repo."""
+    ref = mirror.ref.strip()
+    if mirror.kind == "hf":
+        return ref.lower().startswith("mitroshenkov87/")
+    if mirror.kind == "kaggle":
+        owner, _slash, _rest = ref.partition("/")
+        return owner.lower() == "mitroshenkov87"
+    return False
 
 
 def _descriptor_mirror(kind: str, ref: str, revision: str, filename: str, count: int) -> str:
@@ -1009,13 +1054,20 @@ def _model(value: object) -> Model:
     if status == "unavailable" and not reason.strip():
         raise CatalogError(f"model {model_id} needs a reason when it is unavailable")
     hook = _optional_hook(value.get("post_install"), model_id)
+    model_policy = "race"
+    if "mirror_policy" in value:
+        model_policy = _mirror_policy(value.get("mirror_policy"), f"model {model_id} mirror_policy")
+    groups = _mdl_groups(model_id, value.get("file_groups"))
     rows = value.get("files", [])
     if status == "unavailable":
         files = ()
     elif not isinstance(rows, list) or not rows:
         raise CatalogError(f"model {model_id} needs at least one file")
     else:
-        files = tuple(_file(model_id, row) for row in rows)
+        files = tuple(_file(model_id, row, model_policy, groups) for row in rows)
+        missing = [path for path in groups if path not in {item.path for item in files}]
+        if missing:
+            raise CatalogError(f"file group path is not a file: {missing[0]!r}")
     if status != "unavailable" and not files:
         raise CatalogError(f"model {model_id} needs at least one file")
     return Model(
@@ -1034,7 +1086,12 @@ def _model(value: object) -> Model:
     )
 
 
-def _file(model_id: str, value: object) -> ModelFile:
+def _file(
+    model_id: str,
+    value: object,
+    model_policy: str = "race",
+    groups: dict[str, _MdlGroup] | None = None,
+) -> ModelFile:
     if not isinstance(value, dict):
         raise CatalogError(f"model {model_id} file must be an object")
     name = _rel(str(value.get("path") or "model.bin"))
@@ -1044,12 +1101,66 @@ def _file(model_id: str, value: object) -> ModelFile:
     digest = str(value.get("sha256") or "").strip().lower()
     if HASH_RE.fullmatch(digest) is None:
         raise CatalogError(f"model {model_id} sha256 must be 64 hexadecimal characters")
-    mirrors = value.get("mirrors")
-    if not isinstance(mirrors, list) or not mirrors:
-        raise CatalogError(f"model {model_id} needs at least one mirror")
-    urls = tuple(_mirror(row) for row in mirrors)
+    group = (groups or {}).get(name)
+    own_policy = ""
+    if "mirror_policy" in value:
+        own_policy = _mirror_policy(value.get("mirror_policy"), f"model {model_id} mirror_policy")
+    if "sources" in value:
+        urls = _mirror_list(model_id, value.get("sources"))
+    elif group is not None and group.sources is not None:
+        urls = group.sources
+    else:
+        urls = _mirror_list(model_id, value.get("mirrors"))
+    inherited = group.policy if group is not None and group.policy else ""
+    policy = own_policy or inherited or model_policy
     _reject_gated(model_id, urls)
-    return ModelFile(name, size, digest, urls)
+    return ModelFile(name, size, digest, urls, policy)
+
+
+def _mirror_list(model_id: str, value: object) -> tuple[str, ...]:
+    if not isinstance(value, list) or not value:
+        raise CatalogError(f"model {model_id} needs at least one mirror")
+    return tuple(_mirror(row) for row in value)
+
+
+def _mirror_policy(value: object, label: str) -> str:
+    if value not in {"race", "strict-priority"}:
+        raise CatalogError(f"{label} must be race or strict-priority")
+    return str(value)
+
+
+@dataclass(frozen=True)
+class _MdlGroup:
+    """A file group's policy and optional replacement source list."""
+
+    policy: str
+    sources: tuple[str, ...] | None
+
+
+def _mdl_groups(model_id: str, value: object) -> dict[str, _MdlGroup]:
+    if value is None:
+        return {}
+    if not isinstance(value, list):
+        raise CatalogError(f"model {model_id} file_groups must be a list")
+    found: dict[str, _MdlGroup] = {}
+    allowed = {"paths", "mirror_policy", "sources"}
+    for row in value:
+        if not isinstance(row, dict) or not {"paths"} <= set(row) <= allowed:
+            raise CatalogError(f"model {model_id} file group needs paths")
+        paths = row.get("paths")
+        if not isinstance(paths, list) or not paths:
+            raise CatalogError(f"model {model_id} file group needs paths")
+        policy = ""
+        if "mirror_policy" in row:
+            policy = _mirror_policy(row.get("mirror_policy"), f"model {model_id} mirror_policy")
+        sources = _mirror_list(model_id, row.get("sources")) if "sources" in row else None
+        for path in paths:
+            if not isinstance(path, str) or not path:
+                raise CatalogError(f"file group path is not a file: {path!r}")
+            if path in found:
+                raise CatalogError(f"file {path} is in more than one group")
+            found[path] = _MdlGroup(policy, sources)
+    return found
 
 
 def _mirror(value: object) -> str:

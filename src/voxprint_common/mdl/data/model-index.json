@@ -1,14 +1,104 @@
 [
   {
-    "id": "pyannote-speaker-diarization-community-1",
-    "repo": "Mitroshenkov87/voxprint-pyannote-speaker-diarization-community-1",
-    "revision": "9c851af7",
-    "sha256": "dad4c872fd1724b4aaae277b4e7ee3cc3a4bdc91c1250d452068bd0d583efcd5"
+    "id": "gemma4-31b",
+    "repo": "Mitroshenkov87/voxprint-gemma4-31b",
+    "revision": "674f6bf503aaf4684a52ec6c53ce00158f25c544",
+    "sha256": "4c53e3fe900639860827cd93ce0e8e31cf163dfbf9d1877e504f5b436ebf0b3c"
+  },
+  {
+    "id": "huihui-qwen36-27b",
+    "repo": "Mitroshenkov87/voxprint-huihui-qwen36-27b",
+    "revision": "e18da4c2633c2b9206779bff7d223a14921aa60a",
+    "sha256": "2050fd29586f19a9e61b0cef12c7c4f051c5013f2276c752f3571f2a7743c33d"
+  },
+  {
+    "id": "mirror-opus-mt-de-en",
+    "repo": "Mitroshenkov87/voxprint-mirror-opus-mt-de-en",
+    "revision": "da9e54eab09631452bd88a7b2cac2f87abf7ab8b",
+    "sha256": "ddd31e45d5248287b5ebac86b185fbb037dc73671c213bd4c5da9549f0c0063e"
+  },
+  {
+    "id": "mirror-opus-mt-en-de",
+    "repo": "Mitroshenkov87/voxprint-mirror-opus-mt-en-de",
+    "revision": "e2a63e0c4a7f0fe712723b3c06fee4c63f5e0bdf",
+    "sha256": "c16c25211ec56db9592e6e07332442dd6ab0a4af7ab496ec8c92162e751d102c"
+  },
+  {
+    "id": "mirror-opus-mt-en-ru",
+    "repo": "Mitroshenkov87/voxprint-mirror-opus-mt-en-ru",
+    "revision": "b0078ff68639490ff4f5ff69ebab1b6e296e447e",
+    "sha256": "dde3af62a19522776058443b2885259d950befec7e597f78eddaa8cb7ba476fe"
+  },
+  {
+    "id": "mirror-opus-mt-ru-en",
+    "repo": "Mitroshenkov87/voxprint-mirror-opus-mt-ru-en",
+    "revision": "228bd442cc7d58f8a6aca897ac1965b7cb99e074",
+    "sha256": "793ddf72b49a930a07a7155a78b9c1aeb19c3ce28a479abe86435849a009e744"
+  },
+  {
+    "id": "mirror-qwen3-asr-0.6b",
+    "repo": "Mitroshenkov87/voxprint-mirror-qwen3-asr-0.6b",
+    "revision": "995e8f310375505c37ed1ceae09e228c265be23c",
+    "sha256": "52bda305983fe667d303bcaf8cb4e3492f0d2a61d2ec1a1ea2d42af0ecce3393"
+  },
+  {
+    "id": "mirror-qwen3-forcedaligner-0.6b",
+    "repo": "Mitroshenkov87/voxprint-mirror-qwen3-forcedaligner-0.6b",
+    "revision": "c5c7b9ffcf863c374b92c75e4ec08f602c72cf2d",
+    "sha256": "0993255c60e0d6660eb12398a6849f49abba0919901e4bb8a8604122b90f3c6b"
+  },
+  {
+    "id": "mirror-qwen3-tts-12hz-0.6b-base",
+    "repo": "Mitroshenkov87/voxprint-mirror-qwen3-tts-12hz-0.6b-base",
+    "revision": "a0bb9d7991e5336778e4acffd9c04f7ccdad455f",
+    "sha256": "a4a4f6fbd501c74cf66bb77202c2360744233bd3c3b225bccb6938a024e66328"
+  },
+  {
+    "id": "mirror-qwen3-tts-12hz-1.7b-base",
+    "repo": "Mitroshenkov87/voxprint-mirror-qwen3-tts-12hz-1.7b-base",
+    "revision": "7df59f3d5f20e09d61a42867a071d99858c45d4c",
+    "sha256": "b4c3f3f7b8b3dc2843029fcfcbffe050aa7d2429cae4395b0698b5475e5e4fc0"
+  },
+  {
+    "id": "mirror-sage-fredt5-distilled-95m",
+    "repo": "Mitroshenkov87/voxprint-mirror-sage-fredt5-distilled-95m",
+    "revision": "7f092b6ee83a7217272180e1753f46d23919beda",
+    "sha256": "d397aa59e2aa171febbfaa1fa1e23e1c34b108e983cbf3c29cf83291cedea94f"
+  },
+  {
+    "id": "mirror-z-image-turbo",
+    "repo": "Mitroshenkov87/voxprint-mirror-z-image-turbo",
+    "revision": "6e19fdd9b697a2396ce9b1e683a303a9784a73c1",
+    "sha256": "2697f1663cd50b3693ccc1787dc1a8a733564a2b47251d4a6a8f714758ea6f8a"
+  },
+  {
+    "id": "mirror-z-image-turbo-controlnet-union-2.1",
+    "repo": "Mitroshenkov87/voxprint-mirror-z-image-turbo-controlnet-union-2.1",
+    "revision": "cc9fddea976b56bcf45e8760ff0eff1de903fddd",
+    "sha256": "24b861d71aa554c5f354d273ef75c94221a5b009c47f0ab65a47d7659506ce2e"
   },
   {
     "id": "pyannote-embedding",
     "repo": "Mitroshenkov87/voxprint-pyannote-embedding",
-    "revision": "4655ca65",
-    "sha256": "8a49cdf59db274d2b332e59d24a1fe31ca48682827b09f769b3b24b2f3fd0f12"
+    "revision": "b18e120a294de96f09f31096f19059d8d46e6fd7",
+    "sha256": "5427c29f88bd3a987f722a17e1f5363a91ebf3cd1316e58b8439a37356abf13c"
+  },
+  {
+    "id": "pyannote-speaker-diarization-community-1",
+    "repo": "Mitroshenkov87/voxprint-pyannote-speaker-diarization-community-1",
+    "revision": "8ad517b1fb0cabf61c8fc1ff0bc457ae8dc28abd",
+    "sha256": "5a6844108a3bcfd69baa80b4b9e5ecb6ead10b443c33dc53a5d4be31311b99a6"
+  },
+  {
+    "id": "t-lite-it-2.1",
+    "repo": "Mitroshenkov87/voxprint-t-lite-it-2.1",
+    "revision": "d85d9393d3368ce6daecfd382ab958eb7bd0269a",
+    "sha256": "321d40561d209379adcb2112a9b6e14d3679dad60681ac3e305ddd5076167f87"
+  },
+  {
+    "id": "voices-ru",
+    "repo": "Mitroshenkov87/voxprint-voices-ru",
+    "revision": "6ba1e83f8cfdda4260fd4a17f11adc79fc98a540",
+    "sha256": "1796d14f7a4c27fa4b715359b2b1a82fbe2c528d40e211ace482cd0c02f248e4"
   }
 ]
