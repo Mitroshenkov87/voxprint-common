@@ -40,11 +40,14 @@ from voxprint_common.mdl.descriptor import (
     DescriptorError,
     MirrorRef,
     PostInstall,
+    Prebuilt,
     parse_app_manifest,
     parse_post_install,
+    parse_prebuilt,
 )
 from voxprint_common.mdl.hooks import HookPlan
 from voxprint_common.mdl.names import DISPLAY_NAME
+from voxprint_common.mdl.prebuilt import note_stale, stale_reason
 from voxprint_common.paths import models_dir, state_dir
 
 __all__ = [
@@ -175,6 +178,20 @@ class ModelFile:
 
 
 @dataclass(frozen=True)
+class PrebuiltFile:
+    """A pre-built artifact with resolved download URLs."""
+
+    path: str
+    sha256: str
+    size: int | None
+    urls: tuple[str, ...]
+    mirror_policy: str
+    onnxruntime: str
+    opset: int
+    source_file: str = ""
+
+
+@dataclass(frozen=True)
 class Model:
     """One variant of a model id."""
 
@@ -191,6 +208,7 @@ class Model:
     unavailable: bool = False
     reason: str = ""
     post_install: PostInstall | None = None
+    prebuilts: tuple[PrebuiltFile, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -399,7 +417,23 @@ def plan_files(
                     raise
                 continue
             label = model.display_name or model.id
-            for item in model.files:
+            fresh: list[PrebuiltFile] = []
+            for extra in model.prebuilts:
+                why = "the artifact has no size" if extra.size is None else ""
+                why = why or stale_reason(extra.onnxruntime, extra.opset)
+                if why:
+                    note_stale(prepared.app, model.id, extra.path, why)
+                else:
+                    fresh.append(extra)
+            prebuilt_path = str(root / "blobs" / fresh[0].sha256) if fresh else ""
+            model_hooks = _hook_plans(prepared, model, prebuilt_path, skip_model=bool(fresh))
+            extras = [
+                ModelFile(
+                    extra.path, extra.size or 0, extra.sha256, extra.urls, extra.mirror_policy
+                )
+                for extra in fresh
+            ]
+            for item in (*model.files, *extras):
                 current = buckets.get(item.sha256)
                 if current is None:
                     planned = PlannedFile(
@@ -415,7 +449,7 @@ def plan_files(
                         tier=model.tier.value,
                         display_name=label,
                         model_id=model.id,
-                        hooks=_hook_plans(prepared, model),
+                        hooks=model_hooks,
                         mirror_policy=item.mirror_policy,
                     )
                     buckets[item.sha256] = planned
@@ -433,7 +467,7 @@ def plan_files(
                     current.display_name = label
                 if not current.model_id:
                     current.model_id = model.id
-                for hook in _hook_plans(prepared, model):
+                for hook in model_hooks:
                     if hook not in current.hooks:
                         current.hooks = (*current.hooks, hook)
                 merged: list[str] = list(current.urls)
@@ -571,13 +605,19 @@ def gdrive_url(file_id: str) -> str:
     return "https://drive.google.com/uc?export=download&id=" + urllib.parse.quote(text)
 
 
-def _hook_plans(manifest: AppManifest, model: Model) -> tuple[HookPlan, ...]:
+def _hook_plans(
+    manifest: AppManifest,
+    model: Model,
+    prebuilt_path: str = "",
+    *,
+    skip_model: bool = False,
+) -> tuple[HookPlan, ...]:
     install = manifest.path.parent
     found: list[HookPlan] = []
     if manifest.app_hook is not None:
         found.append(HookPlan(manifest.app, install, manifest.app_hook))
-    if model.post_install is not None:
-        found.append(HookPlan(manifest.app, install, model.post_install))
+    if model.post_install is not None and not skip_model:
+        found.append(HookPlan(manifest.app, install, model.post_install, prebuilt_path))
     if manifest.app_models is not None:
         for hook in manifest.app_models.model_hooks:
             if hook.model_id == model.id:
@@ -709,6 +749,7 @@ def _mark_unavailable(
                 unavailable=True,
                 reason=reason,
                 post_install=model.post_install,
+                prebuilts=model.prebuilts,
             )
         )
     for model_id, reason in blocked:
@@ -775,7 +816,66 @@ def _model_from_descriptor(descriptor: Descriptor, tier: ModelTier, *, optional:
         min_vram_gib=descriptor.tier.min_vram_gib,
         display_name=descriptor.display_name,
         gpu_min_cc=descriptor.tier.gpu_min_cc,
+        post_install=descriptor.post_install,
+        prebuilts=tuple(_descriptor_prebuilt(descriptor, item) for item in descriptor.prebuilt),
     )
+
+
+def _descriptor_prebuilt(descriptor: Descriptor, item: Prebuilt) -> PrebuiltFile:
+    if item.url:
+        urls: tuple[str, ...] = (item.url,)
+    else:
+        urls = tuple(
+            _descriptor_mirror(ref.kind, ref.ref, ref.revision, item.path, 2)
+            for ref in item.sources
+            if isinstance(ref, MirrorRef)
+        )
+    _reject_gated(descriptor.id, urls)
+    return PrebuiltFile(
+        item.path,
+        item.sha256,
+        item.size,
+        urls,
+        item.mirror_policy,
+        item.onnxruntime,
+        item.opset,
+        item.source_file,
+    )
+
+
+def _mdl_prebuilts(model_id: str, value: Mapping[str, object]) -> tuple[PrebuiltFile, ...]:
+    rows: list[tuple[object, str]] = []
+    if "prebuilt" in value:
+        rows.append((value["prebuilt"], ""))
+    for row in value.get("files") or ():  # type: ignore[attr-defined]
+        if isinstance(row, dict) and "prebuilt" in row:
+            rows.append((row["prebuilt"], str(row.get("path") or "")))
+    found: list[PrebuiltFile] = []
+    for raw, source in rows:
+        try:
+            item = parse_prebuilt(
+                raw,
+                f"model {model_id} prebuilt",
+                source,
+                mirrors=lambda entries, _label: _mirror_list(model_id, entries),
+            )
+        except DescriptorError as exc:
+            raise CatalogError(str(exc)) from exc
+        urls = (item.url,) if item.url else tuple(str(entry) for entry in item.sources)
+        _reject_gated(model_id, urls)
+        found.append(
+            PrebuiltFile(
+                item.path,
+                item.sha256,
+                item.size,
+                urls,
+                item.mirror_policy,
+                item.onnxruntime,
+                item.opset,
+                item.source_file,
+            )
+        )
+    return tuple(found)
 
 
 def _descriptor_urls(descriptor: Descriptor, filename: str) -> tuple[str, ...]:
@@ -1083,6 +1183,7 @@ def _model(value: object) -> Model:
         unavailable=status == "unavailable",
         reason=reason.strip(),
         post_install=hook,
+        prebuilts=() if status == "unavailable" else _mdl_prebuilts(model_id, value),
     )
 
 
