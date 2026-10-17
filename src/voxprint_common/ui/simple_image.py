@@ -2208,9 +2208,12 @@ def _fill_form(
         core.Qt.AlignmentFlag.AlignLeft | core.Qt.AlignmentFlag.AlignTop  # type: ignore[attr-defined]
     )
     form.addLayout(rows)  # type: ignore[attr-defined]
+    # One group is the whole panel, so its name would only repeat the title.
+    # Two or more groups keep their own names.
+    show_groups = len({spec.group for spec in specs}) > 1
     group = ""
     for spec in specs:
-        if spec.group != group:
+        if show_groups and spec.group != group:
             group = spec.group
             heading = widgets.QLabel(tr(f"setting.group.{group}"))  # type: ignore[attr-defined]
             heading.setObjectName("settingGroup")

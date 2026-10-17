@@ -433,6 +433,33 @@ QScrollArea#expertScroll > QWidget > QWidget,
 QWidget#historyRow, QWidget#expertForm {{
     background: {card_bg}; color: {TEXT};
 }}
+QScrollArea#expertScroll QScrollBar:vertical {{
+    background: {card_bg}; width: 8px; margin: 0; border: none;
+}}
+QScrollArea#expertScroll QScrollBar::groove:vertical {{
+    background: {card_bg}; border: none; width: 8px;
+}}
+QScrollArea#expertScroll QScrollBar::handle:vertical {{
+    background: {CONTROL_BORDER}; min-height: 24px; border: none; border-radius: 4px;
+}}
+QScrollArea#expertScroll QScrollBar::handle:vertical:hover {{
+    background: {TEXT_FAINT};
+}}
+QScrollArea#expertScroll QScrollBar::add-line:vertical,
+QScrollArea#expertScroll QScrollBar::sub-line:vertical {{
+    height: 0; width: 0; background: {card_bg}; border: none;
+}}
+QScrollArea#expertScroll QScrollBar::up-arrow:vertical,
+QScrollArea#expertScroll QScrollBar::down-arrow:vertical {{
+    width: 0; height: 0; background: {card_bg}; border: none;
+}}
+QScrollArea#expertScroll QScrollBar::add-page:vertical,
+QScrollArea#expertScroll QScrollBar::sub-page:vertical {{
+    background: {card_bg}; border: none;
+}}
+QScrollArea#expertScroll QScrollBar:horizontal {{
+    height: 0; background: {card_bg}; border: none;
+}}
 QPushButton#expertReset {{
     background: transparent; color: {TEXT}; text-align: left;
     border: {density.border_px}px solid {CONTROL_BORDER}; padding: 4px 10px;

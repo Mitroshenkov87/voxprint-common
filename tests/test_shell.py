@@ -44,6 +44,11 @@ def test_headless_layout_and_adoption() -> None:
     assert tokens.density.chip_pad_px == 16
     style = build_shell_style(False)
     assert f"padding: 2px {tokens.density.chip_pad_px}px" in style
+    assert "QScrollArea#expertScroll QScrollBar:vertical" in style
+    handle = f"QScrollBar::handle:vertical {{\n    background: {tokens.colors['CONTROL_BORDER']}"
+    groove = f"QScrollBar::groove:vertical {{\n    background: {tokens.colors['CARD_PLAIN']}"
+    assert handle in style
+    assert groove in style
     assert f"QPushButton:focus {{\n    border: {tokens.density.focus_ring_px}px solid" in style
     assert tokens.identity["audiobook-builder"] == "#f5d76e"
     assert tokens.identity["movie-dubber"] == "#b98cff"
