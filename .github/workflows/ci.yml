@@ -18,8 +18,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Qt libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libfontconfig1 libxkbcommon0 libxkbcommon-x11-0 libdbus-1-3 libxcb1 libxcb-cursor0 libnss3 libx11-6 libx11-xcb1
+          sudo apt-get install -y libglib2.0-0t64 || sudo apt-get install -y libglib2.0-0
       - name: Install
-        run: python -m pip install -e ".[dev]"
+        run: python -m pip install -e ".[dev,ui]"
       - name: Ruff
         run: |
           python -m ruff check src tests
@@ -30,6 +36,8 @@ jobs:
         run: python -m voxprint_common.i18n.check --src src/voxprint_common --locales src/voxprint_common/i18n/locales --langs en,ru,de,uk,lv
       - name: Tests
         shell: bash
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: |
           unset HF_TOKEN || true
           unset HUGGING_FACE_HUB_TOKEN || true

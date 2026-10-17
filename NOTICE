@@ -5,3 +5,62 @@ Licensed under the Apache License, Version 2.0.
 You may obtain a copy of the License at
 
     http://www.apache.org/licenses/LICENSE-2.0
+
+Third-party UI algorithms
+-------------------------
+
+The dock, keymap, and palette modules include algorithms translated into
+Python from repositories that grant the MIT License or the Apache License,
+Version 2.0, at your option. VOXPrint distributes those translations under
+the Apache License, Version 2.0. Names, logos, brand files, and fonts from
+those projects are not included. Files under the GPL, the MPL, or no licence
+were not copied. egui painters were not copied.
+
+craft-libs
+https://github.com/storytold/craft-libs
+commit 83bf4cb25c01ed46e7645c4172974239868aaf06
+
+Copyright (c) 2026 ArtCraft Team and the craft-libs contributors.
+Licensed under the MIT License or the Apache License, Version 2.0, at your option.
+
+Ported into voxprint_common.ui.dock:
+
+- crates/ui/src/docking/model.rs
+- crates/ui/src/docking/targets.rs
+- crates/ui/src/tabs/mod.rs (the fit function only)
+- crates/ui/src/layout/geometry.rs
+- crates/ui/src/layout/resize.rs (divider arithmetic and the keyboard step only)
+- crates/ui/src/layout/toolbar.rs (fit_toolbar only)
+
+WordCraft
+https://github.com/storytold/wordcraft
+commit eae242176108d328c5dd81fbc10370c51ab90706
+
+Copyright (c) 2026 ArtCraft Team and the WordCraft contributors.
+Licensed under the MIT License or the Apache License, Version 2.0, at your option.
+
+Ported into voxprint_common.ui.keymap:
+
+- crates/engine/src/keymap.rs (chord spelling and override rules)
+
+FilmCraft
+https://github.com/storytold/filmcraft
+commit 09aaf9bf15d510eda1c413c0ccabb1d7e08b41c5
+
+Copyright (c) 2026 ArtCraft Team and the FilmCraft contributors.
+Licensed under the MIT License or the Apache License, Version 2.0, at your option.
+
+Ported into voxprint_common.ui.keymap:
+
+- crates/engine/src/shortcuts.rs (modifier glyphs and aliases)
+
+PhotoCraft
+https://github.com/storytold/photocraft
+commit 5f65579ecb44047c2a619036c18ff273202e1389
+
+Copyright (c) 2026 ArtCraft Team and the PhotoCraft contributors.
+Licensed under the MIT License or the Apache License, Version 2.0, at your option.
+
+Ported into voxprint_common.ui.palette:
+
+- crates/ui-egui/src/palette.rs (fuzzy_score and the exact-match bonus)

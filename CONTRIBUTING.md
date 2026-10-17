@@ -13,7 +13,7 @@ The library must stay usable when no other Voxprint app is installed. The consol
 Python 3.14. From a checkout:
 
 ```bash
-python -m pip install -e ".[dev]"
+python -m pip install -e ".[dev,ui]"
 python -m ruff check src tests
 python -m ruff format --check src tests
 python -m interrogate -c pyproject.toml src/voxprint_common
@@ -23,11 +23,11 @@ python -m mkdocs build --strict
 python -m build
 ```
 
-Tests that need Windows are marked `windows` and skip elsewhere. POSIX-only tests are marked `posix`. Qt is not installed in CI. `voxprint_common.ui.splash` must import without loading PySide6. Constructing `Splash` needs the `ui` extra.
+Tests that need Windows are marked `windows` and skip elsewhere. POSIX-only tests are marked `posix`. CI installs the `ui` extra and grabs the reference shell with `QT_QPA_PLATFORM=offscreen` on Ubuntu and Windows. Importing the dock, keymap, commands, palette scorer, tokens, theme, splash, or shell module must not load PySide6. Constructing `Splash`, `ReferenceShell`, or the download window needs the `ui` extra.
 
 Public functions, classes, and modules use Google-style docstrings. The interrogate gate is 65 percent of that public API. New public names should be documented anyway.
 
-Imports stay at the top of the module. The exception is PySide6, which is imported inside the functions that open a window: the splash, and `voxprint_common.mdl.progress_ui.run_window`. `hf_xet` is imported inside the Hugging Face transfer path so a missing package falls back to HTTP Range.
+Imports stay at the top of the module. The exception is PySide6, which is imported inside the functions that open a window: the splash, `voxprint_common.ui.shell`, and `voxprint_common.mdl.progress_ui.run_window`. `hf_xet` is imported inside the Hugging Face transfer path so a missing package falls back to HTTP Range.
 
 ## Platform
 

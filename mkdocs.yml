@@ -41,6 +41,7 @@ nav:
   - CLI protocol: cli.md
   - Model downloader: mdl.md
   - MDL review 0.2.0: mdl-review-0.2.0.md
+  - Shared UI: ui.md
   - API:
       - paths: api/paths.md
       - atomic: api/atomic.md
@@ -59,7 +60,12 @@ nav:
       - i18n: api/i18n.md
       - cli_protocol: api/cli_protocol.md
       - selftest: api/selftest.md
+      - ui.tokens: api/tokens.md
       - ui.theme: api/theme.md
+      - ui.dock: api/dock.md
+      - ui.commands: api/commands.md
+      - ui.keymap: api/keymap.md
+      - ui.shell: api/shell.md
       - ui.splash: api/splash.md
       - provenance: api/provenance.md
 

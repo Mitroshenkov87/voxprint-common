@@ -1,17 +1,25 @@
 """Dark suite palette: yellow primary actions, soft blue menus and accents.
 
-Tokens live in ``tokens.json`` beside this module so a non-Python client can
-read the same values. Text colours are opaque. Panels and controls are nearly
-solid. Only the window background is translucent in the Acrylic stylesheet.
+Colours live in ``tokens.json`` (schema 1), loaded by
+:mod:`voxprint_common.ui.tokens`. Text colours are opaque. Panels and controls
+are nearly solid. Only the window background is translucent in the Acrylic
+stylesheet.
+
+:func:`build_style` is the wizard and download-window stylesheet. The editor
+shell uses :func:`build_shell_style` and the density block in the same file
+(13 px body, 28 px panel headers, 4 px control radius). Both read one colour
+map.
 
 The splash bar is not one of these tokens. Each app passes its own identity
-colour to :class:`voxprint_common.ui.splash.Splash`.
+colour to :class:`voxprint_common.ui.splash.Splash`. Identity colours for the
+apps that have one are ``identity`` in ``tokens.json``.
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
+
+from voxprint_common.ui.tokens import color_map, load
 
 __all__ = [
     "ACCENT",
@@ -49,6 +57,7 @@ __all__ = [
     "TEXT_ON_ACCENT",
     "TEXT_ON_PRIMARY",
     "TOKENS",
+    "build_shell_style",
     "build_style",
     "contrast_ratio",
     "tokens_path",
@@ -156,16 +165,7 @@ def tokens_path() -> Path:
     return Path(__file__).with_name("tokens.json")
 
 
-def _load_tokens() -> dict[str, str]:
-    payload = json.loads(tokens_path().read_text(encoding="utf-8"))
-    if not isinstance(payload, dict) or any(
-        not isinstance(value, str) for value in payload.values()
-    ):
-        raise ValueError("tokens.json must be an object of colour strings")
-    return {str(key): value for key, value in payload.items()}
-
-
-TOKENS: dict[str, str] = _load_tokens()
+TOKENS: dict[str, str] = color_map()
 
 PRIMARY = TOKENS["PRIMARY"]
 PRIMARY_HOVER = TOKENS["PRIMARY_HOVER"]
@@ -229,6 +229,107 @@ CONTRAST_PAIRS: list[tuple[str, str]] = [
     (TEXT_ON_PRIMARY, PRIMARY_HOVER),
     (PRIMARY_DISABLED_TEXT, PRIMARY_DISABLED_BG),
 ]
+
+
+def build_shell_style(glass: bool, *, more: bool = False) -> str:
+    """Return the editor-shell stylesheet.
+
+    Colours are the shared tokens. Sizes come from the density block: body
+    text, panel headers, and the control radius. Qt is not imported.
+
+    Args:
+        glass: Use the translucent Acrylic backgrounds. False uses the solid
+            fallback.
+        more: Use the more-transparent Acrylic backgrounds. Ignored when
+            ``glass`` is false.
+
+    Returns:
+        A stylesheet string.
+    """
+    if glass and more:
+        root_bg, card_bg = ROOT_GLASS_MORE, CARD_GLASS_MORE
+    elif glass:
+        root_bg, card_bg = ROOT_GLASS, CARD_GLASS
+    else:
+        root_bg, card_bg = ROOT_PLAIN, CARD_PLAIN
+    density = load().density
+    radius = density.control_radius_px
+    return f"""
+* {{ font-family: {_FONT}; font-size: {density.body_px}px; color: {TEXT}; }}
+QWidget#shell {{ background: {root_bg}; }}
+QLabel#titlebar {{ font-size: 15px; font-weight: 600; background: transparent; }}
+QLabel#status {{ color: {TEXT_MUTED}; background: transparent; }}
+QLabel#panel {{ background: transparent; }}
+QFrame#dock {{
+    background: {card_bg}; border: {density.border_px}px solid {CONTROL_BORDER};
+    border-radius: {radius}px;
+}}
+QFrame#float {{
+    background: {card_bg}; border: {density.border_px}px solid {ACCENT};
+    border-radius: {radius}px;
+}}
+QTabWidget::pane {{
+    border: {density.border_px}px solid {CONTROL_BORDER}; background: {card_bg};
+    border-radius: {radius}px;
+}}
+QTabBar::tab {{
+    background: transparent; color: {TEXT_MUTED}; padding: 0 12px;
+    min-height: {density.panel_header_px}px; border: none;
+    border-top: 2px solid transparent; margin-right: 2px;
+}}
+QTabBar::tab:hover {{ color: {TEXT}; }}
+QTabBar::tab:selected {{
+    background: {CONTROL_BG}; color: {TEXT}; border-top: 2px solid {ACCENT};
+}}
+QPushButton {{
+    background: {CONTROL_BG}; border: {density.border_px}px solid {CONTROL_BORDER};
+    border-radius: {radius}px; padding: 4px 12px; min-height: {density.panel_header_px}px;
+}}
+QPushButton:hover {{ background: {CONTROL_HOVER}; }}
+QPushButton#primary {{
+    background: {PRIMARY}; color: {TEXT_ON_PRIMARY};
+    border: {density.border_px}px solid {PRIMARY_BORDER};
+    font-weight: 600;
+}}
+QLineEdit, QListWidget {{
+    background: {CONTROL_BG}; border: {density.border_px}px solid {CONTROL_BORDER};
+    border-radius: {radius}px; padding: 4px 8px;
+}}
+QListWidget::item:selected {{ background: {MENU_SELECTION}; color: #ffffff; }}
+QListWidget#paletteHits {{ background: {card_bg}; border: none; padding: 4px; }}
+QListWidget#paletteHits::item {{
+    background: transparent; color: {TEXT}; border: none; padding: 0;
+}}
+QListWidget#paletteHits::item:selected {{ background: transparent; color: {TEXT}; }}
+QWidget#paletteRow {{ background: transparent; border-radius: {radius}px; }}
+QWidget#paletteRow[selected="true"] {{ background: {ACCENT}; }}
+QWidget#paletteRow QLabel#paletteTitle {{ background: transparent; color: {TEXT}; }}
+QWidget#paletteRow QLabel#paletteGroup {{
+    background: transparent; color: {TEXT_MUTED}; font-size: 11px;
+}}
+QWidget#paletteRow[selected="true"] QLabel#paletteTitle,
+QWidget#paletteRow[selected="true"] QLabel#paletteGroup {{ color: {TEXT_ON_ACCENT}; }}
+QLabel#paletteChip {{
+    background: {CONTROL_BG}; color: {TEXT_MUTED};
+    border: {density.border_px}px solid {CONTROL_BORDER};
+    border-radius: {radius}px; padding: 0 6px; font-size: 11px;
+}}
+QWidget#paletteRow[selected="true"] QLabel#paletteChip {{
+    background: transparent; color: {TEXT_ON_ACCENT}; border-color: {TEXT_ON_ACCENT};
+}}
+QMenuBar {{ background: transparent; }}
+QMenuBar::item:selected {{ background: {MENU_SELECTION}; color: #ffffff; }}
+QMenu {{ background: {MENU_BG}; border: {density.border_px}px solid {CONTROL_BORDER}; }}
+QMenu::item:selected {{ background: {MENU_SELECTION}; color: #ffffff; }}
+QSplitter::handle {{ background: transparent; }}
+QFrame#splitLine {{ background: {CONTROL_BORDER}; border: none; }}
+QFrame#splitLine[hot="true"] {{ background: {ACCENT}; }}
+QToolButton#tabClose {{
+    background: transparent; border: none; padding: 0; min-width: 14px; max-width: 14px;
+    min-height: 14px; max-height: 14px;
+}}
+QToolButton#tabClose:hover {{ background: {CONTROL_HOVER}; }}
+"""
 
 
 def build_style(glass: bool, *, more: bool = False) -> str:
