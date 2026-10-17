@@ -67,6 +67,7 @@ nav:
       - ui.keymap: api/keymap.md
       - ui.expert: api/expert.md
       - ui.settings: api/settings.md
+      - ui.simple_image: api/simple-image.md
       - ui.shell: api/shell.md
       - ui.splash: api/splash.md
       - provenance: api/provenance.md

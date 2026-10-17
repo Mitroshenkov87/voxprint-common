@@ -35,6 +35,7 @@ Canvas adopts this first. Then Enlarge, Clarity, Audiobook Builder, Movie Dubber
 - [ ] Show a muted Expert chip while the mode is on.
 - [ ] Put tooltips on expert items only.
 - [ ] Image apps include `IMAGE_CONTENT_FILTER` and do not add a classifier here.
+- [ ] Image apps open on `SimpleImageLayout`. The dock is Panels, and only after Expert mode is on. It is not the default.
 
 ## Import without Qt
 
@@ -43,6 +44,7 @@ from voxprint_common.ui.dock import Layout, dump_layout, load_layout, visible_la
 from voxprint_common.ui.commands import Registry, reference_commands
 from voxprint_common.ui.expert import ExpertMode, active_contexts
 from voxprint_common.ui.settings import IMAGE_CONTENT_FILTER, reference_settings
+from voxprint_common.ui.simple_image import SimpleImageLayout, image_presets
 from voxprint_common.ui.keymap import WHEN_EXPERT, KeyMap, load_overrides, save_overrides
 from voxprint_common.ui.palette import score_text
 from voxprint_common.ui.tokens import load
@@ -78,9 +80,23 @@ Shared command ids are `file.save`, `edit.undo`, `edit.redo`, and `view.palette`
 
 `tokens.json` is schema 1: a colour map, editor density, and the splash colours for Audiobook Builder, Movie Dubber, Enlarge, and Clarity. `voxprint_common.ui.theme.TOKENS` is that colour map. `build_style` remains the wizard and download-window stylesheet. `build_shell_style` uses the density block (13 px body, 28 px panel headers, 4 px control radius) with the same colours. A file whose schema is not 1 is refused.
 
+## Simple image layout
+
+Image apps open on `SimpleImageLayout`, not the dock. The screen is a prompt, plain preset chips, the picture, and a history strip. Enter starts a picture. Shift+Enter adds a line. A thumbnail shows that picture large. Right-click offers Save, Copy, and Use prompt again.
+
+The overflow menu is Open folder, Settings, and Expert mode. Settings holds the plain fields, such as how many pictures and where to save them. Expert mode adds a side panel: steps, sampler, guidance, seed, LoRA, a negative prompt, and the content filter. Panels, in that same menu, opens the dock. The dock is never the default, and leaving Expert mode returns to this screen.
+
+```python
+from voxprint_common.ui.simple_image import SimpleImageLayout, image_presets
+
+layout = SimpleImageLayout(image_presets())
+```
+
+An app can pass its own preset rows. The reference rows are Size (Square, Portrait, Landscape, Wide) and Style (None, Photo, Illustration, Anime, 3D).
+
 ## Reference window
 
-`ReferenceShell` paints two side tab groups around a protected centre, a command palette, and the shell theme. Screenshots below are grabbed with `QT_QPA_PLATFORM=offscreen`.
+`ReferenceShell` opens on that simple screen. Panels paints two side tab groups around a protected centre, a command palette, and the shell theme. Screenshots below are grabbed with `QT_QPA_PLATFORM=offscreen`.
 
 ![English reference shell](img/shell/en-shell.png)
 
@@ -94,12 +110,14 @@ Shared command ids are `file.save`, `edit.undo`, `edit.redo`, and `view.palette`
 
 ![Splitter while dragging](img/shell/en-split.png)
 
-Settings is a plain panel: how many pictures, and where to save them. Expert mode adds steps, the sampler, and the image content filter, and a muted Expert chip in the status bar. The Advanced panel comes back with them. These pictures are offscreen grabs.
+The German picture shows the close control on the active side tab. Inactive tabs keep that control hidden until the pointer is over them. The splitter picture is the root divider while it is dragged: the resting line is one pixel in the border colour, and the drag stroke is a wider accent-blue line. The hit area stays wider than the stroke and stays invisible. The translucent Acrylic backgrounds are a stylesheet flag (`glass=True`). An offscreen grab cannot show operating-system blur, so these pictures use the solid background.
 
-![English settings, simple mode](img/shell/en-simple.png)
+Simple mode is the picture screen. Expert mode keeps that screen and adds the side panel. These pictures are offscreen grabs. The result is a neutral gradient, not a photograph.
 
-![English settings, Expert mode](img/shell/en-expert.png)
+![English simple mode, before a picture](img/shell/en-simple-empty.png)
 
-![Russian settings, Expert mode](img/shell/ru-expert.png)
+![English simple mode, with a picture](img/shell/en-simple-result.png)
 
-The German picture shows the close control on the active side tab. Inactive tabs keep that control hidden until the pointer is over them. The last picture is the root divider while it is dragged: the resting line is one pixel in the border colour, and the drag stroke is a wider accent-blue line. The hit area stays wider than the stroke and stays invisible. The translucent Acrylic backgrounds are a stylesheet flag (`glass=True`). An offscreen grab cannot show operating-system blur, so these pictures use the solid background.
+![Russian simple mode, with a picture](img/shell/ru-simple-result.png)
+
+![English Expert mode](img/shell/en-expert.png)

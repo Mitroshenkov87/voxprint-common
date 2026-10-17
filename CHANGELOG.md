@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-Expert mode is one suite setting, `ui.expert_mode`, off by default. Commands, dock panels, and settings tagged expert stay hidden until it is on, and a hidden panel stays in the layout JSON. `view.toggle_expert_mode` is in the View menu and the command palette, with no default shortcut. Image apps share the expert content-filter setting. The reference shell shows it beside two plain settings and three expert ones, and a muted Expert chip while the mode is on.
+Expert mode is one suite setting, `ui.expert_mode`, off by default. Commands, dock panels, and settings tagged expert stay hidden until it is on, and a hidden panel stays in the layout JSON. `view.toggle_expert_mode` is in the View menu and the command palette, with no default shortcut. Image apps share the expert content-filter setting.
+
+Image apps open on `SimpleImageLayout`: a prompt, plain size and style chips, the picture, and a history strip. Expert mode adds a side panel for steps, sampler, guidance, seed, LoRA, a negative prompt, and the content filter, and can open the full dock. The dock is never the default. A muted Expert chip shows while the mode is on.
 
 The download window keeps a one-row card as tight as the others, fades the bottom of a list that still has more to scroll, and names the file that is downloading instead of a check happening beside it.
 

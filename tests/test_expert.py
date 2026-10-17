@@ -89,7 +89,17 @@ def test_settings_hide_expert_rows_and_content_filter_is_standard() -> None:
     assert simple == ["shell.pictures", "shell.save_folder"]
     shown = [item.setting_id for item in settings.visible(expert=True)]
     assert shown[:2] == ["shell.pictures", "shell.save_folder"]
-    assert shown[2:] == ["shell.steps", "shell.sampler", "image.content_filter"]
+    assert shown[2:] == [
+        "shell.steps",
+        "shell.sampler",
+        "shell.guidance",
+        "shell.seed",
+        "shell.lora",
+        "shell.negative",
+        "image.content_filter",
+    ]
+    negative = settings.get("shell.negative")
+    assert negative is not None and negative.type is SettingType.TEXT and negative.expert is True
     assert IMAGE_CONTENT_FILTER.expert is True
     assert IMAGE_CONTENT_FILTER.type is SettingType.BOOL
     assert IMAGE_CONTENT_FILTER.default is True

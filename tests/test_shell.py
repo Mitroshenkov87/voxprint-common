@@ -65,9 +65,10 @@ def test_offscreen_shell_screenshots(tmp_path: Path) -> None:
     palette = (tmp_path / "en-palette.png").read_bytes()
     russian_palette = (tmp_path / "ru-palette.png").read_bytes()
     split = (tmp_path / "en-split.png").read_bytes()
-    simple = (tmp_path / "en-simple.png").read_bytes()
+    empty = (tmp_path / "en-simple-empty.png").read_bytes()
+    result = (tmp_path / "en-simple-result.png").read_bytes()
+    russian_result = (tmp_path / "ru-simple-result.png").read_bytes()
     expert = (tmp_path / "en-expert.png").read_bytes()
-    russian_expert = (tmp_path / "ru-expert.png").read_bytes()
     pictures = (
         english,
         russian,
@@ -75,9 +76,10 @@ def test_offscreen_shell_screenshots(tmp_path: Path) -> None:
         palette,
         russian_palette,
         split,
-        simple,
+        empty,
+        result,
+        russian_result,
         expert,
-        russian_expert,
     )
     for blob in pictures:
         assert blob.startswith(b"\x89PNG")
@@ -87,7 +89,8 @@ def test_offscreen_shell_screenshots(tmp_path: Path) -> None:
     assert palette != russian_palette
     assert english != palette
     assert english != split
-    assert simple != expert
-    assert expert != russian_expert
-    assert simple != english
+    assert empty != result
+    assert result != russian_result
+    assert result != expert
+    assert empty != english
     assert "PySide6" not in sys.modules

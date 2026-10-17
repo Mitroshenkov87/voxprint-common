@@ -38,6 +38,7 @@ The docs site is [mitroshenkov87.github.io/voxprint-common](https://mitroshenkov
 | `voxprint_common.ui.commands` | Command ids, localised titles, and default chords |
 | `voxprint_common.ui.keymap` | Context, conflicts, and chord overrides in `suite.json` |
 | `voxprint_common.ui.expert` | Suite-wide Expert mode, off by default |
+| `voxprint_common.ui.simple_image` | Simple image screen. The dock is not the default |
 | `voxprint_common.ui.settings` | Setting descriptors, including the image content filter |
 | `voxprint_common.ui.shell` | Reference window. PySide6 loads only when the window is built |
 | `voxprint_common.ui.splash` | 960×540 splash. PySide6 loads only when a splash is shown |

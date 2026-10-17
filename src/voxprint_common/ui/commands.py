@@ -129,14 +129,19 @@ def reference_commands() -> tuple[CommandSpec, ...]:
     App commands are added beside these. Ids already used here stay shared:
     ``file.save``, ``edit.undo``, ``edit.redo``, ``view.palette``, and
     ``view.toggle_expert_mode``. The toggle has no default chord.
+    ``view.full_layout`` and ``view.simple_layout`` are expert commands.
     """
     return (
         CommandSpec("file.save", "command.file.save", "Mod+S"),
+        CommandSpec("file.open_folder", "simple.menu.open_folder"),
         CommandSpec("edit.undo", "command.edit.undo", "Mod+Z"),
         CommandSpec("edit.redo", "command.edit.redo", "Mod+Shift+Z"),
         CommandSpec("view.palette", "command.view.palette", "Mod+K"),
         CommandSpec("view.close_panel", "command.view.close_panel", "Mod+W"),
         CommandSpec("view.float_panel", "command.view.float_panel", "Mod+Shift+F"),
         CommandSpec("view.focus_canvas", "command.view.focus_canvas", "Mod+1"),
+        CommandSpec("view.settings", "simple.menu.settings"),
         CommandSpec("view.toggle_expert_mode", "command.view.toggle_expert_mode"),
+        CommandSpec("view.full_layout", "simple.menu.panels", expert=True),
+        CommandSpec("view.simple_layout", "simple.menu.simple", expert=True),
     )

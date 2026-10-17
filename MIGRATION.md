@@ -314,6 +314,8 @@ Apps open in simple mode. `state/suite.json` key `ui.expert_mode` is false until
 
 `view.toggle_expert_mode` has no default chord. Put it in the View menu and the command palette. A keymap `when` of `expert` runs only while the mode is on.
 
+Image apps open on `SimpleImageLayout` (`voxprint_common.ui.simple_image`). Pass preset rows, or use `image_presets`. The dock is an Expert mode option named Panels. It is not the default, and turning Expert mode off returns to the simple screen.
+
 Image apps (Canvas first, then Enlarge, Clarity, and Lucent) use `IMAGE_CONTENT_FILTER` for the adult-content bool. The descriptor is the whole feature: no classifier and no extra flow live in this library.
 
 Canvas adopts the shell, including this rule, before the other apps.

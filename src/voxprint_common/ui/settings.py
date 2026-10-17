@@ -31,6 +31,7 @@ class SettingType(StrEnum):
     INT = "int"
     FLOAT = "float"
     PATH = "path"
+    TEXT = "text"
 
 
 @dataclass(frozen=True)
@@ -88,6 +89,10 @@ class SettingSpec:
         if kind is SettingType.PATH:
             if self.default is not None and not isinstance(self.default, str):
                 raise ValueError("a path setting default must be text or null")
+            return
+        if kind is SettingType.TEXT:
+            if not isinstance(self.default, str):
+                raise ValueError("a text setting default must be text")
             return
         assert_never(kind)
 
@@ -156,8 +161,9 @@ IMAGE_CONTENT_FILTER = SettingSpec(
 def reference_settings() -> Settings:
     """Return the settings the reference shell shows.
 
-    Two are plain: how many pictures, and where to save them. Three are
-    expert: steps, sampler, and :data:`IMAGE_CONTENT_FILTER`.
+    Two are plain: how many pictures, and where to save them. They live in
+    the settings sheet. The expert side panel adds steps, sampler, guidance,
+    seed, a LoRA file, a negative prompt, and :data:`IMAGE_CONTENT_FILTER`.
     """
     return Settings(
         (
@@ -203,6 +209,46 @@ def reference_settings() -> Settings:
                     Choice("dpm", "setting.shell.sampler.dpm"),
                     Choice("heun", "setting.shell.sampler.heun"),
                 ),
+            ),
+            SettingSpec(
+                "shell.guidance",
+                "setting.shell.guidance",
+                "setting.shell.guidance.help",
+                SettingType.FLOAT,
+                7.0,
+                expert=True,
+                group="tuning",
+                minimum=1.0,
+                maximum=30.0,
+            ),
+            SettingSpec(
+                "shell.seed",
+                "setting.shell.seed",
+                "setting.shell.seed.help",
+                SettingType.INT,
+                0,
+                expert=True,
+                group="tuning",
+                minimum=0,
+                maximum=2_147_483_647,
+            ),
+            SettingSpec(
+                "shell.lora",
+                "setting.shell.lora",
+                "setting.shell.lora.help",
+                SettingType.PATH,
+                "",
+                expert=True,
+                group="tuning",
+            ),
+            SettingSpec(
+                "shell.negative",
+                "setting.shell.negative",
+                "setting.shell.negative.help",
+                SettingType.TEXT,
+                "",
+                expert=True,
+                group="tuning",
             ),
             IMAGE_CONTENT_FILTER,
         )

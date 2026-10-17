@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import assert_never
 
 from voxprint_common.i18n import set_language, tr
+from voxprint_common.suite_settings import set_expert_mode
 from voxprint_common.ui.commands import CommandSpec, Registry, reference_commands
 from voxprint_common.ui.dock import (
     Activate,
@@ -49,6 +50,12 @@ from voxprint_common.ui.keymap import (
 )
 from voxprint_common.ui.palette import score_text
 from voxprint_common.ui.settings import SettingSpec, SettingType, reference_settings
+from voxprint_common.ui.simple_image import (
+    Phase,
+    SimpleImageLayout,
+    SimpleImageWidget,
+    image_presets,
+)
 from voxprint_common.ui.theme import PRIMARY, TEXT, TEXT_MUTED, TEXT_ON_ACCENT, build_shell_style
 
 __all__ = [
@@ -116,6 +123,9 @@ def grab_shell(
     reveal_close: bool = False,
     show_settings: bool = False,
     expert: bool = False,
+    full_layout: bool = False,
+    result: bool = False,
+    prompt: str = "A quiet hill at dusk",
 ) -> None:
     """Paint the reference shell and save a PNG.
 
@@ -130,17 +140,26 @@ def grab_shell(
         reveal_close: Show the close control on the first closable tab.
         show_settings: Select the Settings panel before the grab.
         expert: Turn Expert mode on before the grab.
+        full_layout: Show the dock. This also turns Expert mode on.
+        result: Show a neutral gradient as the finished picture.
+        prompt: Words placed in the prompt when ``result`` is true.
     """
     set_language(language)
+    set_expert_mode(expert or full_layout)
     _qt()
     widgets = _widgets()
     app = widgets.QApplication.instance() or widgets.QApplication([])
-    shell = ReferenceShell(glass=glass)
-    shell.expert.set_enabled(expert)
-    if show_settings:
-        shell.show_panel("settings")
-    shell.resize(1100, 700)
+    shell = ReferenceShell(glass=glass, full_layout=full_layout)
+    shell.resize(1200, 900)
     shell.show()
+    app.processEvents()
+    if show_settings:
+        if shell.full_layout:
+            shell.show_panel("settings")
+        else:
+            shell.run("view.settings")
+    if result and not shell.full_layout:
+        shell.show_result(prompt)
     app.processEvents()
     if show_palette:
         shell.open_palette()
@@ -162,13 +181,15 @@ def grab_shell(
 class ReferenceShell:
     """The reference window. Construction imports PySide6."""
 
-    def __init__(self, *, glass: bool = False) -> None:
+    def __init__(self, *, glass: bool = False, full_layout: bool = False) -> None:
         qt, gui, widgets = _qt()
         self._qt = qt
         self._gui = gui
         self._widgets = widgets
         self.history = DockHistory(reference_layout())
         self.expert = ExpertMode()
+        self.image = SimpleImageLayout(image_presets())
+        self._picture_count = 0
         self._stop_expert = lambda: None
         self.registry = Registry(reference_commands())
         overrides = load_overrides()
@@ -186,6 +207,7 @@ class ReferenceShell:
         self._press_sizes: dict[tuple[bool, ...], tuple[int, ...]] = {}
         self._toolbar_available: int | None = None
         self._palette_query = ""
+        self._chrome_ready = False
         self.widget = widgets.QWidget()
         self.widget.setObjectName("shell")
         self.widget.setFocusPolicy(qt.StrongFocus)
@@ -218,6 +240,13 @@ class ReferenceShell:
         self._install_shortcuts()
         self._install_resize_watch()
         self._stop_expert = self.expert.subscribe(self._on_expert)
+        if full_layout:
+            self.expert.set_enabled(True)
+            self.image.request_full_layout(True, expert=self.expert.enabled())
+            self._fill_menus()
+            self._sync_shortcuts()
+            self._apply_surface()
+        self._chrome_ready = True
         self.rebuild()
 
     def resize(self, width: int, height: int) -> None:
@@ -282,6 +311,7 @@ class ReferenceShell:
             return
         if command_id == "file.save":
             self._status.setText(tr("shell.status.saved"))
+            self.simple.set_note(tr("shell.status.saved"))
             return
         if command_id == "edit.undo":
             self._history_step(self.history.undo)
@@ -301,6 +331,22 @@ class ReferenceShell:
         if command_id == "view.toggle_expert_mode":
             self.expert.toggle()
             return
+        if command_id == "file.open_folder":
+            self._status.setText(tr("simple.menu.open_folder"))
+            self.simple.set_note(tr("simple.menu.open_folder"))
+            return
+        if command_id == "view.settings":
+            if self.full_layout:
+                self.show_panel("settings")
+            else:
+                self.simple.toggle_settings()
+            return
+        if command_id == "view.full_layout":
+            self.set_full_layout(True)
+            return
+        if command_id == "view.simple_layout":
+            self.set_full_layout(False)
+            return
 
     def show_panel(self, panel: str) -> None:
         """Select ``panel`` and paint the dock again.
@@ -315,6 +361,48 @@ class ReferenceShell:
             return
         self.rebuild()
         self._sync_shortcuts()
+
+    @property
+    def full_layout(self) -> bool:
+        """Return whether the dock is on screen. It stays off in simple mode."""
+        return self.image.dock_visible(expert=self.expert.enabled())
+
+    def set_full_layout(self, enabled: bool) -> None:
+        """Show the dock, or return to the simple screen.
+
+        The dock is ignored unless Expert mode is on. Turning Expert mode off
+        clears this choice.
+
+        Args:
+            enabled: True asks for the dock.
+        """
+        self.image.request_full_layout(enabled, expert=self.expert.enabled())
+        self._fill_menus()
+        self._apply_surface()
+        if self.full_layout:
+            self.rebuild()
+
+    def show_result(self, prompt: str) -> None:
+        """Finish one picture and show a neutral gradient for it.
+
+        Args:
+            prompt: Words placed in the prompt box.
+        """
+        self.simple.set_prompt_text(prompt)
+        if self.image.phase is Phase.BUSY:
+            self.image.cancel()
+        if not self.image.generate():
+            return
+        self._picture_count += 1
+        self.image.finish(f"preview-{self._picture_count}")
+        self.simple.refresh(prompt=True)
+
+    def _complete_picture(self) -> None:
+        if self.image.phase is not Phase.BUSY:
+            return
+        self._picture_count += 1
+        self.image.finish(f"picture-{self._picture_count}")
+        self.simple.refresh()
 
     def rebuild(self) -> None:
         """Paint the current dock tree again."""
@@ -342,35 +430,65 @@ class ReferenceShell:
     def _build_chrome(self) -> None:
         widgets = self._widgets
         root = widgets.QVBoxLayout(self.widget)
-        root.setContentsMargins(12, 10, 12, 8)
-        root.setSpacing(8)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+        self.simple = SimpleImageWidget(
+            self.image,
+            reference_settings(),
+            on_generate=self._complete_picture,
+            on_command=self.run,
+        )
+        root.addWidget(self.simple.root, 1)
+        self._dock_host = widgets.QWidget()
+        self._dock_host.setObjectName("dockHost")
+        host = widgets.QVBoxLayout(self._dock_host)
+        host.setContentsMargins(12, 10, 12, 8)
+        host.setSpacing(8)
         title = widgets.QLabel(tr("shell.window.title"))
         title.setObjectName("titlebar")
-        root.addWidget(title)
+        host.addWidget(title)
         menu_bar = widgets.QMenuBar()
         file_menu = menu_bar.addMenu(tr("shell.menu.file"))
         edit_menu = menu_bar.addMenu(tr("shell.menu.edit"))
         view_menu = menu_bar.addMenu(tr("shell.menu.view"))
-        root.addWidget(menu_bar)
-        root.addWidget(self._toolbar)
-        root.addWidget(self._dock, 1)
+        host.addWidget(menu_bar)
+        host.addWidget(self._toolbar)
+        host.addWidget(self._dock, 1)
         status_row = widgets.QWidget()
-        row = widgets.QHBoxLayout(status_row)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(8)
-        row.addWidget(self._status, 1)
-        row.addWidget(self._expert_chip)
-        root.addWidget(status_row)
+        self._status_layout = widgets.QHBoxLayout(status_row)
+        self._status_layout.setContentsMargins(0, 0, 0, 0)
+        self._status_layout.setSpacing(8)
+        self._status_layout.addWidget(self._status, 1)
+        host.addWidget(status_row)
+        root.addWidget(self._dock_host, 1)
         self._file_menu = file_menu
         self._edit_menu = edit_menu
         self._view_menu = view_menu
         self._fill_menus()
+        self._apply_surface()
+
+    def _apply_surface(self) -> None:
+        dock = self.full_layout
+        self._dock_host.setVisible(dock)
+        self.simple.root.setVisible(not dock)
+        self.simple.set_expert(self.expert.enabled() and not dock)
+        if dock:
+            if self._status_layout.indexOf(self._expert_chip) < 0:
+                self._status_layout.addWidget(self._expert_chip)
+        else:
+            self.simple.place_chip(self._expert_chip)
+        self._expert_chip.setText(tr("shell.status.expert"))
+        self._expert_chip.setVisible(self.expert.enabled())
 
     def _fill_menus(self) -> None:
         self._file_menu.clear()
         self._edit_menu.clear()
         self._view_menu.clear()
         for spec in self.registry.visible(expert=self.expert.enabled()):
+            if spec.command_id == "view.full_layout" and self.full_layout:
+                continue
+            if spec.command_id == "view.simple_layout" and not self.full_layout:
+                continue
             if spec.command_id.startswith("file."):
                 self._add_action(self._file_menu, spec)
             elif spec.command_id.startswith("edit."):
@@ -429,14 +547,16 @@ class ReferenceShell:
         return active_contexts(*focused, expert=self.expert.enabled())
 
     def _on_expert(self, enabled: bool) -> None:
-        del enabled
-        self._expert_chip.setText(tr("shell.status.expert"))
-        self._expert_chip.setVisible(self.expert.enabled())
+        if not enabled:
+            self.image.request_full_layout(False, expert=False)
+        if not self._chrome_ready:
+            return
         self._fill_menus()
         if self.palette_open():
             self._refill_palette(self._palette_query)
         self._sync_shortcuts()
         self.rebuild()
+        self._apply_surface()
 
     def _view(self) -> Layout[str]:
         return visible_layout(self.history.layout, reference_panels(), expert=self.expert.enabled())
@@ -555,6 +675,7 @@ class ReferenceShell:
                 button.deleteLater()  # type: ignore[attr-defined]
                 continue
             button.clicked.connect(lambda _checked=False, command=command_id: self.run(command))  # type: ignore[attr-defined]
+            button.show()  # type: ignore[attr-defined]
             layout.addWidget(button)
         if overflow:
             for index in overflow:
@@ -563,6 +684,7 @@ class ReferenceShell:
                 action.triggered.connect(
                     lambda _checked=False, command=command_id: self.run(command)
                 )
+            more.show()
             layout.addWidget(more)
         else:
             more.hide()
@@ -962,7 +1084,12 @@ def _match_indexes(text: str, query: str) -> set[int]:
 
 def _group_key(command_id: str) -> str:
     """Return the palette category key for a command id."""
-    if command_id == "view.toggle_expert_mode":
+    if command_id in {
+        "view.toggle_expert_mode",
+        "view.settings",
+        "view.full_layout",
+        "view.simple_layout",
+    }:
         return "shell.group.view"
     prefix = command_id.split(".", 1)[0]
     if prefix == "file":
@@ -1237,6 +1364,12 @@ def _setting_control(shell: ReferenceShell, spec: SettingSpec) -> object:
         edit = widgets.QLineEdit()
         edit.setObjectName(spec.setting_id)
         edit.setText(spec.default if isinstance(spec.default, str) else "")
+        control = edit
+    elif kind is SettingType.TEXT:
+        edit = widgets.QPlainTextEdit()
+        edit.setObjectName(spec.setting_id)
+        edit.setPlainText(spec.default if isinstance(spec.default, str) else "")
+        edit.setFixedHeight(64)
         control = edit
     else:
         assert_never(kind)

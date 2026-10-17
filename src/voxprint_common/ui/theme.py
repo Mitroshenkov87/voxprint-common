@@ -342,6 +342,52 @@ QToolButton#tabClose {{
     min-height: 14px; max-height: 14px;
 }}
 QToolButton#tabClose:hover {{ background: {CONTROL_HOVER}; }}
+QPlainTextEdit {{
+    background: {CONTROL_BG}; color: {TEXT};
+    border: {density.border_px}px solid {CONTROL_BORDER};
+    border-radius: {radius}px; padding: 8px;
+    selection-background-color: {ACCENT};
+}}
+QPlainTextEdit#promptBox {{ font-size: 16px; padding: 10px 12px; }}
+QPushButton#generate {{
+    background: {PRIMARY}; color: {TEXT_ON_PRIMARY};
+    border: {density.border_px}px solid {PRIMARY_BORDER};
+    border-radius: 8px; font-size: 16px; font-weight: 600; padding: 8px 18px;
+}}
+QPushButton#generate:disabled {{
+    background: {CONTROL_BG}; color: {TEXT_MUTED}; border-color: {CONTROL_BORDER};
+}}
+QPushButton#overflow {{
+    background: transparent; color: {TEXT_MUTED}; border: none; padding: 2px 10px;
+    min-height: 28px;
+}}
+QPushButton#overflow::menu-indicator {{ image: none; width: 0; }}
+QPushButton[chip="true"] {{
+    min-height: 30px; padding: 2px 14px; border-radius: 15px;
+}}
+QPushButton[chip="true"]:checked {{
+    background: {PRIMARY}; color: {TEXT_ON_PRIMARY};
+    border-color: {PRIMARY_BORDER}; font-weight: 600;
+}}
+QPushButton[thumb="true"] {{ padding: 2px; border-radius: 8px; }}
+QPushButton[thumb="true"]:checked {{
+    border: 2px solid {PRIMARY}; background: {CONTROL_BG};
+}}
+QLabel#presetLabel, QLabel#emptyHint, QLabel#simpleNote {{
+    color: {TEXT_MUTED}; background: transparent;
+}}
+QLabel#emptyHint {{ font-size: 16px; }}
+QLabel#progressText {{ color: {TEXT}; font-size: 15px; background: transparent; }}
+QLabel#result {{ background: transparent; }}
+QFrame#stage, QFrame#expertPanel, QFrame#settingsSheet {{
+    background: {card_bg}; border: {density.border_px}px solid {CONTROL_BORDER};
+    border-radius: 8px;
+}}
+QProgressBar#progress {{
+    border: none; background: {CONTROL_BG}; border-radius: 4px;
+    min-height: 8px; max-height: 8px;
+}}
+QProgressBar#progress::chunk {{ background: {PRIMARY}; border-radius: 4px; }}
 """
 
 
