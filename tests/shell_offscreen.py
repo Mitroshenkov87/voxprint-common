@@ -647,13 +647,25 @@ def _check_simple(app: object, qt: object, test: object) -> None:
     assert panel_box[0] >= stage_after[0] + stage_after[2]
     split = shell.find("QSplitter", "expertSplit")
     assert split is not None
-    split.setSizes([900, 420])  # type: ignore[attr-defined]
+    # A 1200-wide window can be too narrow for a 420 panel once Windows
+    # font metrics widen the stage. Give the splitter room, then request
+    # sizes that already sum to its content width.
+    shell.resize(1800, 900)  # type: ignore[attr-defined]
     app.processEvents()  # type: ignore[attr-defined]
+
+    def panel_width(width: int) -> None:
+        handle = split.handleWidth()  # type: ignore[attr-defined]
+        room = split.width() - handle  # type: ignore[attr-defined]
+        split.setSizes([max(1, room - width), width])  # type: ignore[attr-defined]
+        app.processEvents()  # type: ignore[attr-defined]
+
+    panel_width(420)
     assert panel.width() == 420  # type: ignore[attr-defined]
-    split.setSizes([900, 220])  # type: ignore[attr-defined]
-    app.processEvents()  # type: ignore[attr-defined]
+    panel_width(220)
     assert panel.width() == 220  # type: ignore[attr-defined]
-    split.setSizes([900, 280])  # type: ignore[attr-defined]
+    shell.resize(1200, 900)  # type: ignore[attr-defined]
+    app.processEvents()  # type: ignore[attr-defined]
+    panel_width(280)
     assert shell.find("QDoubleSpinBox", "shell.guidance").isVisible() is True  # type: ignore[attr-defined]
     assert shell.find("QSpinBox", "shell.seed").isVisible() is True  # type: ignore[attr-defined]
     assert shell.find("QLineEdit", "shell.addons").isVisible() is True  # type: ignore[attr-defined]
