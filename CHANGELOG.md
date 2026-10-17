@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-The expert panel uses the dark tokens, a title, and the live values of the current preset, with Reset while that preset has changes. History uses the same dark surface. Expert mode does not resize the window. The image screen keeps one size row and a large result. The viewer is a picture with a thin toolbar. Clarity wipes one frame along a vertical divider. Audiobook Builder asks you to choose a book. Selected chips are wide enough for the bold label.
+The expert panel uses the dark tokens, a title, and the live values of the current preset, with Reset while that preset has changes. History uses the same dark surface. Expert mode does not resize the window. The image screen keeps one size row and a large result. The viewer is a picture with a thin toolbar. Clarity wipes one frame along a vertical divider. Audiobook Builder asks you to choose a book. Selected chips and the Expert toggle are wide enough for the bold label. A combo keeps its longest value inside the panel, or ends it with an ellipsis and a tooltip. A model uses one name in the simple picker and in Expert mode.
 
 Language catalogs are JSON files in `ui/locales`, beside `tokens.json`. A missing translation falls back to English. `density.focus_ring_px` is 2. `suite.json` is written under the data home with a lock, and a torn file does not replace the last good copy. The viewer screen has no input and no primary action. History can be hidden. The first window is 1200 by 900, with a minimum of 960 by 640, or 640 by 400 for the viewer. Later launches restore the saved rectangle. The expert panel is 280 px and resizes from 220 to 420. Time left appears only when a job supplies a duration.
 

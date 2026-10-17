@@ -1351,10 +1351,45 @@ def _check_split_colour(app: object, accent: str) -> None:
     app.processEvents()  # type: ignore[attr-defined]
 
 
+def _painted_button_font(button: object) -> object:
+    """Return the font the stylesheet actually draws for this button."""
+    from PySide6.QtGui import QFont
+
+    font = QFont(button.font())  # type: ignore[attr-defined]
+    name = str(button.objectName())  # type: ignore[attr-defined]
+    checked = bool(button.isChecked())  # type: ignore[attr-defined]
+    bold = name in {"generate", "primary"} or (
+        checked and (name == "expertToggle" or button.property("chip") == "true")  # type: ignore[attr-defined]
+    )
+    if bold:
+        font.setWeight(QFont.Weight.DemiBold)
+    if name == "generate":
+        font.setPixelSize(16)
+    return font
+
+
+def _combo_usable_width(combo: object) -> int:
+    from PySide6.QtWidgets import QStyle, QStyleOptionComboBox
+
+    option = QStyleOptionComboBox()
+    combo.initStyleOption(option)  # type: ignore[attr-defined]
+    rect = combo.style().subControlRect(  # type: ignore[attr-defined]
+        QStyle.ComplexControl.CC_ComboBox,
+        option,
+        QStyle.SubControl.SC_ComboBoxEditField,
+        combo,  # type: ignore[arg-type]
+    )
+    return max(rect.width() - 2, 0)
+
+
 def _check_chip_fit(app: object) -> None:
-    """Selected chips are bold. The bold text has to fit the contents rect."""
-    from PySide6.QtGui import QFont, QFontMetrics
-    from PySide6.QtWidgets import QPushButton
+    """Labels stay inside chips, the expert toggle, buttons, and combos.
+
+    A combo may elide with an ellipsis when the panel is narrower than its
+    longest item. The full value stays on the tooltip and on ``currentText``.
+    """
+    from PySide6.QtGui import QFontMetrics
+    from PySide6.QtWidgets import QComboBox, QPushButton
 
     from voxprint_common.i18n import set_language
     from voxprint_common.suite_settings import set_expert_mode
@@ -1379,18 +1414,53 @@ def _check_chip_fit(app: object) -> None:
             key, value = _MODIFIED[app_id]
             shell.image.set_value(key, value)
             shell.simple.refresh()
+            shell.simple.set_expert(True)
             app.processEvents()  # type: ignore[attr-defined]
+            assert shell.widget.width() == 1200, (language, app_id, shell.widget.width())
+            assert shell.widget.height() == 900, (language, app_id, shell.widget.height())
             for button in shell.widget.findChildren(QPushButton):
-                if button.property("chip") != "true" or not button.isVisible():
+                if not button.isVisible():
                     continue
                 text = button.text()
                 if not text:
                     continue
-                font = QFont(button.font())
-                font.setWeight(QFont.Weight.DemiBold)
-                advance = QFontMetrics(font).horizontalAdvance(text)
+                font = _painted_button_font(button)
+                advance = QFontMetrics(font).horizontalAdvance(text)  # type: ignore[arg-type]
                 contents = button.contentsRect().width()
-                assert advance <= contents, (language, app_id, text, advance, contents)
+                assert advance <= contents, (
+                    language,
+                    app_id,
+                    button.objectName(),
+                    text,
+                    advance,
+                    contents,
+                )
+            for combo in shell.widget.findChildren(QComboBox):
+                if not combo.isVisible():
+                    continue
+                combo.repaint()
+                text = combo.currentText()
+                if not text:
+                    continue
+                usable = _combo_usable_width(combo)
+                advance = QFontMetrics(combo.font()).horizontalAdvance(text)
+                fitted = combo.property("fittedText")
+                assert isinstance(fitted, str), (language, app_id, combo.objectName(), text)
+                if advance <= usable:
+                    assert fitted == text, (language, app_id, text, fitted, usable)
+                    continue
+                assert fitted.endswith("…") and fitted != text, (
+                    language,
+                    app_id,
+                    combo.objectName(),
+                    text,
+                    fitted,
+                    advance,
+                    usable,
+                )
+                assert QFontMetrics(combo.font()).horizontalAdvance(fitted) <= usable
+                assert text in combo.toolTip(), (language, app_id, text, combo.toolTip())
+                assert combo.currentText() == text
             shell.close()
             app.processEvents()  # type: ignore[attr-defined]
 

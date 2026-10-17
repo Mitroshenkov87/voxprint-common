@@ -1030,6 +1030,7 @@ class SimpleImageWidget:
         self._overflow = widgets.QPushButton(f"{tr('shell.toolbar.overflow')}  ▾")
         self._overflow.setObjectName("overflow")
         self._overflow.setAutoDefault(False)
+        _fit_plain(self._overflow, pad=28)
         overflow = widgets.QMenu(self.root)
         overflow.addAction(
             tr("simple.menu.open_folder"),
@@ -1048,6 +1049,8 @@ class SimpleImageWidget:
         self._expert_toggle.setCheckable(True)
         self._expert_toggle.setAutoDefault(False)
         self._expert_toggle.clicked.connect(lambda: self._command("view.toggle_expert_mode"))
+        # The checked label is weight 600, same as a selected chip.
+        _fit_chip(self._expert_toggle)
         self._top.addWidget(self._expert_toggle)
         root.addLayout(self._top)
         self._prompt = None
@@ -1069,11 +1072,13 @@ class SimpleImageWidget:
             self._improve.setObjectName("improvePrompt")
             self._improve.setAutoDefault(False)
             self._improve.clicked.connect(self._improve_prompt)
+            _fit_plain(self._improve, pad=28)
             self._revert = widgets.QPushButton(tr("simple.revert"))
             self._revert.setObjectName("revertPrompt")
             self._revert.setAutoDefault(False)
             self._revert.setEnabled(False)
             self._revert.clicked.connect(self._revert_prompt)
+            _fit_plain(self._revert, pad=28)
             tools.addWidget(self._improve)
             tools.addWidget(self._revert)
             tools.addStretch(1)
@@ -1089,6 +1094,8 @@ class SimpleImageWidget:
             self._generate_button.setObjectName("generate")
             self._generate_button.setAutoDefault(False)
             self._generate_button.setMinimumSize(148, 64)
+            # The action is 16 px and weight 600. The width follows that font.
+            _fit_bold(self._generate_button, pad=40, pixel=16)
             self._generate_button.clicked.connect(self._generate)
             prompt_row.addWidget(self._generate_button)
             root.addLayout(prompt_row)
@@ -1335,6 +1342,7 @@ class SimpleImageWidget:
         cancel = widgets.QPushButton(tr("simple.cancel"))
         cancel.setObjectName("cancel")
         cancel.setAutoDefault(False)
+        _fit_plain(cancel, pad=28)
         cancel.clicked.connect(self._cancel)
         cancel_row.addWidget(cancel)
         cancel_row.addStretch(1)
@@ -1544,6 +1552,7 @@ class SimpleImageWidget:
                     action.clicked.connect(
                         lambda _checked=False, command=choice.action_id: self._command(command)
                     )
+                    _fit_plain(action, pad=28)
                     line.addWidget(action)
                 if index == 0 and self._layout.state is not None:
                     custom = widgets.QPushButton(tr("simple.preset.custom"))
@@ -1678,6 +1687,7 @@ class SimpleImageWidget:
             button.clicked.connect(
                 lambda _checked=False, row_id=row.row_id: self._reset_group(row_id)
             )
+            _fit_plain(button, pad=24)
             layout.addWidget(button)
         host.setVisible(visible)  # type: ignore[attr-defined]
 
@@ -1762,6 +1772,7 @@ class SimpleImageWidget:
             button.setObjectName(name)
             button.setAutoDefault(False)
             button.setMinimumHeight(28)
+            _fit_plain(button, pad=28)
             button.clicked.connect(handler)
             row.addWidget(button)
         row.addStretch(1)
@@ -1787,6 +1798,7 @@ class SimpleImageWidget:
         button.setObjectName(name)
         button.setAutoDefault(False)
         button.setMinimumHeight(34)
+        _fit_plain(button, pad=32)
         button.clicked.connect(handler)
         return button
 
@@ -1833,10 +1845,10 @@ class SimpleImageWidget:
             label = widgets.QLabel(tr("simple.drop.model"))
             label.setObjectName("modelLabel")
             column.addWidget(label)
-            model = widgets.QComboBox()
+            model = _eliding_combo()
             model.setObjectName("modelPicker")
-            model.addItem(tr("simple.model.standard"))
-            model.addItem(tr("simple.model.large"))
+            model.addItem(tr("setting.tool.model.standard"))
+            model.addItem(tr("setting.tool.model.large"))
             self._model = model
             column.addWidget(model)
             column.addStretch(1)
@@ -1861,7 +1873,7 @@ class SimpleImageWidget:
             row.setSpacing(8)
             voice_label = widgets.QLabel(tr("simple.voice"))
             voice_label.setObjectName("voiceLabel")
-            voice = widgets.QComboBox()
+            voice = _eliding_combo()
             voice.setObjectName("voicePicker")
             voice.addItem(tr("simple.voice.warm"))
             voice.addItem(tr("simple.voice.clear"))
@@ -2200,9 +2212,15 @@ def _fill_form(
         label = widgets.QLabel(tr(spec.label_key))  # type: ignore[attr-defined]
         label.setObjectName("panel")
         label.setWordWrap(True)
-        label.setMinimumWidth(96)
-        row.addWidget(label, 1)
-        row.addWidget(control, 1)
+        if spec.type is SettingType.ENUM:
+            # The value keeps the row. A long label wraps instead of squeezing it.
+            label.setMinimumWidth(0)
+            row.addWidget(label, 0)
+            row.addWidget(control, 1)
+        else:
+            label.setMinimumWidth(96)
+            row.addWidget(label, 1)
+            row.addWidget(control, 1)
         form.addLayout(row)  # type: ignore[attr-defined]
 
 
@@ -2214,16 +2232,14 @@ def _control(widgets: object, spec: SettingSpec, value: object) -> object:
         box.setChecked(value is True)
         control = box
     elif kind is SettingType.ENUM:
-        combo = widgets.QComboBox()  # type: ignore[attr-defined]
-        combo.setObjectName(spec.setting_id)
-        combo.setSizeAdjustPolicy(combo.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-        combo.setMinimumContentsLength(10)
+        combo = _eliding_combo()
+        combo.setObjectName(spec.setting_id)  # type: ignore[attr-defined]
         selected = 0
         for index, choice in enumerate(spec.choices):
-            combo.addItem(tr(choice.label_key), choice.value)
+            combo.addItem(tr(choice.label_key), choice.value)  # type: ignore[attr-defined]
             if choice.value == value:
                 selected = index
-        combo.setCurrentIndex(selected)
+        combo.setCurrentIndex(selected)  # type: ignore[attr-defined]
         control = combo
     elif kind is SettingType.INT:
         spin = widgets.QSpinBox()  # type: ignore[attr-defined]
@@ -2259,7 +2275,11 @@ def _control(widgets: object, spec: SettingSpec, value: object) -> object:
     else:
         assert_never(kind)
     if spec.expert:
-        control.setToolTip(tr(spec.help_key))  # type: ignore[attr-defined]
+        tip = tr(spec.help_key)
+        control.setProperty("helpTip", tip)  # type: ignore[attr-defined]
+        control.setToolTip(tip)  # type: ignore[attr-defined]
+    if kind is SettingType.ENUM:
+        _note_combo_fit(control)
     return control
 
 
@@ -2306,6 +2326,7 @@ def _write_control(control: object, spec: SettingSpec, value: object) -> None:
         index = control.findData(value)  # type: ignore[attr-defined]
         if index >= 0:
             control.setCurrentIndex(index)  # type: ignore[attr-defined]
+        _note_combo_fit(control)
         return
     if kind is SettingType.INT:
         if isinstance(value, int) and not isinstance(value, bool):
@@ -2432,15 +2453,131 @@ def _swatch(
     return gui.QPixmap.fromImage(image)  # type: ignore[attr-defined]
 
 
-def _fit_chip(button: object) -> None:
-    """Reserve the bold label width. Selected chips are drawn at weight 600."""
+_COMBO: type | None = None
+
+
+def _eliding_combo() -> object:
+    """Return a combo box that elides the current text instead of clipping it."""
+    global _COMBO
+    if _COMBO is None:
+        _core, _gui, widgets = _qt()
+
+        class _ElidingCombo(widgets.QComboBox):  # type: ignore[misc]
+            def __init__(self, parent: object = None) -> None:
+                super().__init__(parent)  # type: ignore[arg-type]
+                self.setSizeAdjustPolicy(self.SizeAdjustPolicy.AdjustToContents)
+                self.setMinimumContentsLength(1)
+                self.currentIndexChanged.connect(lambda *_args: _note_combo_fit(self))
+
+            def minimumSizeHint(self) -> object:  # type: ignore[override]
+                core, _gui, _widgets = _qt()
+                hint = super().minimumSizeHint()
+                # A long translation may be wider than the panel. Elide instead.
+                return core.QSize(72, hint.height())
+
+            def paintEvent(self, event: object) -> None:
+                del event
+                _paint_elided_combo(self)
+
+            def resizeEvent(self, event: object) -> None:
+                super().resizeEvent(event)  # type: ignore[arg-type]
+                _note_combo_fit(self)
+
+            def showEvent(self, event: object) -> None:
+                super().showEvent(event)  # type: ignore[arg-type]
+                _note_combo_fit(self)
+
+            def showPopup(self) -> None:
+                view = self.view()
+                view.setMinimumWidth(max(view.sizeHintForColumn(0) + 24, self.width()))
+                super().showPopup()
+
+        _COMBO = _ElidingCombo
+    return _COMBO()
+
+
+def _combo_usable_width(combo: object) -> int:
+    """Return the width the closed combo can paint, inside the arrow."""
+    _core, _gui, widgets = _qt()
+    option = widgets.QStyleOptionComboBox()  # type: ignore[attr-defined]
+    combo.initStyleOption(option)  # type: ignore[attr-defined]
+    rect = combo.style().subControlRect(  # type: ignore[attr-defined]
+        widgets.QStyle.ComplexControl.CC_ComboBox,  # type: ignore[attr-defined]
+        option,
+        widgets.QStyle.SubControl.SC_ComboBoxEditField,  # type: ignore[attr-defined]
+        combo,
+    )
+    # The style draws the label one pixel in from each side of the field.
+    return max(int(rect.width()) - 2, 0)
+
+
+def _note_combo_fit(combo: object) -> None:
+    """Remember the elided label, and put the full value on the tooltip."""
+    text = str(combo.currentText())  # type: ignore[attr-defined]
+    usable = _combo_usable_width(combo)
+    if usable < 8:
+        combo.setProperty("fittedText", text)  # type: ignore[attr-defined]
+        return
+    core, gui, _widgets = _qt()
+    metrics = gui.QFontMetrics(combo.font())  # type: ignore[attr-defined]
+    fitted = str(
+        metrics.elidedText(text, core.Qt.TextElideMode.ElideRight, usable)  # type: ignore[attr-defined]
+    )
+    combo.setProperty("fittedText", fitted)  # type: ignore[attr-defined]
+    help_tip = combo.property("helpTip")  # type: ignore[attr-defined]
+    help_text = help_tip if isinstance(help_tip, str) else ""
+    if fitted == text:
+        tip = help_text
+    elif help_text:
+        tip = f"{text}\n{help_text}"
+    else:
+        tip = text
+    if combo.toolTip() != tip:  # type: ignore[attr-defined]
+        combo.setToolTip(tip)  # type: ignore[attr-defined]
+
+
+def _paint_elided_combo(combo: object) -> None:
+    _note_combo_fit(combo)
+    _core, gui, widgets = _qt()
+    painter = widgets.QStylePainter(combo)  # type: ignore[attr-defined]
+    option = widgets.QStyleOptionComboBox()  # type: ignore[attr-defined]
+    combo.initStyleOption(option)  # type: ignore[attr-defined]
+    fitted = combo.property("fittedText")  # type: ignore[attr-defined]
+    if isinstance(fitted, str):
+        option.currentText = fitted
+    role = gui.QPalette.ColorRole  # type: ignore[attr-defined]
+    painter.setPen(combo.palette().color(role.Text))  # type: ignore[attr-defined]
+    painter.drawComplexControl(widgets.QStyle.ComplexControl.CC_ComboBox, option)  # type: ignore[attr-defined]
+    painter.drawControl(widgets.QStyle.ControlElement.CE_ComboBoxLabel, option)  # type: ignore[attr-defined]
+    painter.end()
+
+
+def _fit_bold(button: object, *, pad: int, pixel: int | None = None) -> None:
+    """Reserve the bold label width, including the horizontal padding."""
     text = str(button.text())  # type: ignore[attr-defined]
     _core, gui, _widgets = _qt()
     font = gui.QFont(button.font())  # type: ignore[attr-defined]
     font.setWeight(gui.QFont.Weight.DemiBold)  # type: ignore[attr-defined]
+    if pixel is not None:
+        font.setPixelSize(pixel)
     advance = int(gui.QFontMetrics(font).horizontalAdvance(text))  # type: ignore[attr-defined]
+    button.setMinimumWidth(max(advance + pad, 36))  # type: ignore[attr-defined]
+
+
+def _fit_plain(button: object, *, pad: int) -> None:
+    """Reserve the label width, including the horizontal padding."""
+    text = str(button.text())  # type: ignore[attr-defined]
+    if not text:
+        return
+    _core, gui, _widgets = _qt()
+    advance = int(gui.QFontMetrics(button.font()).horizontalAdvance(text))  # type: ignore[attr-defined]
+    button.setMinimumWidth(max(advance + pad, 36))  # type: ignore[attr-defined]
+
+
+def _fit_chip(button: object) -> None:
+    """Reserve the bold label width. Selected chips are drawn at weight 600."""
     # 14 px of padding on each side, plus the border.
-    button.setMinimumWidth(max(advance + 32, 36))  # type: ignore[attr-defined]
+    _fit_bold(button, pad=32)
 
 
 def _darken(scroll: object, gui: object) -> None:
