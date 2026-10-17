@@ -13,7 +13,7 @@ and does not move the rest. The dock stays a separate API.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -28,6 +28,8 @@ from voxprint_common.ui.presets import (
     reference_presets,
 )
 from voxprint_common.ui.safety import AdultPromptPolicy, SafetyGate, adult_prompt_policy
+from voxprint_common.ui.section_view import install_sections, sync_sections
+from voxprint_common.ui.sections import SectionDeck, SectionSet
 from voxprint_common.ui.settings import Settings, SettingSpec, SettingType, reference_settings
 from voxprint_common.ui.theme import CARD_PLAIN
 from voxprint_common.ui.tokens import load
@@ -152,6 +154,9 @@ class SimpleImageLayout:
         gate: SafetyGate | None = None,
         state_name: str = "image-settings.json",
         history_name: str = _HISTORY_NAME,
+        section_set: SectionSet | None = None,
+        capture: Callable[[str, str], Mapping[str, object]] | None = None,
+        restore: Callable[[str, str, Mapping[str, object]], None] | None = None,
     ) -> None:
         """Copy ``rows`` and select each row's default.
 
@@ -168,6 +173,9 @@ class SimpleImageLayout:
                 blocks every picture.
             state_name: Settings file name inside ``state_dir``.
             history_name: History file name inside ``state_dir``.
+            section_set: Sections and wizards. None keeps the single shared screen.
+            capture: Returns the app's wizard blob. The shell stores it and does not read it.
+            restore: Receives that blob when a checkpoint is loaded.
 
         Raises:
             ValueError: Two rows share an id.
@@ -207,6 +215,17 @@ class SimpleImageLayout:
         self.history: list[GalleryItem] = []
         self.selected: str | None = None
         self.full_layout = False
+        self.sections = (
+            SectionDeck(
+                section_set,
+                self._state,
+                state_dir=state_dir,
+                capture=capture,
+                restore=restore,
+            )
+            if section_set is not None and self._state is not None
+            else None
+        )
         self._load_history()
 
     @property
@@ -856,6 +875,7 @@ class SimpleImageWidget:
         self._handling_enter = False
         self._source: object | None = None
         self._scaled_to: tuple[int, int] | None = None
+        self._prompt_row: object | None = None
         core = self._core
 
         class _Root(widgets.QWidget):
@@ -865,6 +885,8 @@ class SimpleImageWidget:
         self.root = _Root()
         self.root.setObjectName("simpleRoot")
         self._build()
+        if self._layout.sections is not None:
+            install_sections(self)
 
     def place_chip(self, chip: object) -> None:
         """Keep the status chip out of the expert panel.
@@ -911,6 +933,8 @@ class SimpleImageWidget:
             self._expert_resets = resets
             self._expert_form.addWidget(resets)  # type: ignore[attr-defined]
             specs = tuple(spec for spec in self._settings.visible(expert=True) if spec.expert)
+            if self._layout.sections is not None:
+                specs = self._layout.sections.scoped(specs)
             _fill_form(
                 widgets,
                 self._expert_form,
@@ -960,6 +984,10 @@ class SimpleImageWidget:
         busy = self._layout.phase is Phase.BUSY
         if self._generate_button is not None:
             self._generate_button.setEnabled(not busy)  # type: ignore[attr-defined]
+        if self._layout.sections is not None:
+            sync_sections(self)
+            if not self._layout.sections.shows_screen():
+                return
         phase = self._layout.phase
         if phase is Phase.EMPTY:
             self._stack.setCurrentIndex(0)  # type: ignore[attr-defined]
@@ -1059,6 +1087,7 @@ class SimpleImageWidget:
         if self._surface.input_kind is not InputKind.NONE:
             prompt_row = widgets.QHBoxLayout()
             prompt_row.setSpacing(12)
+            self._prompt_row = prompt_row
         if self._surface.input_kind in {InputKind.PROMPT, InputKind.OUTLINE}:
             self._prompt = widgets.QPlainTextEdit()
             self._prompt.setObjectName("promptBox")

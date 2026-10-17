@@ -13,6 +13,7 @@ and the palette scorer.
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Mapping
 from html import escape
 from pathlib import Path
 from typing import assert_never
@@ -50,6 +51,7 @@ from voxprint_common.ui.keymap import (
     load_overrides,
 )
 from voxprint_common.ui.palette import score_text
+from voxprint_common.ui.sections import audiobook_sections
 from voxprint_common.ui.settings import SettingSpec, SettingType, reference_settings
 from voxprint_common.ui.simple_image import (
     Phase,
@@ -149,6 +151,10 @@ def grab_shell(
     modified: bool = False,
     prompt: str = "A quiet hill at dusk",
     app_id: str = "canvas",
+    sections: bool = False,
+    section_id: str = "",
+    wizard_id: str = "",
+    wizard_running: bool = False,
 ) -> None:
     """Paint the reference shell and save a PNG.
 
@@ -168,6 +174,10 @@ def grab_shell(
         modified: Hand-edit steps so Quality shows a changed chip and Reset.
         prompt: Words placed in the input when ``result`` is true.
         app_id: Which app surface to draw. ``canvas`` is the image screen.
+        sections: Draw the Audiobook Builder section demo.
+        section_id: Section to select when ``sections`` is true.
+        wizard_id: Wizard to open when ``sections`` is true.
+        wizard_running: Advance that wizard to its running step and show progress.
     """
     set_language(language)
     set_expert_mode(expert or full_layout)
@@ -179,6 +189,7 @@ def grab_shell(
         full_layout=full_layout,
         state_dir=path.parent / "state" / path.stem,
         app=app_id,
+        sections=sections,
     )
     shell.resize(1200, 900)
     shell.show()
@@ -207,6 +218,22 @@ def grab_shell(
     if reveal_close:
         shell._reveal_one_close()
         app.processEvents()
+    if sections and shell.image.sections is not None:
+        if prompt:
+            shell.simple.set_prompt_text(prompt)
+        deck = shell.image.sections
+        if wizard_id:
+            deck.open_wizard(wizard_id)
+            if wizard_running:
+                shell.image.set_value("train.sample", "sample.wav")
+                deck.advance()
+                shell.image.set_value("train.name", "Anya")
+                deck.advance()
+                deck.note_progress(2, 5, tr("wizard.train.running"))
+        elif section_id:
+            deck.select(section_id)
+        shell.simple.refresh()
+        app.processEvents()
     path.parent.mkdir(parents=True, exist_ok=True)
     shell.grab().save(str(path))
     shell.close()
@@ -234,6 +261,31 @@ class _ReferenceReview:
         return None
 
 
+def _checkpoint_blob(wizard_id: str, step_id: str) -> dict[str, str]:
+    """Return the app blob for this step.
+
+    The shell writes the blob into the checkpoint and does not look inside it.
+
+    Args:
+        wizard_id: Open wizard.
+        step_id: Open step.
+    """
+    return {"wizard": wizard_id, "step": step_id}
+
+
+def _restore_checkpoint(wizard_id: str, step_id: str, blob: Mapping[str, object]) -> None:
+    """Hand a stored blob back to the app.
+
+    There is no training step here. The app owns whatever the blob means.
+
+    Args:
+        wizard_id: Wizard that was open.
+        step_id: Step that was open.
+        blob: The object ``capture`` returned.
+    """
+    del wizard_id, step_id, blob
+
+
 class ReferenceShell:
     """The reference window. Construction imports PySide6."""
 
@@ -244,6 +296,7 @@ class ReferenceShell:
         full_layout: bool = False,
         state_dir: Path | None = None,
         app: str = "canvas",
+        sections: bool = False,
     ) -> None:
         """Build the reference window.
 
@@ -253,7 +306,10 @@ class ReferenceShell:
             state_dir: Directory for the history. None uses the app directory
                 under the suite State dir.
             app: Which simple screen to show. ``canvas`` is the image screen.
+            sections: Use the Audiobook Builder section demo on that audio screen.
         """
+        if sections and app != "audiobook-builder":
+            raise ValueError("sections are the Audiobook Builder demo")
         qt, gui, widgets = _qt()
         self._qt = qt
         self._gui = gui
@@ -262,7 +318,10 @@ class ReferenceShell:
         self.expert = ExpertMode()
         self.surface = surface_for(app)
         history_dir = suite_state_dir() / self.surface.app_id if state_dir is None else state_dir
+        self._section_set = audiobook_sections() if sections else None
         self.settings = settings_for(self.surface)
+        if self._section_set is not None:
+            self.settings = self._section_set.settings
         settings_file, history_file = state_names(self.surface)
         self.image = SimpleImageLayout(
             presets=variant_presets(self.surface, self.settings),
@@ -271,6 +330,9 @@ class ReferenceShell:
             gate=_ReferenceReview(),
             state_name=settings_file,
             history_name=history_file,
+            section_set=self._section_set,
+            capture=_checkpoint_blob,
+            restore=_restore_checkpoint,
         )
         self.prompt_policy = self.image.prompt_policy()
         self._picture_count = 0

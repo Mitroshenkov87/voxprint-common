@@ -49,7 +49,9 @@ class SettingSpec:
 
     ``label_key`` and ``help_key`` are catalog keys. ``help_key`` is a tooltip,
     and tooltips are for expert settings. ``default`` is the sensible value
-    used while the control is hidden.
+    used while the control is hidden. ``section`` and ``step`` name the section
+    or wizard step that shows an expert field. Both empty means the field
+    belongs to a screen that has no sections.
     """
 
     setting_id: str
@@ -62,6 +64,8 @@ class SettingSpec:
     choices: tuple[Choice, ...] = ()
     minimum: float | None = None
     maximum: float | None = None
+    section: str = ""
+    step: str = ""
 
     def __post_init__(self) -> None:
         """Reject a default that does not match ``type``."""

@@ -460,6 +460,21 @@ QScrollArea#expertScroll QScrollBar::sub-page:vertical {{
 QScrollArea#expertScroll QScrollBar:horizontal {{
     height: 0; background: {card_bg}; border: none;
 }}
+QWidget#sectionBar {{ background: transparent; }}
+QPushButton#sectionTab {{
+    background: transparent; color: {TEXT_MUTED}; border: none; border-radius: 0;
+    border-bottom: 2px solid transparent; padding: 4px 12px; min-height: 28px;
+}}
+QPushButton#sectionTab:checked {{
+    color: {TEXT}; font-weight: 600; background: transparent;
+    border-bottom: 2px solid {ACCENT};
+}}
+QPushButton#sectionMore, QPushButton#sectionAction, QPushButton#sectionPreview {{
+    background: {CONTROL_BG}; color: {TEXT};
+    border: {density.border_px}px solid {CONTROL_BORDER};
+    border-radius: {radius}px; padding: 2px 12px; min-height: 28px;
+}}
+QPushButton#sectionMore::menu-indicator {{ image: none; width: 0; }}
 QPushButton#expertReset {{
     background: transparent; color: {TEXT}; text-align: left;
     border: {density.border_px}px solid {CONTROL_BORDER}; padding: 4px 10px;

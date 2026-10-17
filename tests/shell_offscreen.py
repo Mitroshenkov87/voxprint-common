@@ -300,6 +300,35 @@ def main() -> None:
         app_id="canvas",
         prompt="Ein stiller Hügel",
     )
+    grab_shell(
+        out / "ru-sections.png",
+        language="ru",
+        app_id="audiobook-builder",
+        sections=True,
+        prompt="тихая-глава.epub",
+    )
+    grab_shell(
+        out / "ru-casting.png",
+        language="ru",
+        app_id="audiobook-builder",
+        sections=True,
+        section_id="roles",
+    )
+    grab_shell(
+        out / "ru-steps.png",
+        language="ru",
+        app_id="audiobook-builder",
+        sections=True,
+        wizard_id="train",
+    )
+    grab_shell(
+        out / "ru-steps-running.png",
+        language="ru",
+        app_id="audiobook-builder",
+        sections=True,
+        wizard_id="train",
+        wizard_running=True,
+    )
 
 
 def _overflow_labels() -> list[str]:

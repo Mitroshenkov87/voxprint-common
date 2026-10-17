@@ -134,6 +134,10 @@ def test_offscreen_shell_screenshots(tmp_path: Path) -> None:
             "ru-viewer-expert.png",
             "de-image-simple.png",
             "de-image-expert.png",
+            "ru-sections.png",
+            "ru-casting.png",
+            "ru-steps.png",
+            "ru-steps-running.png",
         )
     }
     pictures = (

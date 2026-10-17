@@ -173,6 +173,16 @@ Audiobook Builder and Movie Dubber. The input is a Choose a book drop area that 
 
 ![English audio screen, preset with changes](img/shell/audio-modified.png)
 
+Audiobook Builder can also open as sections. A single-section screen does not gain a tab row. Six sections fit the 960 px minimum, and any tab that does not fit goes to More instead of a scrollbar. Narration keeps the shared screen and adds Prepare text. Roles is a casting table: each row picks a voice, and that value is stored in the section's settings. Voices lists the voices and opens Train a voice, a three-step wizard whose last step shows progress and Cancel. A restart restores that step from the shared settings and a checkpoint the app provides. Expert fields for another section, or for a wizard step that is not open, stay out of the panel.
+
+![Russian sections](img/shell/ru-sections.png)
+
+![Russian casting table](img/shell/ru-casting.png)
+
+![Russian wizard](img/shell/ru-steps.png)
+
+![Russian wizard, running step](img/shell/ru-steps-running.png)
+
 ### Video
 
 Clarity. The input is a dropped video. The action is Improve video. The result is one frame with a before/after wipe. The divider is the slider. The preset file is `presets/video.json` (Strength). The expert panel shows the model, tile size, denoise strength, and encoder/CRF.
