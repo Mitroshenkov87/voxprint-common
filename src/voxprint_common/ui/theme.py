@@ -639,6 +639,19 @@ QSlider#compareSlider::add-page:horizontal, QSlider#compareSlider::sub-page:hori
 QSlider#compareSlider::handle:horizontal {{
     width: 4px; margin: -220px 0; background: {TEXT}; border: none; border-radius: 1px;
 }}
+QWidget#videoResult {{ background: transparent; }}
+QLabel#videoPoster {{
+    background: {CONTROL_BG}; color: {TEXT};
+    border: {density.border_px}px solid {CONTROL_BORDER}; border-radius: 8px;
+}}
+QLabel#videoPath {{ color: {TEXT}; background: transparent; }}
+QPushButton#videoPlay, QPushButton#videoOpen {{ padding: 4px 14px; min-height: 34px; }}
+QSlider#videoSeek::groove:horizontal {{
+    height: 6px; background: {CONTROL_BG}; border-radius: 3px;
+}}
+QSlider#videoSeek::handle:horizontal {{
+    background: {ACCENT}; width: 16px; margin: -6px 0; border-radius: 8px;
+}}
 QProgressBar#progress {{
     border: none; background: {CONTROL_BG}; border-radius: 4px;
     min-height: 8px; max-height: 8px;

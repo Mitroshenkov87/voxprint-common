@@ -13,14 +13,27 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import assert_never
 
+from voxprint_common.i18n import tr
 from voxprint_common.ui.safety import reject_reserved_key
 
+UNIT_PERCENT = "unit.percent"
+UNIT_DB = "unit.db"
+UNIT_KHZ = "unit.khz"
+UNIT_PX = "unit.px"
+
 __all__ = [
+    "UNIT_DB",
+    "UNIT_KHZ",
+    "UNIT_PERCENT",
+    "UNIT_PX",
     "Choice",
     "SettingSpec",
     "SettingType",
     "Settings",
+    "format_setting_value",
     "reference_settings",
+    "setting_suffix",
+    "spin_suffix",
 ]
 
 
@@ -51,7 +64,9 @@ class SettingSpec:
     and tooltips are for expert settings. ``default`` is the sensible value
     used while the control is hidden. ``section`` and ``step`` name the section
     or wizard step that shows an expert field. Both empty means the field
-    belongs to a screen that has no sections.
+    belongs to a screen that has no sections. ``suffix_key`` is an optional
+    unit. A dotted key is translated. A short literal such as ``%`` is shown
+    as written. An empty key leaves the value unchanged.
     """
 
     setting_id: str
@@ -66,6 +81,7 @@ class SettingSpec:
     maximum: float | None = None
     section: str = ""
     step: str = ""
+    suffix_key: str = ""
 
     def __post_init__(self) -> None:
         """Reject a default that does not match ``type``."""
@@ -288,6 +304,70 @@ def reference_settings() -> Settings:
             ),
         )
     )
+
+
+def setting_suffix(spec: SettingSpec) -> str:
+    """Return the unit painted for ``spec``.
+
+    A dotted ``suffix_key`` is a catalog key, so the unit follows the
+    language. A short literal such as ``%`` is returned unchanged. An empty
+    key means the setting has no unit.
+
+    Args:
+        spec: The setting whose unit is needed.
+    """
+    key = spec.suffix_key
+    if not key:
+        return ""
+    if "." in key:
+        return tr(key)
+    return key
+
+
+def spin_suffix(spec: SettingSpec) -> str:
+    """Return the suffix a spin box shows after the number.
+
+    A letter unit gains one leading space. ``%`` stays against the digits.
+
+    Args:
+        spec: The setting whose unit is needed.
+    """
+    unit = setting_suffix(spec)
+    if not unit:
+        return ""
+    if unit[:1].isalpha():
+        return f" {unit}"
+    return unit
+
+
+def format_setting_value(spec: SettingSpec, value: object) -> str:
+    """Return ``value`` with its unit, for a simple-mode value label.
+
+    A letter unit is separated by a space. ``%`` stays against the number.
+    A setting with no unit is the number alone.
+
+    Args:
+        spec: The setting that owns ``value``.
+        value: The stored number.
+    """
+    text = _value_text(spec, value)
+    unit = setting_suffix(spec)
+    if not unit:
+        return text
+    if unit[:1].isalpha():
+        return f"{text} {unit}"
+    return f"{text}{unit}"
+
+
+def _value_text(spec: SettingSpec, value: object) -> str:
+    kind = spec.type
+    if kind is SettingType.INT and isinstance(value, int) and not isinstance(value, bool):
+        return str(value)
+    if kind is SettingType.FLOAT and isinstance(value, int | float) and not isinstance(value, bool):
+        return f"{float(value):.1f}"
+    if value is None:
+        return ""
+    return str(value)
 
 
 def _check_range(value: float, minimum: float | None, maximum: float | None) -> None:

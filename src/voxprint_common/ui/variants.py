@@ -92,7 +92,10 @@ class AppSurface:
     ``preset_name`` is the file stem under ``presets/``. ``action_key``,
     ``empty_key``, ``placeholder_key``, and ``drop_key`` are catalog keys.
     ``min_width`` and ``min_height`` are the window minimum. The default is
-    960 by 640. A variant may lower that to 640 by 400.
+    960 by 640. A variant may lower that to 640 by 400. ``voice_picker`` adds
+    the Warm, Clear, and Low row for a media-and-voice input. ``video_result``
+    replaces the sound-bar player with a video preview and, after the run, the
+    dubbed file.
     """
 
     app_id: str
@@ -106,6 +109,8 @@ class AppSurface:
     drop_key: str = ""
     min_width: int = WINDOW_MIN_WIDTH
     min_height: int = WINDOW_MIN_HEIGHT
+    voice_picker: bool = True
+    video_result: bool = False
 
 
 def surfaces() -> tuple[AppSurface, ...]:
@@ -624,6 +629,8 @@ _SURFACES = (
         "simple.drop.video",
         "audio",
         "simple.drop.video",
+        voice_picker=False,
+        video_result=True,
     ),
     AppSurface(
         "clarity",

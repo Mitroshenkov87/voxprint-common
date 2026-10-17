@@ -6,8 +6,20 @@ from pathlib import Path
 
 import pytest
 
+from voxprint_common.i18n import set_language
 from voxprint_common.ui.presets import PresetMatch
 from voxprint_common.ui.safety import ReviewedOutput, reject_reserved_key
+from voxprint_common.ui.settings import (
+    UNIT_DB,
+    UNIT_KHZ,
+    UNIT_PERCENT,
+    UNIT_PX,
+    SettingSpec,
+    SettingType,
+    format_setting_value,
+    setting_suffix,
+    spin_suffix,
+)
 from voxprint_common.ui.simple_image import SimpleLayout
 from voxprint_common.ui.variants import (
     LOWER_MIN_HEIGHT,
@@ -68,6 +80,9 @@ def test_variants_are_configurations_not_separate_layouts() -> None:
     assert audio.action_key == "simple.action.audiobook"
     assert dub.action_key == "simple.action.dub"
     assert audio.preset_name == dub.preset_name == "audio"
+    assert audio.voice_picker is True and audio.video_result is False
+    assert dub.voice_picker is False and dub.video_result is True
+    assert image.voice_picker is True and image.video_result is False
     assert surface_for("clarity").result_kind.value == "compare"
     assert surface_for("plotweaver").action_key == "simple.action.write"
     assert surface_for("model-forge").action_key == "simple.action.prepare"
@@ -163,6 +178,94 @@ def test_missing_gate_blocks_every_variant(tmp_path: Path) -> None:
     layout.set_prompt("A quiet hill at dusk")
     assert layout.generate() is False
     assert layout.phase.value == "blocked"
+
+
+def test_setting_suffix_follows_the_language() -> None:
+    percent = SettingSpec(
+        "demo.likeness",
+        "setting.audio.loudness",
+        "setting.audio.loudness.help",
+        SettingType.INT,
+        50,
+        minimum=0,
+        maximum=100,
+        suffix_key="%",
+    )
+    level = SettingSpec(
+        "demo.level",
+        "setting.audio.loudness",
+        "setting.audio.loudness.help",
+        SettingType.FLOAT,
+        -16.0,
+        minimum=-24,
+        maximum=0,
+        suffix_key=UNIT_DB,
+    )
+    plain = SettingSpec(
+        "demo.plain",
+        "setting.audio.loudness",
+        "setting.audio.loudness.help",
+        SettingType.INT,
+        1,
+        minimum=0,
+        maximum=2,
+    )
+    assert setting_suffix(percent) == "%"
+    assert spin_suffix(percent) == "%"
+    assert format_setting_value(percent, 50) == "50%"
+    assert format_setting_value(plain, 1) == "1"
+    assert spin_suffix(plain) == ""
+    set_language("en")
+    assert format_setting_value(level, -16) == "-16.0 dB"
+    assert spin_suffix(level) == " dB"
+    rate = SettingSpec(
+        "demo.rate",
+        "setting.audio.loudness",
+        "setting.audio.loudness.help",
+        SettingType.FLOAT,
+        44.0,
+        minimum=0,
+        maximum=96,
+        suffix_key=UNIT_KHZ,
+    )
+    pixels = SettingSpec(
+        "demo.pixels",
+        "setting.audio.loudness",
+        "setting.audio.loudness.help",
+        SettingType.INT,
+        12,
+        minimum=0,
+        maximum=64,
+        suffix_key=UNIT_PX,
+    )
+    assert format_setting_value(rate, 44) == "44.0 kHz"
+    assert setting_suffix(pixels) == "px"
+    assert UNIT_PERCENT == "unit.percent"
+    set_language("ru")
+    assert format_setting_value(level, -16) == "-16.0 дБ"
+    assert setting_suffix(rate) == "кГц"
+    set_language("de")
+    assert setting_suffix(level) == "dB"
+    set_language("en")
+
+
+def test_movie_dubber_keeps_video_paths(tmp_path: Path) -> None:
+    surface = surface_for("movie-dubber")
+    settings = settings_for(surface)
+    names = state_names(surface)
+    layout = SimpleLayout(
+        presets=variant_presets(surface, settings),
+        settings=settings,
+        state_dir=tmp_path,
+        state_name=names[0],
+        history_name=names[1],
+        variant=surface.variant,
+    )
+    layout.set_video_source("/films/quiet.mp4")
+    layout.set_video_output("/films/quiet/dubbed.mp4")
+    assert layout.video_source == "/films/quiet.mp4"
+    assert layout.video_output == "/films/quiet/dubbed.mp4"
+    assert layout.video_source not in layout.prompt
 
 
 class _Allow:

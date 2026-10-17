@@ -133,6 +133,8 @@ def test_offscreen_shell_screenshots(tmp_path: Path) -> None:
             "ru-image-expert.png",
             "ru-audio-simple.png",
             "ru-audio-expert.png",
+            "ru-dub-simple.png",
+            "ru-dub-expert.png",
             "viewer-simple.png",
             "viewer-expert.png",
             "image-modified.png",

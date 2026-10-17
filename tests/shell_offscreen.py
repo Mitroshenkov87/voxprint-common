@@ -219,6 +219,21 @@ def main() -> None:
         prompt="тихая-глава.epub",
     )
     grab_shell(
+        out / "ru-dub-simple.png",
+        language="ru",
+        result=True,
+        app_id="movie-dubber",
+        prompt="тихий-фильм.mp4",
+    )
+    grab_shell(
+        out / "ru-dub-expert.png",
+        language="ru",
+        expert=True,
+        result=True,
+        app_id="movie-dubber",
+        prompt="тихий-фильм.mp4",
+    )
+    grab_shell(
         out / "viewer-simple.png",
         language="en",
         result=True,
@@ -355,7 +370,7 @@ def _check_variants(app: object, out: Path) -> None:
         ("enlarge", "simple.action.enlarge", "fileDrop", "result"),
         ("lucent", "simple.generate", "promptBox", "result"),
         ("audiobook-builder", "simple.action.audiobook", "voicePicker", "player"),
-        ("movie-dubber", "simple.action.dub", "fileDrop", "player"),
+        ("movie-dubber", "simple.action.dub", "fileDrop", "videoPoster"),
         ("clarity", "simple.action.improve_video", "fileDrop", "compareSlider"),
         ("plotweaver", "simple.action.write", "promptBox", "documentView"),
         ("model-forge", "simple.action.prepare", "modelPicker", "reportView"),
@@ -1534,6 +1549,194 @@ def _check_source_drop(app: object) -> None:
     app.processEvents()  # type: ignore[attr-defined]
 
 
+def _check_suffix(app: object) -> None:
+    """A unit is painted on the expert spin and on the simple value label."""
+    from PySide6.QtWidgets import QLabel, QSpinBox
+
+    from voxprint_common.i18n import set_language
+    from voxprint_common.ui.settings import (
+        UNIT_DB,
+        SettingSpec,
+        SettingType,
+        format_setting_value,
+    )
+    from voxprint_common.ui.simple_image import SimpleImageLayout, SimpleImageWidget
+    from voxprint_common.ui.variants import settings_for, surface_for, variant_presets
+
+    surface = surface_for("audiobook-builder")
+    settings = settings_for(surface)
+    likeness = SettingSpec(
+        "demo.likeness",
+        "setting.audio.loudness",
+        "setting.audio.loudness.help",
+        SettingType.INT,
+        50,
+        expert=True,
+        group="audio",
+        minimum=0,
+        maximum=100,
+        suffix_key="%",
+    )
+    level = SettingSpec(
+        "demo.level",
+        "setting.audio.loudness",
+        "setting.audio.loudness.help",
+        SettingType.FLOAT,
+        -16.0,
+        group="audio",
+        minimum=-24,
+        maximum=0,
+        suffix_key=UNIT_DB,
+    )
+    settings.add(likeness)
+    settings.add(level)
+    layout = SimpleImageLayout(
+        presets=variant_presets(surface, settings),
+        settings=settings,
+        variant=surface.variant,
+    )
+    view = SimpleImageWidget(layout, settings, surface=surface)
+    view.root.resize(900, 700)
+    view.root.show()
+    view.set_expert(True)
+    app.processEvents()  # type: ignore[attr-defined]
+    spin = view.root.findChild(QSpinBox, "demo.likeness")
+    assert spin is not None
+    assert spin.suffix() == "%"
+    assert spin.text() == "50%"
+    label = view.root.findChild(QLabel, "value-demo.level")
+    assert label is not None and label.isVisible()
+    assert label.text() == format_setting_value(level, -16.0) == "-16.0 dB"
+    set_language("ru")
+    view.refresh()
+    view.set_expert(True)
+    app.processEvents()  # type: ignore[attr-defined]
+    label = view.root.findChild(QLabel, "value-demo.level")
+    spin = view.root.findChild(QSpinBox, "demo.likeness")
+    assert label is not None and spin is not None
+    assert label.text() == "-16.0 дБ"
+    assert spin.suffix() == "%"
+    set_language("en")
+    view.root.close()
+    app.processEvents()  # type: ignore[attr-defined]
+
+
+def _check_dub_surface(app: object) -> None:
+    """Movie Dubber previews and plays a video, and does not append a narrator."""
+    from PySide6.QtWidgets import QComboBox, QLabel, QPushButton, QWidget
+
+    from voxprint_common.i18n import set_language
+    from voxprint_common.ui.shell import ReferenceShell
+
+    set_language("en")
+    book = ReferenceShell(app="audiobook-builder")
+    book.resize(1200, 900)
+    book.show()
+    app.processEvents()  # type: ignore[attr-defined]
+    assert book.widget.findChild(QComboBox, "voicePicker") is not None
+    assert book.widget.findChild(QWidget, "videoResult") is None
+    book.simple.set_prompt_text("book.epub")
+    assert book.simple._input_text().startswith("book.epub · ")
+    book.close()
+    app.processEvents()  # type: ignore[attr-defined]
+
+    set_language("ru")
+    shell = ReferenceShell(app="movie-dubber")
+    shell.resize(1200, 900)
+    shell.show()
+    app.processEvents()  # type: ignore[attr-defined]
+    assert shell.widget.findChild(QComboBox, "voicePicker") is None
+    assert shell.widget.findChild(QLabel, "voiceLabel") is None
+    shell.simple.set_prompt_text("/films/тихий-фильм.mp4")
+    app.processEvents()  # type: ignore[attr-defined]
+    assert shell.simple._input_text() == "/films/тихий-фильм.mp4"
+    poster = shell.widget.findChild(QLabel, "videoPoster")
+    path = shell.widget.findChild(QLabel, "videoPath")
+    opener = shell.widget.findChild(QPushButton, "videoOpen")
+    region = shell.widget.findChild(QWidget, "videoResult")
+    assert region is not None and poster is not None and path is not None and opener is not None
+    assert region.isVisible() and poster.isVisible()
+    assert path.text() == "/films/тихий-фильм.mp4"
+    assert "\u2026" not in path.text()
+    shell.show_result("тихий-фильм.mp4")
+    app.processEvents()  # type: ignore[attr-defined]
+    assert path.text() == "/films/тихий-фильм/dubbed.mp4"
+    assert poster.isVisible()
+    play = shell.widget.findChild(QPushButton, "videoPlay")
+    if shell.simple._media is None:
+        assert play is None or not play.isVisible()
+    else:
+        assert play is not None and play.isVisible()
+        assert play.text() == "Воспроизвести"
+        assert not shell.simple._video_is_playing()
+    shell.close()
+    app.processEvents()  # type: ignore[attr-defined]
+    set_language("en")
+
+
+def _check_chip_reflow(app: object) -> None:
+    """A chip and the Expert toggle follow a new label, language, or checked state."""
+    from PySide6.QtGui import QFont, QFontMetrics
+    from PySide6.QtWidgets import QPushButton
+
+    from voxprint_common.i18n import set_language, tr
+    from voxprint_common.ui.shell import ReferenceShell
+    from voxprint_common.ui.simple_image import _chip_width, _fit_chip
+    from voxprint_common.ui.tokens import load
+
+    pad = load().density.chip_pad_px
+    set_language("ru")
+    shell = ReferenceShell(app="canvas")
+    shell.resize(1200, 900)
+    shell.show()
+    app.processEvents()  # type: ignore[attr-defined]
+    toggle = shell.widget.findChild(QPushButton, "expertToggle")
+    assert toggle is not None
+    assert toggle.text() == "Режим эксперта"
+    assert toggle.minimumWidth() == _chip_width(toggle)
+
+    def side(button: QPushButton) -> int:
+        font = QFont(button.font())
+        font.setPixelSize(load().density.body_px)
+        font.setWeight(QFont.Weight.DemiBold)
+        advance = QFontMetrics(font).horizontalAdvance(button.text())
+        return (button.width() - advance) // 2
+
+    shell.simple.set_expert(True)
+    app.processEvents()  # type: ignore[attr-defined]
+    assert toggle.isChecked()
+    assert toggle.minimumWidth() == _chip_width(toggle)
+    assert side(toggle) >= pad
+    shell.simple.set_expert(False)
+    app.processEvents()  # type: ignore[attr-defined]
+    assert toggle.isChecked() is False
+    assert toggle.minimumWidth() == _chip_width(toggle)
+    chips = [
+        button
+        for button in shell.widget.findChildren(QPushButton)
+        if button.property("chip") == "true" and button.isVisible() and button.text()
+    ]
+    assert chips
+    chip = chips[0]
+    for label in ("Голоса актёров", "Оставить голоса актёров"):
+        chip.setText(label)
+        chip.setChecked(True)
+        _fit_chip(chip)
+        app.processEvents()  # type: ignore[attr-defined]
+        assert chip.minimumWidth() == _chip_width(chip)
+        assert side(chip) >= pad
+        assert label in chip.text()
+    set_language("en")
+    shell.simple.refresh()
+    app.processEvents()  # type: ignore[attr-defined]
+    assert toggle.text() == tr("command.view.toggle_expert_mode")
+    assert toggle.minimumWidth() == _chip_width(toggle)
+    assert side(toggle) >= pad
+    shell.close()
+    app.processEvents()  # type: ignore[attr-defined]
+    set_language("en")
+
+
 def _check_chip_fit(app: object) -> None:
     """Labels stay inside chips, the expert toggle, buttons, and combos.
 
@@ -1546,6 +1749,7 @@ def _check_chip_fit(app: object) -> None:
     from voxprint_common.i18n import set_language
     from voxprint_common.suite_settings import set_expert_mode
     from voxprint_common.ui.shell import _MODIFIED, ReferenceShell
+    from voxprint_common.ui.simple_image import _chip_width
     from voxprint_common.ui.tokens import load
 
     pad = load().density.chip_pad_px
@@ -1555,12 +1759,15 @@ def _check_chip_fit(app: object) -> None:
     surfaces = (
         "canvas",
         "audiobook-builder",
+        "movie-dubber",
         "clarity",
         "plotweaver",
         "model-forge",
         "viewer",
     )
-    for language in ("en", "ru", "de"):
+    _check_suffix(app)
+    _check_dub_surface(app)
+    for language in ("en", "ru", "de", "uk", "lv"):
         for app_id in surfaces:
             set_language(language)
             set_expert_mode(False)
@@ -1587,6 +1794,14 @@ def _check_chip_fit(app: object) -> None:
                 advance = QFontMetrics(font).horizontalAdvance(text)  # type: ignore[arg-type]
                 pill = button.objectName() == "expertToggle" or button.property("chip") == "true"
                 if pill:
+                    assert button.minimumWidth() == _chip_width(button), (
+                        language,
+                        app_id,
+                        button.objectName(),
+                        text,
+                        button.minimumWidth(),
+                        _chip_width(button),
+                    )
                     side = (button.width() - advance) // 2
                     assert side >= pad, (
                         language,
@@ -1636,6 +1851,7 @@ def _check_chip_fit(app: object) -> None:
                 assert combo.currentText() == text
             shell.close()
             app.processEvents()  # type: ignore[attr-defined]
+    _check_chip_reflow(app)
 
 
 if __name__ == "__main__":

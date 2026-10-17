@@ -161,7 +161,7 @@ Canvas, Enlarge, and the Lucent helper. Canvas and Lucent ask for a prompt and t
 
 ### Audio
 
-Audiobook Builder and Movie Dubber. The input is a Choose a book drop area that shows the file name once a book is chosen, plus a voice. The action is Create audiobook or Dub video. The result is a player with sound bars and chapters. History lists past jobs. The preset file is `presets/audio.json` (Pace). The expert panel shows sample rate, format, normalisation, and loudness. The pictures below are Audiobook Builder.
+Audiobook Builder and Movie Dubber share the audio surface. Audiobook Builder asks for a book and a voice. The action is Create audiobook. The result is a player with sound bars and chapters. Movie Dubber asks for a video and leaves out that voice row, so the narrator names are not added to the prompt. The action is Dub video. Before a run the result previews the chosen video. After the dub it plays that video with the new audio: play, pause, seek, the full output path, and Open folder. When Qt Multimedia is missing, the same region keeps the poster and Open folder. History lists past jobs. The preset file is `presets/audio.json` (Pace). The expert panel shows sample rate, format, normalisation, and loudness. A setting can carry a unit such as %, dB, kHz, or px. The pictures below are Audiobook Builder, then Movie Dubber in Russian.
 
 ![English audio screen](img/shell/audio-simple.png)
 
@@ -172,6 +172,10 @@ Audiobook Builder and Movie Dubber. The input is a Choose a book drop area that 
 ![Russian audio screen, Expert mode](img/shell/ru-audio-expert.png)
 
 ![English audio screen, preset with changes](img/shell/audio-modified.png)
+
+![Russian movie dubber](img/shell/ru-dub-simple.png)
+
+![Russian movie dubber, Expert mode](img/shell/ru-dub-expert.png)
 
 Audiobook Builder can also open as sections. A single-section screen does not gain a tab row. Six sections fit the 960 px minimum, and any tab that does not fit goes to More instead of a scrollbar. Narration keeps the shared screen and adds Prepare text. Roles is a casting table: each row picks a voice, and that value is stored in the section's settings. Voices lists the voices and opens Train a voice, a three-step wizard whose last step shows progress and Cancel. A restart restores that step from the shared settings and a checkpoint the app provides. Expert fields for another section, or for a wizard step that is not open, stay out of the panel.
 

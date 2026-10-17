@@ -53,7 +53,7 @@ from voxprint_common.ui.keymap import (
 from voxprint_common.ui.palette import score_text
 from voxprint_common.ui.safety import ReviewedOutput
 from voxprint_common.ui.sections import audiobook_sections
-from voxprint_common.ui.settings import SettingSpec, SettingType, reference_settings
+from voxprint_common.ui.settings import SettingSpec, SettingType, reference_settings, spin_suffix
 from voxprint_common.ui.simple_image import (
     Phase,
     SimpleImageLayout,
@@ -676,6 +676,10 @@ class ReferenceShell:
                 is None
             ):
                 break
+        if self.surface.video_result and self.image.phase is Phase.READY:
+            source = self.image.video_source.strip() or self.image.prompt.strip()
+            stem = Path(source).stem or "film"
+            self.image.set_video_output(f"/films/{stem}/dubbed.mp4")
         self.simple.refresh(prompt=True)
 
     def rebuild(self) -> None:
@@ -1632,6 +1636,9 @@ def _setting_control(shell: ReferenceShell, spec: SettingSpec) -> object:
         spin.setObjectName(spec.setting_id)
         spin.setRange(int(spec.minimum or 0), int(spec.maximum or 0))
         spin.setValue(int(spec.default) if isinstance(spec.default, int) else 0)
+        suffix = spin_suffix(spec)
+        if suffix:
+            spin.setSuffix(suffix)
         control = spin
     elif kind is SettingType.FLOAT:
         spin = widgets.QDoubleSpinBox()
@@ -1639,6 +1646,9 @@ def _setting_control(shell: ReferenceShell, spec: SettingSpec) -> object:
         spin.setRange(float(spec.minimum or 0), float(spec.maximum or 0))
         spin.setSingleStep(0.1)
         spin.setValue(float(spec.default) if isinstance(spec.default, int | float) else 0.0)
+        suffix = spin_suffix(spec)
+        if suffix:
+            spin.setSuffix(suffix)
         control = spin
     elif kind is SettingType.PATH:
         edit = widgets.QLineEdit()

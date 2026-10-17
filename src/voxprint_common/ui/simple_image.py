@@ -35,8 +35,15 @@ from voxprint_common.ui.safety import (
 )
 from voxprint_common.ui.section_view import install_sections, sync_sections
 from voxprint_common.ui.sections import SectionDeck, SectionSet
-from voxprint_common.ui.settings import Settings, SettingSpec, SettingType, reference_settings
-from voxprint_common.ui.theme import CARD_PLAIN
+from voxprint_common.ui.settings import (
+    Settings,
+    SettingSpec,
+    SettingType,
+    format_setting_value,
+    reference_settings,
+    spin_suffix,
+)
+from voxprint_common.ui.theme import CARD_PLAIN, CONTROL_BG, TEXT
 from voxprint_common.ui.tokens import load
 from voxprint_common.ui.variants import (
     AppSurface,
@@ -233,6 +240,8 @@ class SimpleImageLayout:
             else None
         )
         self.prompt = ""
+        self.video_source = ""
+        self.video_output = ""
         self._seed = 0
         self.phase = Phase.EMPTY
         self.step = 0
@@ -303,6 +312,22 @@ class SimpleImageLayout:
             text: The words in the prompt box, including a blank string.
         """
         self.prompt = text
+
+    def set_video_source(self, path: str) -> None:
+        """Remember the film to preview before a dub.
+
+        Args:
+            path: The chosen video. An empty string clears the preview.
+        """
+        self.video_source = path
+
+    def set_video_output(self, path: str) -> None:
+        """Remember the dubbed file to play after a run.
+
+        Args:
+            path: The finished video, including its folder.
+        """
+        self.video_output = path
 
     def choose(self, row_id: str, value: str) -> None:
         """Select the chip ``value`` in ``row_id``.
@@ -1002,6 +1027,18 @@ class SimpleImageWidget:
         self._handling_enter = False
         self._source: object | None = None
         self._scaled_to: tuple[int, int] | None = None
+        self._video_path: object | None = None
+        self._video_play: object | None = None
+        self._video_seek: object | None = None
+        self._video_poster: object | None = None
+        self._video_view: object | None = None
+        self._video_stack: object | None = None
+        self._video_controls: object | None = None
+        self._media: object | None = None
+        self._loaded_video = ""
+        self._seeking = False
+        self._video_started = False
+        self._value_host: object | None = None
         self._prompt_row: object | None = None
         core = self._core
 
@@ -1044,6 +1081,7 @@ class SimpleImageWidget:
         if window is not None and window.isVisible():
             held = (window.width(), window.height())
         self._expert_toggle.setChecked(enabled)  # type: ignore[attr-defined]
+        self._reflow_expert_toggle()
         self._expert_panel.setVisible(enabled)  # type: ignore[attr-defined]
         _clear(self._expert_form)
         self._expert_resets = None
@@ -1091,7 +1129,12 @@ class SimpleImageWidget:
             text: Prompt words, a file name, or a model name.
         """
         self._layout.set_prompt(text)
+        if self._surface.video_result:
+            self._layout.set_video_source(text.strip())
         self._show_input(text)
+        if self._surface.video_result and self._layout.phase is Phase.EMPTY and text.strip():
+            self._paint_video()
+            self._stack.setCurrentIndex(2)  # type: ignore[attr-defined]
 
     def refresh(self, *, prompt: bool = False) -> None:
         """Paint the current phase, chips, and history.
@@ -1102,6 +1145,8 @@ class SimpleImageWidget:
         if prompt:
             self._show_input(self._layout.prompt)
         self._sync_presets()
+        self._reflow_expert_toggle()
+        self._paint_value_labels()
         self._paint_expert()
         self._fill_history()
         self._apply_history()
@@ -1117,6 +1162,10 @@ class SimpleImageWidget:
                 return
         phase = self._layout.phase
         if phase is Phase.EMPTY:
+            if self._surface.video_result and self._layout.video_source.strip():
+                self._paint_video()
+                self._stack.setCurrentIndex(2)  # type: ignore[attr-defined]
+                return
             self._stack.setCurrentIndex(0)  # type: ignore[attr-defined]
             return
         if phase is Phase.BUSY:
@@ -1271,6 +1320,7 @@ class SimpleImageWidget:
         if not self._layout.rows:
             self._preset_host.hide()
             self._preset_host.setFixedHeight(0)
+        self._install_value_labels(root)
 
         class _Stage(widgets.QFrame):
             def minimumSizeHint(_self: object) -> object:
@@ -1514,6 +1564,8 @@ class SimpleImageWidget:
         if kind is ResultKind.PICTURE:
             return self._picture_page()
         if kind is ResultKind.PLAYER:
+            if self._surface.video_result:
+                return self._video_page()
             return self._player_page()
         if kind is ResultKind.COMPARE:
             return self._compare_page()
@@ -1570,6 +1622,108 @@ class SimpleImageWidget:
         self._chapters = chapters
         layout.addWidget(chapters)
         return page
+
+    def _video_page(self) -> object:
+        """Build the optional video result: preview, then the dubbed file."""
+        widgets = self._widgets
+        page = widgets.QWidget()
+        page.setObjectName("videoResult")
+        layout = widgets.QVBoxLayout(page)
+        layout.setContentsMargins(16, 16, 16, 12)
+        layout.setSpacing(10)
+        stack = widgets.QStackedWidget()
+        poster = self._poster_label()
+        stack.addWidget(poster)
+        self._video_poster = poster
+        self._video_stack = stack
+        self._open_media(page, stack)
+        layout.addWidget(stack, 1)
+        controls = widgets.QWidget()
+        controls.setObjectName("videoControls")
+        row = widgets.QHBoxLayout(controls)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
+        play = widgets.QPushButton(tr("simple.video.play"))
+        play.setObjectName("videoPlay")
+        play.setAutoDefault(False)
+        _fit_plain(play, pad=28)
+        play.clicked.connect(self._toggle_video)
+        self._video_play = play
+        row.addWidget(play)
+        seek = widgets.QSlider(self._qt.Horizontal)
+        seek.setObjectName("videoSeek")
+        seek.setRange(0, 1)
+        seek.setValue(0)
+        seek.sliderPressed.connect(self._seek_pressed)
+        seek.sliderReleased.connect(self._seek_released)
+        self._video_seek = seek
+        row.addWidget(seek, 1)
+        self._video_controls = controls
+        if self._media is None:
+            controls.hide()
+        layout.addWidget(controls)
+        path_row = widgets.QHBoxLayout()
+        path_row.setSpacing(8)
+        path = widgets.QLabel()
+        path.setObjectName("videoPath")
+        path.setWordWrap(True)
+        path.setTextInteractionFlags(self._qt.TextSelectableByMouse)
+        self._video_path = path
+        path_row.addWidget(path, 1)
+        open_folder = widgets.QPushButton(tr("simple.menu.open_folder"))
+        open_folder.setObjectName("videoOpen")
+        open_folder.setAutoDefault(False)
+        _fit_plain(open_folder, pad=28)
+        open_folder.clicked.connect(lambda: self._command("file.open_folder"))
+        path_row.addWidget(open_folder)
+        layout.addLayout(path_row)
+        poster.setPixmap(_film_poster(self._gui, 640, 360))
+        return page
+
+    def _poster_label(self) -> object:
+        widgets = self._widgets
+        core = self._core
+
+        class _Poster(widgets.QLabel):
+            def sizeHint(_self: object) -> object:
+                return core.QSize(0, 0)
+
+            def minimumSizeHint(_self: object) -> object:
+                return core.QSize(0, 0)
+
+        poster = _Poster()
+        poster.setObjectName("videoPoster")
+        poster.setAlignment(self._qt.AlignCenter)
+        poster.setMinimumHeight(160)
+        poster.setScaledContents(True)
+        poster.setSizePolicy(
+            widgets.QSizePolicy.Policy.Ignored,
+            widgets.QSizePolicy.Policy.Ignored,
+        )
+        return poster
+
+    def _open_media(self, page: object, stack: object) -> None:
+        """Attach Qt Multimedia, or leave the poster as the fallback."""
+        loaded = _qt_media()
+        if loaded is None:
+            return
+        player_cls, audio_cls, video_cls = loaded
+        try:
+            view = video_cls()
+            player = player_cls(page)
+            audio = audio_cls(page)
+            player.setAudioOutput(audio)
+            player.setVideoOutput(view)
+        except AttributeError, ImportError, RuntimeError:
+            return
+        view.hide()
+        stack.addWidget(view)  # type: ignore[attr-defined]
+        self._video_view = view
+        self._media = player
+        player.playbackStateChanged.connect(self._on_video_state)
+        player.positionChanged.connect(self._on_video_position)
+        player.durationChanged.connect(self._on_video_duration)
+        player.errorOccurred.connect(self._on_video_error)
 
     def _compare_page(self) -> object:
         widgets = self._widgets
@@ -2067,7 +2221,7 @@ class SimpleImageWidget:
         self._drop = drop
         self._install_drop(drop)
         column.addWidget(drop, 1)
-        if kind is InputKind.MEDIA_VOICE:
+        if kind is InputKind.MEDIA_VOICE and self._surface.voice_picker:
             row = widgets.QHBoxLayout()
             row.setSpacing(8)
             voice_label = widgets.QLabel(tr("simple.voice"))
@@ -2100,7 +2254,10 @@ class SimpleImageWidget:
                         return False
                     path = urls[0].toLocalFile() or urls[0].toString()
                     name = Path(path).name or path
-                    self.set_prompt_text(name)
+                    if self._surface.video_result:
+                        self.set_prompt_text(path)
+                    else:
+                        self.set_prompt_text(name)
                     event.acceptProposedAction()  # type: ignore[attr-defined]
                     return True
                 return False
@@ -2219,6 +2376,8 @@ class SimpleImageWidget:
                     continue
                 control.blockSignals(True)
                 _write_control(control, spec, self._layout.get(spec.setting_id))
+                if spec.type is SettingType.INT or spec.type is SettingType.FLOAT:
+                    _apply_suffix(control, spec)
                 control.blockSignals(False)
         finally:
             self._applying = False
@@ -2253,6 +2412,166 @@ class SimpleImageWidget:
             eta.setText(tr("simple.progress.eta_seconds", seconds=seconds))  # type: ignore[attr-defined]
         eta.show()  # type: ignore[attr-defined]
 
+    def _reflow_expert_toggle(self) -> None:
+        """Resize the Expert toggle from the checked face after a label change."""
+        button = self._expert_toggle
+        label = tr("command.view.toggle_expert_mode")
+        if str(button.text()) != label:  # type: ignore[attr-defined]
+            button.setText(label)  # type: ignore[attr-defined]
+        width = _chip_width(button)
+        if int(button.minimumWidth()) != width:  # type: ignore[attr-defined]
+            button.setMinimumWidth(width)  # type: ignore[attr-defined]
+
+    def _simple_value_specs(self) -> tuple[SettingSpec, ...]:
+        specs: list[SettingSpec] = []
+        for spec in self._settings.visible(expert=False):
+            if not spec.suffix_key:
+                continue
+            if spec.type is SettingType.INT or spec.type is SettingType.FLOAT:
+                specs.append(spec)
+        return tuple(specs)
+
+    def _spec_value(self, spec: SettingSpec) -> object:
+        state = self._layout.state
+        if state is not None and state.has(spec.setting_id):
+            return self._layout.get(spec.setting_id)
+        return spec.default
+
+    def _paint_value_labels(self) -> None:
+        if self._value_host is None:
+            return
+        for spec in self._simple_value_specs():
+            label = self.root.findChild(self._widgets.QLabel, f"value-{spec.setting_id}")
+            if label is None:
+                continue
+            label.setText(format_setting_value(spec, self._spec_value(spec)))  # type: ignore[attr-defined]
+
+    def _install_value_labels(self, root: object) -> None:
+        specs = self._simple_value_specs()
+        if not specs:
+            return
+        widgets = self._widgets
+        host = widgets.QWidget()
+        host.setObjectName("simpleValues")
+        column = widgets.QVBoxLayout(host)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(4)
+        for spec in specs:
+            label = widgets.QLabel(format_setting_value(spec, self._spec_value(spec)))
+            label.setObjectName(f"value-{spec.setting_id}")
+            label.setWordWrap(True)
+            column.addWidget(label)
+        self._value_host = host
+        root.addWidget(host)  # type: ignore[attr-defined]
+
+    def _paint_video(self) -> None:
+        """Show the source before a run, and the dubbed file once it is ready."""
+        if self._video_path is None:
+            return
+        ready = self._layout.phase is Phase.READY and bool(self._layout.video_output)
+        shown = self._layout.video_output if ready else self._layout.video_source
+        self._video_path.setText(shown)  # type: ignore[attr-defined]
+        self._sync_video_labels()
+        self._load_video(shown)
+        if not self._video_started:
+            self._show_poster()
+
+    def _sync_video_labels(self) -> None:
+        play = self._video_play
+        if play is None:
+            return
+        playing = self._video_is_playing()
+        key = "simple.video.pause" if playing else "simple.video.play"
+        play.setText(tr(key))  # type: ignore[attr-defined]
+        _fit_plain(play, pad=28)
+        opener = self.root.findChild(self._widgets.QPushButton, "videoOpen")
+        if opener is not None:
+            opener.setText(tr("simple.menu.open_folder"))
+            _fit_plain(opener, pad=28)
+
+    def _video_is_playing(self) -> bool:
+        media = self._media
+        if media is None:
+            return False
+        return media.playbackState() == media.PlaybackState.PlayingState  # type: ignore[attr-defined]
+
+    def _load_video(self, path: str) -> None:
+        if path == self._loaded_video:
+            return
+        self._loaded_video = path
+        self._video_started = False
+        media = self._media
+        if media is None:
+            return
+        try:
+            if not path:
+                media.setSource(self._core.QUrl())  # type: ignore[attr-defined]
+                return
+            media.setSource(self._core.QUrl.fromLocalFile(path))  # type: ignore[attr-defined]
+        except AttributeError, RuntimeError:
+            self._show_poster()
+
+    def _show_poster(self) -> None:
+        stack = self._video_stack
+        poster = self._video_poster
+        if stack is None or poster is None:
+            return
+        stack.setCurrentWidget(poster)  # type: ignore[attr-defined]
+        if self._video_view is not None:
+            self._video_view.hide()  # type: ignore[attr-defined]
+
+    def _toggle_video(self) -> None:
+        media = self._media
+        if media is None:
+            return
+        if self._video_is_playing():
+            media.pause()  # type: ignore[attr-defined]
+            return
+        self._video_started = True
+        media.play()  # type: ignore[attr-defined]
+
+    def _seek_pressed(self) -> None:
+        self._seeking = True
+
+    def _seek_released(self) -> None:
+        self._seeking = False
+        media = self._media
+        seek = self._video_seek
+        if media is None or seek is None:
+            return
+        media.setPosition(int(seek.value()))  # type: ignore[attr-defined]
+
+    def _on_video_state(self, _state: object) -> None:
+        playing = self._video_is_playing()
+        if playing:
+            self._video_started = True
+            stack = self._video_stack
+            view = self._video_view
+            if stack is not None and view is not None:
+                view.show()  # type: ignore[attr-defined]
+                stack.setCurrentWidget(view)  # type: ignore[attr-defined]
+        elif not self._video_started:
+            self._show_poster()
+        self._sync_video_labels()
+
+    def _on_video_position(self, position: int) -> None:
+        seek = self._video_seek
+        if self._seeking or seek is None:
+            return
+        seek.blockSignals(True)  # type: ignore[attr-defined]
+        seek.setValue(int(position))  # type: ignore[attr-defined]
+        seek.blockSignals(False)  # type: ignore[attr-defined]
+
+    def _on_video_duration(self, duration: int) -> None:
+        seek = self._video_seek
+        if seek is None:
+            return
+        seek.setRange(0, max(int(duration), 1))  # type: ignore[attr-defined]
+
+    def _on_video_error(self, *_args: object) -> None:
+        self._video_started = False
+        self._show_poster()
+
     def _show_ready(self) -> None:
         item = self._layout.item(self._layout.selected)
         if item is None:
@@ -2265,8 +2584,11 @@ class SimpleImageWidget:
             self._rescale()
             return
         if kind is ResultKind.PLAYER:
-            self._player.setPixmap(_bars(self._gui, item.item_id, 880, 220))  # type: ignore[attr-defined]
-            self._chapters.setText(_chapters())  # type: ignore[attr-defined]
+            if self._surface.video_result:
+                self._paint_video()
+            else:
+                self._player.setPixmap(_bars(self._gui, item.item_id, 880, 220))  # type: ignore[attr-defined]
+                self._chapters.setText(_chapters())  # type: ignore[attr-defined]
         elif kind is ResultKind.COMPARE:
             self._paint_wipe()
         elif kind is ResultKind.DOCUMENT:
@@ -2454,6 +2776,7 @@ def _control(widgets: object, spec: SettingSpec, value: object) -> object:
         _expand(spin)
         spin.setRange(int(spec.minimum or 0), int(spec.maximum or 0))
         spin.setValue(int(value) if isinstance(value, int) and not isinstance(value, bool) else 0)
+        _apply_suffix(spin, spec)
         control = spin
     elif kind is SettingType.FLOAT:
         spin = widgets.QDoubleSpinBox()  # type: ignore[attr-defined]
@@ -2467,6 +2790,7 @@ def _control(widgets: object, spec: SettingSpec, value: object) -> object:
             float(value) if isinstance(value, int | float) and not isinstance(value, bool) else 0.0
         )
         spin.setValue(number)
+        _apply_suffix(spin, spec)
         control = spin
     elif kind is SettingType.PATH:
         edit = widgets.QLineEdit()  # type: ignore[attr-defined]
@@ -2821,16 +3145,33 @@ def _fit_plain(button: object, *, pad: int) -> None:
 
 
 def _fit_chip(button: object) -> None:
-    """Reserve bold text plus the same side padding as an unchecked pill."""
+    """Reserve the checked face: weight 600, the body size, the chip padding, and the border.
+
+    The width is that font's advance plus ``chip_pad_px`` and ``border_px`` on
+    each side. Those are the same density tokens the stylesheet uses for
+    ``QPushButton#expertToggle`` and ``QPushButton[chip="true"]``. The checked
+    rule only sets the weight, so an unchecked pill keeps this width and does
+    not clip when it is selected.
+    """
+    button.setMinimumWidth(_chip_width(button))  # type: ignore[attr-defined]
+
+
+def _chip_width(button: object) -> int:
     density = load().density
     text = str(button.text())  # type: ignore[attr-defined]
     _core, gui, _widgets = _qt()
     button.ensurePolished()  # type: ignore[attr-defined]
     font = gui.QFont(button.font())  # type: ignore[attr-defined]
     font.setPixelSize(density.body_px)
-    font.setWeight(gui.QFont.Weight.DemiBold)  # type: ignore[attr-defined]
+    font.setWeight(gui.QFont.Weight.DemiBold)
     advance = int(gui.QFontMetrics(font).horizontalAdvance(text))  # type: ignore[attr-defined]
-    button.setMinimumWidth(advance + (density.chip_pad_px + density.border_px) * 2)  # type: ignore[attr-defined]
+    return advance + (density.chip_pad_px + density.border_px) * 2
+
+
+def _apply_suffix(spin: object, spec: SettingSpec) -> None:
+    suffix = spin_suffix(spec)
+    if suffix:
+        spin.setSuffix(suffix)  # type: ignore[attr-defined]
 
 
 def _darken(scroll: object, gui: object) -> None:
@@ -2946,8 +3287,39 @@ SimpleLayout = SimpleImageLayout
 SimpleWidget = SimpleImageWidget
 
 
+def _film_poster(gui: object, width: int, height: int) -> object:
+    """Return a dark still, so the result is not a blank page before playback."""
+    image = gui.QImage(max(width, 1), max(height, 1), gui.QImage.Format.Format_RGB32)  # type: ignore[attr-defined]
+    image.fill(gui.QColor(CARD_PLAIN))  # type: ignore[attr-defined]
+    painter = gui.QPainter(image)  # type: ignore[attr-defined]
+    painter.setRenderHint(gui.QPainter.RenderHint.Antialiasing, True)  # type: ignore[attr-defined]
+    painter.setPen(gui.QPen(gui.QColor(CONTROL_BG), 8))  # type: ignore[attr-defined]
+    painter.setBrush(gui.QColor("#18181f"))  # type: ignore[attr-defined]
+    painter.drawRoundedRect(24, 24, max(width - 48, 1), max(height - 48, 1), 12, 12)  # type: ignore[attr-defined]
+    side = max(min(width, height) // 5, 12)
+    cx, cy = width // 2, height // 2
+    path = gui.QPainterPath()  # type: ignore[attr-defined]
+    path.moveTo(cx - side // 3, cy - side // 2)
+    path.lineTo(cx - side // 3, cy + side // 2)
+    path.lineTo(cx + side // 2, cy)
+    path.closeSubpath()
+    painter.fillPath(path, gui.QColor(TEXT))  # type: ignore[attr-defined]
+    painter.end()
+    return gui.QPixmap.fromImage(image)  # type: ignore[attr-defined]
+
+
 def _qt() -> tuple[object, object, object]:
     """Import PySide6 when a widget is constructed."""
     from PySide6 import QtCore, QtGui, QtWidgets
 
     return QtCore, QtGui, QtWidgets
+
+
+def _qt_media() -> tuple[object, object, object] | None:
+    """Import Qt Multimedia, or return None when it is not installed."""
+    try:
+        from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+        from PySide6.QtMultimediaWidgets import QVideoWidget
+    except ImportError:
+        return None
+    return QMediaPlayer, QAudioOutput, QVideoWidget
