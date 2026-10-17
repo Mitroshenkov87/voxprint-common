@@ -778,14 +778,20 @@ def _check_simple(app: object, qt: object, test: object) -> None:
     # The overflow button beside it shifts by that same amount.
     delta = toggle_after[2] - toggle_before[2]
     assert delta >= 0
+    panel = shell.find("QFrame", "expertPanel")
+    split = shell.find("QSplitter", "expertSplit")
+    assert panel is not None and split is not None
+    # The panel is a full-height column, so the screen column gives up that
+    # width plus the splitter handle. The checked Expert pill still grows left.
+    shift = panel.width() + split.handleWidth()  # type: ignore[attr-defined]
     assert toggle_after == (
-        toggle_before[0] - delta,
+        toggle_before[0] - shift - delta,
         toggle_before[1],
         toggle_after[2],
         toggle_before[3],
     )
     assert overflow_after == (
-        overflow_before[0] - delta,
+        overflow_before[0] - shift - delta,
         overflow_before[1],
         overflow_before[2],
         overflow_before[3],
@@ -793,13 +799,34 @@ def _check_simple(app: object, qt: object, test: object) -> None:
     for name, box in simple_boxes.items():
         if name in {"expertToggle", "overflow"}:
             continue
-        assert after[name] == box, (name, box, after[name])
+        got = after[name]
+        if name in {"promptBox", "historyStrip"}:
+            assert got == (box[0], box[1], box[2] - shift, box[3]), (name, box, got, shift)
+            continue
+        if name == "generate":
+            assert got == (box[0] - shift, box[1], box[2], box[3]), (name, box, got, shift)
+            continue
+        if name in {"chip-count-4", "preset-count"}:
+            continue
+        assert got == box, (name, box, got)
     stage_after = _window_box(shell, stage)
     result_after = _window_box(shell, result)
-    assert stage_after[0] == stage_box[0] and stage_after[1] == stage_box[1]
-    assert stage_after[3] == stage_box[3]
-    assert stage_after[2] < stage_box[2]
-    assert result_after[2] < result_box[2]
+    # A narrower column can make the output row a few pixels taller. That
+    # pushes the count row and the stage top down, and the stage gives the
+    # same pixels back from its height.
+    growth = stage_after[1] - stage_box[1]
+    assert 0 <= growth <= 16
+    assert stage_after[0] == stage_box[0]
+    assert stage_after[2] == stage_box[2] - shift
+    assert stage_after[1] + stage_after[3] == stage_box[1] + stage_box[3]
+    assert result_after[0] == result_box[0]
+    assert result_after[1] == result_box[1] + growth
+    assert result_after[2] == result_box[2] - shift
+    assert result_after[3] == result_box[3] - growth
+    for name in ("chip-count-4", "preset-count"):
+        box = simple_boxes[name]
+        got = after[name]
+        assert got == (box[0], box[1] + growth, box[2], box[3]), (name, box, got, growth)
     panel = shell.find("QFrame", "expertPanel")
     assert panel is not None and panel.isVisible() is True  # type: ignore[attr-defined]
     assert panel.minimumWidth() == 220 and panel.maximumWidth() == 420  # type: ignore[attr-defined]
@@ -1482,9 +1509,9 @@ def _near_white(widget: object) -> bool:
 def _check_viewports(shell: object) -> None:
     """A scroll area the app creates uses the token palette, not Qt's grey base."""
     from PySide6.QtGui import QColor, QPalette
-    from PySide6.QtWidgets import QApplication, QScrollArea, QTextEdit, QWidget
+    from PySide6.QtWidgets import QApplication, QFrame, QLabel, QScrollArea, QTextEdit, QWidget
 
-    from voxprint_common.ui.theme import TEXT_DISABLED, apply_shell_palette, palette_colors
+    from voxprint_common.ui.theme import TEXT, TEXT_DISABLED, apply_shell_palette, palette_colors
 
     role = QPalette.ColorRole
     group = QPalette.ColorGroup
@@ -1521,6 +1548,33 @@ def _check_viewports(shell: object) -> None:
     QApplication.processEvents()
     assert not _near_white(edit.viewport())
     assert not _near_white(area.viewport())
+    # Reparenting restores the platform light base unless the shell paints again.
+    moved = QWidget()
+    area.setParent(moved)
+    QApplication.processEvents()
+    assert area.viewport().palette().color(role.Base).name() == QColor(dark["Base"]).name()
+    assert host.palette().color(role.Base).name() == QColor(dark["Base"]).name()
+    panel = shell.widget.findChild(QFrame, "expertPanel")  # type: ignore[attr-defined]
+    scroll = shell.widget.findChild(QScrollArea, "expertScroll")  # type: ignore[attr-defined]
+    assert panel is not None and scroll is not None and panel.isVisible()
+    margins = panel.layout().contentsMargins()
+    room = panel.height() - margins.top() - margins.bottom()
+    assert abs(scroll.height() - room) <= 4
+    column = shell.widget.findChild(QWidget, "shellColumn")  # type: ignore[attr-defined]
+    assert column is not None
+    assert abs(panel.height() - column.height()) <= 4
+    heading = QLabel("Book", panel)
+    heading.setObjectName("settingGroup")
+    heading.ensurePolished()
+    assert heading.font().pixelSize() == 15
+    assert heading.palette().color(role.WindowText).name() == QColor(TEXT).name()
+    form = shell.widget.findChild(QWidget, "expertForm")  # type: ignore[attr-defined]
+    assert form is not None
+    before = len(form.findChildren(QWidget))
+    shell.simple.set_expert(False)  # type: ignore[attr-defined]
+    shell.simple.set_expert(True)  # type: ignore[attr-defined]
+    QApplication.processEvents()
+    assert len(form.findChildren(QWidget)) == before
 
 
 def _check_busy_generate(app: object) -> None:
@@ -2078,6 +2132,7 @@ def _check_pre_yitro(app: object) -> None:
     from PySide6.QtWidgets import QApplication, QLabel, QWidget
 
     from voxprint_common.i18n import set_language, tr
+    from voxprint_common.suite_settings import set_expert_mode
     from voxprint_common.ui.shell import ReferenceShell
     from voxprint_common.ui.simple_image import _chip_width
     from voxprint_common.ui.tokens import load
@@ -2204,6 +2259,7 @@ def _check_pre_yitro(app: object) -> None:
         image.fill(QColor(*color))
         return image
 
+    set_expert_mode(False)
     canvas = ReferenceShell(app="canvas", state_dir=root / "canvas")
     canvas.resize(1200, 900)
     canvas.show()

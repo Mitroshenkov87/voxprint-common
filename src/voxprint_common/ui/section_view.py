@@ -31,7 +31,9 @@ def install_sections(widget: object) -> None:
         widget: A simple screen whose layout has a section deck.
     """
     bar = _tab_bar(widget)
-    root = widget.root.layout()  # type: ignore[attr-defined]
+    column = getattr(widget, "_shell_column", None)
+    host = widget.root if column is None else column  # type: ignore[attr-defined]
+    root = host.layout()  # type: ignore[attr-defined]
     root.insertWidget(1, bar)  # type: ignore[attr-defined]
     widget._section_bar = bar  # type: ignore[attr-defined]
     _build_pages(widget)

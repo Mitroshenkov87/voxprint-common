@@ -40,7 +40,7 @@ Canvas adopts this first. Then Enlarge, Clarity, Audiobook Builder, Movie Dubber
 - [ ] Image apps (Canvas, Enlarge, and the Lucent helper) open on the image-app pattern in `SimpleImageLayout`.
 - [ ] Drive the chips and the expert panel from one settings state. A preset file writes the values. Keep the chosen preset and any overrides in the app's State directory.
 - [ ] Keep Size, Style, Number of pictures, More like this, Save, Open folder, and Use prompt again on that screen.
-- [ ] Expert mode only adds the side panel. Leave the rest of the screen where it is. The dock stays an API, with no switch on the image screen.
+- [ ] Expert mode adds a full-height side panel beside the screen. The window size stays. The dock stays an API, with no switch on the image screen.
 
 ## Import without Qt
 
@@ -115,7 +115,7 @@ The history strip keeps the last 50 pictures in the app's State directory (`imag
 
 A long job uses one progress block: a stage label, a percent, an estimate of the time left, and Cancel. `progress(step, total, stage_label, eta_seconds=...)` fills it. `stage_label` is already translated. Omit `eta_seconds` to leave the estimate off. `generate` calls the app hook with the live settings, including the expert values, and then the screen becomes busy. A second Generate while that job is running is ignored, and the button stays disabled.
 
-Expert mode adds a side panel to the right of the picture and does not move or restyle the rest. The panel holds the live values. The reference list is Steps, Guidance (CFG), Seed, Sampler, Picture size, Output size, Negative prompt, Add-ons, Add-on strength, VRAM limit, and Adult content (18+). A path field is expert because Open folder is the everyday action. The adult-content value selects the prompt policy. The minors gate still reviews the prompt and the picture.
+Expert mode adds a full-height side panel beside the screen. The window size stays. The panel holds the live values. A section heading in that panel is 15 px in the main text colour. Opening the panel again clears the previous form, including a nested row, before painting the new one. A scroll viewport keeps the theme base after the scroll or the panel is reparented. The reference list is Steps, Guidance (CFG), Seed, Sampler, Picture size, Output size, Negative prompt, Add-ons, Add-on strength, VRAM limit, and Adult content (18+). A path field is expert because Open folder is the everyday action. The adult-content value selects the prompt policy. The minors gate still reviews the prompt and the picture.
 
 The dock (`Layout`, and `ReferenceShell(full_layout=True)`) stays available as an API for tools that arrange panels. The image screen has no control that opens it. Pass the app's `SafetyGate` as `gate`. An image screen requires that object. A non-image screen without it blocks every picture. `review_result` receives the finished picture, as a path or as bytes and a mime type. A missing picture is blocked before the gate runs. An image screen can also store a source picture and a mask. Simple mode shows Add a picture only when the app turns that slot on. The mask stays an Expert field, or the app sets the path itself.
 
@@ -137,7 +137,7 @@ layout = SimpleImageLayout(
 
 ## Variants
 
-`SimpleLayout` is the same screen for every app. A variant is a short configuration: the input, the primary action, the result, and a preset file. It does not add a second layout. Expert mode still only adds the side panel. That panel is 280 px and can be resized from 220 to 420. The overflow menu stays Open folder, Manage models, Settings, and Expert mode, and an image screen adds Open, Credits, and About. A click on an image drop zone sends `file.open`. A folder or several files send `batch` with those absolute paths. The viewer toolbar still sends `file.open`. A job shows time left on the status row only when the app supplies a duration. Chips are measured again after the shell font and stylesheet, and when the font or style changes. Expert spin boxes and path fields size to their text and suffix, with `field_min_px` as the floor.
+`SimpleLayout` is the same screen for every app. A variant is a short configuration: the input, the primary action, the result, and a preset file. It does not add a second layout. Expert mode still only adds the side panel, and that panel is a full-height column beside the screen. It is 280 px and can be resized from 220 to 420. The overflow menu stays Open folder, Manage models, Settings, and Expert mode, and an image screen adds Open, Credits, and About. A click on an image drop zone sends `file.open`. A folder or several files send `batch` with those absolute paths. The viewer toolbar still sends `file.open`. A job shows time left on the status row only when the app supplies a duration. Chips are measured again after the shell font and stylesheet, and when the font or style changes. Expert spin boxes and path fields size to their text and suffix, with `field_min_px` as the floor.
 
 The code name is `SimpleLayout` / `SimpleWidget` in `voxprint_common.ui.simple_image`. `SimpleImageLayout` and `SimpleImageWidget` are the same classes. `surface_for(app_id)` in `voxprint_common.ui.variants` picks the configuration. `ReferenceShell(app="clarity")` draws that app.
 

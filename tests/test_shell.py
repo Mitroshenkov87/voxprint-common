@@ -61,6 +61,9 @@ def test_headless_layout_and_adoption() -> None:
     assert "image: none" in style
     assert "subcontrol-origin: margin" in style
     assert "QScrollArea#expertScroll QScrollBar:horizontal" in style
+    group_rule = style.split("QLabel#settingGroup", 1)[1].split("}", 1)[0]
+    assert "font-size: 15px" in group_rule
+    assert f"color: {tokens.colors['TEXT']}" in group_rule
     handle = f"QScrollBar::handle:vertical {{\n    background: {tokens.colors['CONTROL_BORDER']}"
     groove = f"QScrollBar::groove:vertical {{\n    background: {tokens.colors['CARD_PLAIN']}"
     assert handle in style

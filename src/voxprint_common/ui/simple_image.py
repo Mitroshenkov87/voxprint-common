@@ -6,8 +6,8 @@ Image, audio, video, text, tool, and viewer are thin configurations
 (:mod:`voxprint_common.ui.variants`), not separate layouts. The viewer has
 no input and no primary action, so the result fills that space.
 :class:`SimpleImageLayout` and :class:`SimpleImageWidget` are the same classes.
-Importing this module does not import PySide6. Expert mode adds a side panel
-and does not move the rest. The dock stays a separate API.
+Importing this module does not import PySide6. Expert mode adds a full-height
+side panel beside the screen. The dock stays a separate API.
 """
 
 from __future__ import annotations
@@ -43,7 +43,13 @@ from voxprint_common.ui.settings import (
     reference_settings,
     spin_suffix,
 )
-from voxprint_common.ui.theme import CARD_PLAIN, CONTROL_BG, TEXT
+from voxprint_common.ui.theme import (
+    CARD_PLAIN,
+    CONTROL_BG,
+    TEXT,
+    palette_colors,
+    resolved_shell_light,
+)
 from voxprint_common.ui.tokens import load
 from voxprint_common.ui.variants import (
     AppSurface,
@@ -1091,8 +1097,8 @@ class SimpleImageWidget:
     inserts a line. Size, output size, style, and how many pictures stay on
     screen, with More like this, Save, Open folder, and Use prompt again.
     Improve prompt, when the app supplies it, replaces the text in that same
-    box. Expert mode adds a side panel and leaves every other control where it
-    was. A long job shows a stage, a percent, an estimate, and Cancel. The
+    box. Expert mode adds a full-height side panel beside the screen. The window
+    size stays. A long job shows a stage, a percent, an estimate, and Cancel. The
     generator hook runs first, with the live settings, and then the screen
     enters that busy state. A second Generate while busy is ignored because
     the button is disabled. The
@@ -1550,9 +1556,20 @@ class SimpleImageWidget:
         widgets = self._widgets
         qt = self._qt
         core = self._core
-        root = widgets.QVBoxLayout(self.root)
-        root.setContentsMargins(16, 12, 16, 12)
+        outer = widgets.QVBoxLayout(self.root)
+        outer.setContentsMargins(16, 12, 16, 12)
+        outer.setSpacing(10)
+        self._outer = outer
+        column_host = widgets.QWidget()
+        column_host.setObjectName("shellColumn")
+        column_host.setSizePolicy(
+            widgets.QSizePolicy.Policy.Expanding,
+            widgets.QSizePolicy.Policy.Expanding,
+        )
+        root = widgets.QVBoxLayout(column_host)
+        root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(10)
+        self._shell_column = column_host
         self._top = widgets.QHBoxLayout()
         self._top.setSpacing(8)
         self._top.addStretch(1)
@@ -1698,7 +1715,7 @@ class SimpleImageWidget:
                 return core.QSize(0, 0)
 
             def sizeHint(_self: object) -> object:
-                return core.QSize(260, 120)
+                return core.QSize(260, 0)
 
         scroll = _Scroll()
         scroll.setObjectName("expertScroll")
@@ -1707,7 +1724,7 @@ class SimpleImageWidget:
         scroll.setHorizontalScrollBarPolicy(qt.ScrollBarAlwaysOff)
         scroll.setSizePolicy(
             widgets.QSizePolicy.Policy.Expanding,
-            widgets.QSizePolicy.Policy.Ignored,
+            widgets.QSizePolicy.Policy.Expanding,
         )
         inner = widgets.QWidget()
         inner.setObjectName("expertForm")
@@ -1715,19 +1732,20 @@ class SimpleImageWidget:
         self._expert_form.setContentsMargins(0, 0, 0, 0)
         self._expert_form.setSpacing(4)
         scroll.setWidget(inner)
-        _darken(scroll, self._gui)
+        _bind_scroll_palette(scroll, self._gui)
         self._panel_layout.addWidget(scroll, 1)
         self._expert_panel.hide()
+        root.addWidget(self._stage, 1)
         self._centre_split = widgets.QSplitter(qt.Horizontal)
         self._centre_split.setObjectName("expertSplit")
         self._centre_split.setChildrenCollapsible(False)
-        self._centre_split.addWidget(self._stage)
+        self._centre_split.addWidget(self._shell_column)
         self._centre_split.addWidget(self._expert_panel)
         self._centre_split.setStretchFactor(0, 1)
         self._centre_split.setStretchFactor(1, 0)
         self._fitting_panel = False
         self._install_panel_fit()
-        root.addWidget(self._centre_split, 1)
+        _bind_panel_palette(self._expert_panel, self._gui)
         self._history_scroll = widgets.QScrollArea()
         self._history_scroll.setObjectName("historyStrip")
         self._history_scroll.setWidgetResizable(True)
@@ -1741,7 +1759,7 @@ class SimpleImageWidget:
         self._history.setContentsMargins(0, 0, 0, 0)
         self._history.setSpacing(8)
         self._history_scroll.setWidget(history)
-        _darken(self._history_scroll, self._gui)
+        _bind_scroll_palette(self._history_scroll, self._gui)
         root.addWidget(self._history_scroll)
         self._status_row = widgets.QWidget()
         self._status_row.setObjectName("statusRow")
@@ -1758,6 +1776,7 @@ class SimpleImageWidget:
         self._note.setObjectName("simpleNote")
         self._note.hide()
         root.addWidget(self._note)
+        self._outer.addWidget(self._centre_split, 1)
         self._install_keys()
         self._install_metrics()
         self.refresh()
@@ -3726,8 +3745,12 @@ def _chip_checked(selected: str, value: str, kind: PresetMatch | None) -> bool:
 
 
 def _clear(layout: object) -> None:
+    """Delete every widget in ``layout``, including rows in a nested form."""
     while layout.count():  # type: ignore[attr-defined]
         item = layout.takeAt(0)  # type: ignore[attr-defined]
+        nested = item.layout()
+        if nested is not None:
+            _clear(nested)
         widget = item.widget()
         if widget is not None:
             widget.hide()
@@ -4153,14 +4176,63 @@ def _apply_suffix(spin: object, spec: SettingSpec) -> None:
 
 
 def _darken(scroll: object, gui: object) -> None:
-    colour = gui.QColor(CARD_PLAIN)  # type: ignore[attr-defined]
+    """Paint a scroll, its viewport, and its content from the theme base.
+
+    A stylesheet background does not paint a viewport. Qt fills that viewport
+    from ``QPalette.Base``. Reparenting the scroll or the panel that holds it
+    restores the platform light base and leaves auto-fill on, so this paint
+    runs again after that reparent.
+    """
+    colour = gui.QColor(palette_colors(light=resolved_shell_light())["Base"])  # type: ignore[attr-defined]
     role = gui.QPalette.ColorRole  # type: ignore[attr-defined]
-    for target in (scroll, scroll.viewport()):  # type: ignore[attr-defined]
+    targets = [scroll, scroll.viewport()]  # type: ignore[attr-defined]
+    inner = scroll.widget()  # type: ignore[attr-defined]
+    if inner is not None:
+        targets.append(inner)
+    for target in targets:
         palette = target.palette()
         palette.setColor(role.Window, colour)
         palette.setColor(role.Base, colour)
         target.setPalette(palette)
         target.setAutoFillBackground(True)
+
+
+def _bind_scroll_palette(scroll: object, gui: object) -> None:
+    """Keep ``scroll`` on the theme base after it, or its content, is reparented."""
+    _darken(scroll, gui)
+    core, _gui, _widgets = _qt()
+
+    class _Watch(core.QObject):
+        def eventFilter(_self: object, _watched: object, event: object) -> bool:
+            kind = event.type()  # type: ignore[attr-defined]
+            if kind not in {core.QEvent.Type.ParentChange, core.QEvent.Type.ChildAdded}:
+                return False
+            core.QTimer.singleShot(0, lambda: _darken(scroll, gui))
+            return False
+
+    watch = _Watch(scroll)
+    scroll.installEventFilter(watch)  # type: ignore[attr-defined]
+    scroll._palette_watch = watch  # type: ignore[attr-defined]
+
+
+def _bind_panel_palette(panel: object, gui: object) -> None:
+    """Repaint every scroll in ``panel`` when the panel itself is reparented."""
+    core, _gui, widgets = _qt()
+
+    def refresh() -> None:
+        for scroll in panel.findChildren(widgets.QScrollArea):  # type: ignore[attr-defined]
+            _darken(scroll, gui)
+
+    class _Watch(core.QObject):
+        def eventFilter(_self: object, _watched: object, event: object) -> bool:
+            if event.type() != core.QEvent.Type.ParentChange:  # type: ignore[attr-defined]
+                return False
+            core.QTimer.singleShot(0, refresh)
+            return False
+
+    watch = _Watch(panel)
+    panel.installEventFilter(watch)  # type: ignore[attr-defined]
+    panel._palette_watch = watch  # type: ignore[attr-defined]
 
 
 def _hill(gui: object, points: tuple[tuple[float, float], ...]) -> object:
