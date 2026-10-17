@@ -947,9 +947,7 @@ class SimpleImageWidget:
         menu = widgets.QMenu(self.root)
         image = self._surface.variant is VariantId.IMAGE
         if confirming:
-            question_key = (
-                "simple.history.delete.confirm" if image else "simple.history.delete.job"
-            )
+            question_key = "simple.history.delete.confirm" if image else "simple.history.delete.job"
             question = menu.addAction(tr(question_key))
             question.setEnabled(False)
             menu.addAction(tr("simple.history.delete"), lambda: self._delete(item_id))
