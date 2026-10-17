@@ -10,21 +10,33 @@
           "id": "short",
           "label_key": "simple.preset.length.short",
           "values": {
-            "text.length": "short"
+            "text.length": "short",
+            "text.model": "story",
+            "text.temperature": 0.4,
+            "text.length_target": 400,
+            "text.tone": "plain"
           }
         },
         {
           "id": "chapter",
           "label_key": "simple.preset.length.chapter",
           "values": {
-            "text.length": "chapter"
+            "text.length": "chapter",
+            "text.model": "story",
+            "text.temperature": 0.7,
+            "text.length_target": 1200,
+            "text.tone": "plain"
           }
         },
         {
           "id": "long",
           "label_key": "simple.preset.length.long",
           "values": {
-            "text.length": "long"
+            "text.length": "long",
+            "text.model": "dialogue",
+            "text.temperature": 0.8,
+            "text.length_target": 2400,
+            "text.tone": "warm"
           }
         }
       ]

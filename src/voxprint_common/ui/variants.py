@@ -181,7 +181,7 @@ def variant_presets(
         enlarge_installed: True when Enlarge can make a larger result.
     """
     if surface.variant is VariantId.VIEWER:
-        return PresetFile(())
+        return load_presets(preset_path("viewer"), settings)
     if surface.preset_name == "canvas":
         return reference_presets(settings, enlarge_installed=enlarge_installed)
     document = load_presets(preset_path(surface.preset_name), settings)
@@ -251,6 +251,39 @@ def _audio_settings() -> Settings:
                     Choice("44", "setting.audio.sample_rate.44"),
                 ),
             ),
+            SettingSpec(
+                "audio.format",
+                "setting.audio.format",
+                "setting.audio.format.help",
+                SettingType.ENUM,
+                "flac",
+                expert=True,
+                group="audio",
+                choices=(
+                    Choice("flac", "setting.audio.format.flac"),
+                    Choice("wav", "setting.audio.format.wav"),
+                ),
+            ),
+            SettingSpec(
+                "audio.normalize",
+                "setting.audio.normalize",
+                "setting.audio.normalize.help",
+                SettingType.BOOL,
+                True,
+                expert=True,
+                group="audio",
+            ),
+            SettingSpec(
+                "audio.loudness",
+                "setting.audio.loudness",
+                "setting.audio.loudness.help",
+                SettingType.FLOAT,
+                -16.0,
+                expert=True,
+                group="audio",
+                minimum=-24.0,
+                maximum=-8.0,
+            ),
         )
     )
 
@@ -269,6 +302,65 @@ def _video_settings() -> Settings:
                     Choice("gentle", "simple.preset.strength.gentle"),
                     Choice("strong", "simple.preset.strength.strong"),
                 ),
+            ),
+            SettingSpec(
+                "video.model",
+                "setting.video.model",
+                "setting.video.model.help",
+                SettingType.ENUM,
+                "standard",
+                expert=True,
+                group="video",
+                choices=(
+                    Choice("standard", "setting.video.model.standard"),
+                    Choice("fine", "setting.video.model.fine"),
+                ),
+            ),
+            SettingSpec(
+                "video.tile",
+                "setting.video.tile",
+                "setting.video.tile.help",
+                SettingType.INT,
+                512,
+                expert=True,
+                group="video",
+                minimum=128,
+                maximum=1024,
+            ),
+            SettingSpec(
+                "video.denoise",
+                "setting.video.denoise",
+                "setting.video.denoise.help",
+                SettingType.FLOAT,
+                0.2,
+                expert=True,
+                group="video",
+                minimum=0.0,
+                maximum=1.0,
+            ),
+            SettingSpec(
+                "video.encoder",
+                "setting.video.encoder",
+                "setting.video.encoder.help",
+                SettingType.ENUM,
+                "h264",
+                expert=True,
+                group="video",
+                choices=(
+                    Choice("h264", "setting.video.encoder.h264"),
+                    Choice("h265", "setting.video.encoder.h265"),
+                ),
+            ),
+            SettingSpec(
+                "video.crf",
+                "setting.video.crf",
+                "setting.video.crf.help",
+                SettingType.INT,
+                18,
+                expert=True,
+                group="video",
+                minimum=1,
+                maximum=40,
             ),
             SettingSpec(
                 "video.stabilize",
@@ -300,6 +392,41 @@ def _text_settings() -> Settings:
                 ),
             ),
             SettingSpec(
+                "text.model",
+                "setting.text.model",
+                "setting.text.model.help",
+                SettingType.ENUM,
+                "story",
+                expert=True,
+                group="text",
+                choices=(
+                    Choice("story", "setting.text.model.story"),
+                    Choice("dialogue", "setting.text.model.dialogue"),
+                ),
+            ),
+            SettingSpec(
+                "text.temperature",
+                "setting.text.temperature",
+                "setting.text.temperature.help",
+                SettingType.FLOAT,
+                0.7,
+                expert=True,
+                group="text",
+                minimum=0.0,
+                maximum=1.5,
+            ),
+            SettingSpec(
+                "text.length_target",
+                "setting.text.length_target",
+                "setting.text.length_target.help",
+                SettingType.INT,
+                1200,
+                expert=True,
+                group="text",
+                minimum=100,
+                maximum=8000,
+            ),
+            SettingSpec(
                 "text.tone",
                 "setting.text.tone",
                 "setting.text.tone.help",
@@ -319,6 +446,46 @@ def _text_settings() -> Settings:
 def _viewer_settings() -> Settings:
     return Settings(
         (
+            SettingSpec(
+                "viewer.colour",
+                "setting.viewer.colour",
+                "setting.viewer.colour.help",
+                SettingType.ENUM,
+                "srgb",
+                expert=True,
+                group="viewer",
+                choices=(
+                    Choice("srgb", "setting.viewer.colour.srgb"),
+                    Choice("p3", "setting.viewer.colour.p3"),
+                ),
+            ),
+            SettingSpec(
+                "viewer.zoom_filter",
+                "setting.viewer.zoom_filter",
+                "setting.viewer.zoom_filter.help",
+                SettingType.ENUM,
+                "smooth",
+                expert=True,
+                group="viewer",
+                choices=(
+                    Choice("smooth", "setting.viewer.zoom_filter.smooth"),
+                    Choice("nearest", "setting.viewer.zoom_filter.nearest"),
+                ),
+            ),
+            SettingSpec(
+                "viewer.background",
+                "setting.viewer.background",
+                "setting.viewer.background.help",
+                SettingType.ENUM,
+                "dark",
+                expert=True,
+                group="viewer",
+                choices=(
+                    Choice("dark", "setting.viewer.background.dark"),
+                    Choice("grey", "setting.viewer.background.grey"),
+                    Choice("black", "setting.viewer.background.black"),
+                ),
+            ),
             SettingSpec(
                 "viewer.show_history",
                 "setting.viewer.show_history",
@@ -341,10 +508,50 @@ def _tool_settings() -> Settings:
                 "setting.tool.precision.help",
                 SettingType.ENUM,
                 "careful",
+                expert=True,
                 group="tool",
                 choices=(
                     Choice("fast", "simple.preset.precision.fast"),
                     Choice("careful", "simple.preset.precision.careful"),
+                ),
+            ),
+            SettingSpec(
+                "tool.model",
+                "setting.tool.model",
+                "setting.tool.model.help",
+                SettingType.ENUM,
+                "standard",
+                expert=True,
+                group="tool",
+                choices=(
+                    Choice("standard", "setting.tool.model.standard"),
+                    Choice("large", "setting.tool.model.large"),
+                ),
+            ),
+            SettingSpec(
+                "tool.quant",
+                "setting.tool.quant",
+                "setting.tool.quant.help",
+                SettingType.ENUM,
+                "int8",
+                expert=True,
+                group="tool",
+                choices=(
+                    Choice("int8", "setting.tool.quant.int8"),
+                    Choice("int4", "setting.tool.quant.int4"),
+                ),
+            ),
+            SettingSpec(
+                "tool.output",
+                "setting.tool.output",
+                "setting.tool.output.help",
+                SettingType.ENUM,
+                "package",
+                expert=True,
+                group="tool",
+                choices=(
+                    Choice("package", "setting.tool.output.package"),
+                    Choice("folder", "setting.tool.output.folder"),
                 ),
             ),
             SettingSpec(

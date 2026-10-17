@@ -29,6 +29,7 @@ from voxprint_common.ui.presets import (
 )
 from voxprint_common.ui.safety import AdultPromptPolicy, SafetyGate, adult_prompt_policy
 from voxprint_common.ui.settings import Settings, SettingSpec, SettingType, reference_settings
+from voxprint_common.ui.theme import CARD_PLAIN
 from voxprint_common.ui.variants import (
     AppSurface,
     InputKind,
@@ -840,16 +841,27 @@ class SimpleImageWidget:
         self._chapters: object | None = None
         self._before: object | None = None
         self._after: object | None = None
+        self._compare: object | None = None
+        self._wipe: object | None = None
         self._document: object | None = None
         self._report: object | None = None
         self._applying = False
         self._resets: dict[str, object] = {}
         self._customs: dict[str, object] = {}
+        self._expert_resets: object | None = None
+        self._size_orient = ""
         self._chip_groups: dict[str, object] = {}
         self._previous_prompt: str | None = None
         self._handling_enter = False
         self._source: object | None = None
-        self.root = widgets.QWidget()
+        self._scaled_to: tuple[int, int] | None = None
+        core = self._core
+
+        class _Root(widgets.QWidget):
+            def minimumSizeHint(_self: object) -> object:
+                return core.QSize(0, 0)
+
+        self.root = _Root()
         self.root.setObjectName("simpleRoot")
         self._build()
 
@@ -869,22 +881,44 @@ class SimpleImageWidget:
     def set_expert(self, enabled: bool) -> None:
         """Show or hide the expert side panel.
 
+        The window keeps its size. The result view gives up the space.
+
         Args:
             enabled: True shows the expert settings beside the picture.
         """
+        window = self.root.window()  # type: ignore[attr-defined]
+        held = None
+        if window is not None and window.isVisible():
+            held = (window.width(), window.height())
+        self._expert_toggle.setChecked(enabled)  # type: ignore[attr-defined]
         self._expert_panel.setVisible(enabled)  # type: ignore[attr-defined]
         _clear(self._expert_form)
+        self._expert_resets = None
         if enabled:
+            widgets = self._widgets
+            title = widgets.QLabel(tr("simple.expert.title"))
+            title.setObjectName("expertTitle")
+            self._expert_form.addWidget(title)  # type: ignore[attr-defined]
+            resets = widgets.QWidget()
+            resets.setObjectName("expertResets")
+            reset_layout = widgets.QVBoxLayout(resets)
+            reset_layout.setContentsMargins(0, 4, 0, 4)
+            reset_layout.setSpacing(6)
+            self._expert_resets = resets
+            self._expert_form.addWidget(resets)  # type: ignore[attr-defined]
             specs = tuple(spec for spec in self._settings.visible(expert=True) if spec.expert)
             _fill_form(
-                self._widgets,
+                widgets,
                 self._expert_form,
                 specs,
                 values=_live_values(self._layout, specs),
                 on_change=self._on_expert_edit,
             )
             self._expert_form.addStretch(1)  # type: ignore[attr-defined]
+            self._refresh_resets()
             self._fit_expert_panel()
+        if held is not None and window is not None:
+            window.resize(held[0], held[1])
 
     def set_note(self, text: str) -> None:
         """Show a short line under the history, or hide it when ``text`` is empty.
@@ -983,13 +1017,14 @@ class SimpleImageWidget:
     def _build(self) -> None:
         widgets = self._widgets
         qt = self._qt
+        core = self._core
         root = widgets.QVBoxLayout(self.root)
         root.setContentsMargins(16, 12, 16, 12)
         root.setSpacing(10)
         self._top = widgets.QHBoxLayout()
         self._top.setSpacing(8)
         self._top.addStretch(1)
-        self._overflow = widgets.QPushButton(tr("shell.toolbar.overflow"))
+        self._overflow = widgets.QPushButton(f"{tr('shell.toolbar.overflow')}  ▾")
         self._overflow.setObjectName("overflow")
         self._overflow.setAutoDefault(False)
         overflow = widgets.QMenu(self.root)
@@ -1007,6 +1042,7 @@ class SimpleImageWidget:
         self._top.addWidget(self._overflow)
         self._expert_toggle = widgets.QPushButton(tr("command.view.toggle_expert_mode"))
         self._expert_toggle.setObjectName("expertToggle")
+        self._expert_toggle.setCheckable(True)
         self._expert_toggle.setAutoDefault(False)
         self._expert_toggle.clicked.connect(lambda: self._command("view.toggle_expert_mode"))
         self._top.addWidget(self._expert_toggle)
@@ -1020,7 +1056,7 @@ class SimpleImageWidget:
             self._prompt = widgets.QPlainTextEdit()
             self._prompt.setObjectName("promptBox")
             self._prompt.setPlaceholderText(tr(self._surface.placeholder_key))
-            self._prompt.setMinimumHeight(96)
+            self._prompt.setFixedHeight(84)
             prompt_col = widgets.QVBoxLayout()
             prompt_col.setSpacing(6)
             prompt_col.addWidget(self._prompt, 1)
@@ -1049,11 +1085,15 @@ class SimpleImageWidget:
             self._generate_button = widgets.QPushButton(tr(self._surface.action_key))
             self._generate_button.setObjectName("generate")
             self._generate_button.setAutoDefault(False)
-            self._generate_button.setMinimumSize(168, 96)
+            self._generate_button.setMinimumSize(148, 64)
             self._generate_button.clicked.connect(self._generate)
             prompt_row.addWidget(self._generate_button)
             root.addLayout(prompt_row)
         self._preset_host = widgets.QWidget()
+        self._preset_host.setSizePolicy(
+            widgets.QSizePolicy.Policy.Preferred,
+            widgets.QSizePolicy.Policy.Maximum,
+        )
         self._preset_rows = widgets.QVBoxLayout(self._preset_host)
         self._preset_rows.setContentsMargins(0, 0, 0, 0)
         self._preset_rows.setSpacing(8)
@@ -1062,7 +1102,12 @@ class SimpleImageWidget:
         if not self._layout.rows:
             self._preset_host.hide()
             self._preset_host.setFixedHeight(0)
-        self._stage = widgets.QFrame()
+
+        class _Stage(widgets.QFrame):
+            def minimumSizeHint(_self: object) -> object:
+                return core.QSize(0, 0)
+
+        self._stage = _Stage()
         self._stage.setObjectName("stage")
         self._stage.setAttribute(qt.WA_StyledBackground, True)
         stage_layout = widgets.QVBoxLayout(self._stage)
@@ -1079,6 +1124,9 @@ class SimpleImageWidget:
         core = self._core
 
         class _Panel(widgets.QFrame):
+            def minimumSizeHint(_self: object) -> object:
+                return core.QSize(220, 0)
+
             def sizeHint(_self: object) -> object:
                 hint = widgets.QFrame.sizeHint(_self)  # type: ignore[arg-type]
                 return core.QSize(280, hint.height())
@@ -1097,7 +1145,16 @@ class SimpleImageWidget:
         self._panel_layout = widgets.QVBoxLayout(self._expert_panel)
         self._panel_layout.setContentsMargins(12, 10, 12, 10)
         self._panel_layout.setSpacing(8)
-        scroll = widgets.QScrollArea()
+
+        class _Scroll(widgets.QScrollArea):
+            def minimumSizeHint(_self: object) -> object:
+                return core.QSize(0, 0)
+
+            def sizeHint(_self: object) -> object:
+                return core.QSize(260, 120)
+
+        scroll = _Scroll()
+        scroll.setObjectName("expertScroll")
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(widgets.QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(qt.ScrollBarAlwaysOff)
@@ -1106,10 +1163,12 @@ class SimpleImageWidget:
             widgets.QSizePolicy.Policy.Ignored,
         )
         inner = widgets.QWidget()
+        inner.setObjectName("expertForm")
         self._expert_form = widgets.QVBoxLayout(inner)
         self._expert_form.setContentsMargins(0, 0, 0, 0)
         self._expert_form.setSpacing(4)
         scroll.setWidget(inner)
+        _darken(scroll, self._gui)
         self._panel_layout.addWidget(scroll, 1)
         self._expert_panel.hide()
         self._centre_split = widgets.QSplitter(qt.Horizontal)
@@ -1130,10 +1189,12 @@ class SimpleImageWidget:
         self._history_scroll.setVerticalScrollBarPolicy(qt.ScrollBarAlwaysOff)
         self._history_scroll.setFixedHeight(104)
         history = widgets.QWidget()
+        history.setObjectName("historyRow")
         self._history = widgets.QHBoxLayout(history)
         self._history.setContentsMargins(0, 0, 0, 0)
         self._history.setSpacing(8)
         self._history_scroll.setWidget(history)
+        _darken(self._history_scroll, self._gui)
         root.addWidget(self._history_scroll)
         self._status_row = widgets.QWidget()
         self._status_row.setObjectName("statusRow")
@@ -1297,16 +1358,27 @@ class SimpleImageWidget:
         page = widgets.QWidget()
         layout = widgets.QVBoxLayout(page)
         layout.setContentsMargins(12, 12, 12, 12)
-        self._picture = widgets.QLabel()
+        widget = self
+
+        class _Picture(widgets.QLabel):
+            def resizeEvent(_self: object, event: object) -> None:
+                widgets.QLabel.resizeEvent(_self, event)  # type: ignore[arg-type]
+                widget._rescale()
+
+            def sizeHint(_self: object) -> object:
+                return widget._core.QSize(0, 0)
+
+            def minimumSizeHint(_self: object) -> object:
+                return widget._core.QSize(0, 0)
+
+        self._picture = _Picture()
         self._picture.setObjectName("result")
         self._picture.setAlignment(self._qt.AlignCenter)
+        self._picture.setSizePolicy(
+            widgets.QSizePolicy.Policy.Ignored,
+            widgets.QSizePolicy.Policy.Ignored,
+        )
         layout.addWidget(self._picture, 1)
-
-        def _resized(_event: object) -> None:
-            widgets.QLabel.resizeEvent(self._picture, _event)  # type: ignore[arg-type]
-            self._rescale()
-
-        self._picture.resizeEvent = _resized  # type: ignore[method-assign]
         return page
 
     def _player_page(self) -> object:
@@ -1332,27 +1404,28 @@ class SimpleImageWidget:
     def _compare_page(self) -> object:
         widgets = self._widgets
         page = widgets.QWidget()
-        layout = widgets.QVBoxLayout(page)
-        layout.setContentsMargins(16, 16, 16, 12)
-        layout.setSpacing(10)
-        row = widgets.QHBoxLayout()
-        row.setSpacing(12)
-        before = widgets.QLabel()
-        before.setObjectName("compareBefore")
-        before.setAlignment(self._qt.AlignCenter)
-        after = widgets.QLabel()
-        after.setObjectName("compareAfter")
-        after.setAlignment(self._qt.AlignCenter)
-        self._before = before
-        self._after = after
-        row.addWidget(before, 1)
-        row.addWidget(after, 1)
-        layout.addLayout(row, 1)
+        layout = widgets.QGridLayout(page)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(0)
+        frame = widgets.QLabel()
+        frame.setObjectName("compareView")
+        frame.setAlignment(self._qt.AlignCenter)
+        frame.setMinimumHeight(0)
+        self._compare = frame
         slider = widgets.QSlider(self._qt.Horizontal)
         slider.setObjectName("compareSlider")
-        slider.setRange(0, 100)
-        slider.setValue(50)
-        layout.addWidget(slider)
+        slider.setRange(0, 1000)
+        slider.setValue(500)
+        slider.valueChanged.connect(lambda _value: self._paint_wipe())
+        self._wipe = slider
+        layout.addWidget(frame, 0, 0)
+        layout.addWidget(slider, 0, 0)
+
+        def _resized(_event: object) -> None:
+            widgets.QLabel.resizeEvent(frame, _event)  # type: ignore[arg-type]
+            self._paint_wipe()
+
+        frame.resizeEvent = _resized  # type: ignore[method-assign]
         return page
 
     def _document_page(self) -> object:
@@ -1395,21 +1468,43 @@ class SimpleImageWidget:
 
     def _fill_presets(self) -> None:
         widgets = self._widgets
+        compact: object | None = None
         for row in self._layout.rows:
             group = widgets.QButtonGroup(self.root)
             group.setExclusive(True)
             self._chip_groups[row.row_id] = group
-            lines = _choice_groups(row.choices)
+            lines = (("", row.choices),) if row.row_id == "size" else _choice_groups(row.choices)
             for index, (group_key, choices) in enumerate(lines):
-                line = widgets.QHBoxLayout()
-                line.setSpacing(8)
+                shared = compact if row.row_id == "detail" and index == 0 else None
+                line = shared if shared is not None else widgets.QHBoxLayout()
+                if shared is None:
+                    line.setSpacing(8)
+                else:
+                    line.addSpacing(16)  # type: ignore[attr-defined]
                 label = widgets.QLabel(tr(row.label_key) if index == 0 else "")
                 if index == 0:
                     label.setObjectName(f"preset-{row.row_id}")
                 label.setProperty("presetLabel", "true")
-                label.setMinimumWidth(156)
+                label.setMinimumWidth(72 if shared is not None else 108)
                 line.addWidget(label)
-                if group_key:
+                if row.row_id == "size" and index == 0:
+                    seen: list[str] = []
+                    for choice in row.choices:
+                        key = choice.group_key
+                        if not key or key in seen:
+                            continue
+                        seen.append(key)
+                        orient = widgets.QPushButton(tr(key))
+                        orient.setObjectName(f"orient-{key.rsplit('.', 1)[-1]}")
+                        orient.setProperty("chip", "true")
+                        orient.setCheckable(True)
+                        orient.setAutoDefault(False)
+                        orient.clicked.connect(
+                            lambda _checked=False, group_key=key: self._set_orientation(group_key)
+                        )
+                        line.addWidget(orient)
+                        _fit_chip(orient)
+                if group_key and row.row_id != "size":
                     group_label = widgets.QLabel(tr(group_key))
                     group_label.setProperty("presetLabel", "true")
                     group_label.setMinimumWidth(96)
@@ -1431,6 +1526,7 @@ class SimpleImageWidget:
                     else:
                         button.setEnabled(False)
                     line.addWidget(button)
+                    _fit_chip(button)
                     button.style().unpolish(button)
                     button.style().polish(button)
                     if choice.available:
@@ -1467,8 +1563,13 @@ class SimpleImageWidget:
                     )
                     self._resets[row.row_id] = reset
                     line.addWidget(reset)
-                line.addStretch(1)
-                self._preset_rows.addLayout(line)
+                if row.row_id == "output":
+                    compact = line
+                    continue
+                line.addStretch(1)  # type: ignore[attr-defined]
+                if shared is None or row.row_id == "detail":
+                    self._preset_rows.addLayout(line)
+                compact = None
 
     def _sync_presets(self) -> None:
         for row in self._layout.rows:
@@ -1486,6 +1587,7 @@ class SimpleImageWidget:
                 if button is None or not button.isCheckable():
                     continue
                 button.setText(_chip_text(choice.label_key, selected, choice.value, kind))
+                _fit_chip(button)
                 button.setChecked(_chip_checked(selected, choice.value, kind))
             if group is not None and kind is not PresetMatch.CUSTOM:
                 group.setExclusive(True)  # type: ignore[attr-defined]
@@ -1498,6 +1600,83 @@ class SimpleImageWidget:
                 continue
             reset.setVisible(kind is not PresetMatch.EXACT)  # type: ignore[attr-defined]
             reset.setText(tr("simple.preset.reset", name=tr(status.label_key)))  # type: ignore[attr-defined]
+            _fit_chip(reset)
+        self._apply_size_filter()
+        self._refresh_resets()
+
+    def _apply_size_filter(self) -> None:
+        """Show ratio chips only for the orientation that is selected."""
+        rows = [row for row in self._layout.rows if row.row_id == "size"]
+        if not rows:
+            return
+        row = rows[0]
+        selected = self._layout.presets.get("size", "")
+        current = next((choice for choice in row.choices if choice.value == selected), None)
+        orient = current.group_key if current is not None else self._size_orient
+        if not orient:
+            return
+        self._size_orient = orient
+        for choice in row.choices:
+            button = self.root.findChild(
+                self._widgets.QPushButton,
+                _chip_name("size", choice.value),
+            )
+            if button is not None:
+                button.setVisible(choice.group_key == orient)  # type: ignore[attr-defined]
+        for choice in row.choices:
+            if not choice.group_key:
+                continue
+            marker = self.root.findChild(
+                self._widgets.QPushButton,
+                f"orient-{choice.group_key.rsplit('.', 1)[-1]}",
+            )
+            if marker is not None:
+                marker.setChecked(choice.group_key == orient)  # type: ignore[attr-defined]
+
+    def _set_orientation(self, group_key: str) -> None:
+        rows = [row for row in self._layout.rows if row.row_id == "size"]
+        if not rows:
+            return
+        row = rows[0]
+        selected = self._layout.presets.get("size", "")
+        current = next((choice for choice in row.choices if choice.value == selected), None)
+        if current is not None and current.group_key == group_key:
+            self._size_orient = group_key
+            self._apply_size_filter()
+            return
+        nxt = next(
+            (
+                choice
+                for choice in row.choices
+                if choice.group_key == group_key and choice.available
+            ),
+            None,
+        )
+        if nxt is None:
+            return
+        self._choose("size", nxt.value)
+
+    def _refresh_resets(self) -> None:
+        """Show Reset at the top of the expert panel while a preset has changes."""
+        host = self._expert_resets
+        if host is None:
+            return
+        layout = host.layout()  # type: ignore[attr-defined]
+        _clear(layout)
+        visible = False
+        for row in self._layout.rows:
+            status = self._layout.preset_status(row.row_id)
+            if status is None or status.kind is not PresetMatch.MODIFIED:
+                continue
+            visible = True
+            button = self._widgets.QPushButton(tr("simple.preset.reset", name=tr(status.label_key)))
+            button.setObjectName("expertReset")
+            button.setAutoDefault(False)
+            button.clicked.connect(
+                lambda _checked=False, row_id=row.row_id: self._reset_group(row_id)
+            )
+            layout.addWidget(button)
+        host.setVisible(visible)  # type: ignore[attr-defined]
 
     def _fill_history(self) -> None:
         widgets = self._widgets
@@ -1514,7 +1693,7 @@ class SimpleImageWidget:
             button.setAutoDefault(False)
             button.setFixedSize(88, 88)
             if self._surface.result_kind is ResultKind.PICTURE:
-                button.setIcon(self._gui.QIcon(_placeholder(self._gui, item.item_id, 168, 168)))
+                button.setIcon(self._gui.QIcon(_scene(self._gui, item.item_id, 168, 168)))
                 button.setIconSize(self._core.QSize(80, 80))
             else:
                 button.setText(str(index))
@@ -1534,6 +1713,8 @@ class SimpleImageWidget:
         self._history.addStretch(1)
 
     def _action_bar(self) -> object:
+        if self._surface.variant is VariantId.VIEWER:
+            return self._viewer_bar()
         widgets = self._widgets
         bar = widgets.QWidget()
         bar.setObjectName("actionBar")
@@ -1559,6 +1740,44 @@ class SimpleImageWidget:
             row.addWidget(button)
         row.addStretch(1)
         return bar
+
+    def _viewer_bar(self) -> object:
+        widgets = self._widgets
+        bar = widgets.QWidget()
+        bar.setObjectName("viewerBar")
+        row = widgets.QHBoxLayout(bar)
+        row.setContentsMargins(8, 8, 8, 0)
+        row.setSpacing(6)
+        specs = (
+            ("viewerOpen", "simple.viewer.open", lambda: self._command("file.open")),
+            ("viewerSave", "simple.viewer.save", self._save_current),
+            ("viewerPrev", "simple.viewer.previous", self._viewer_previous),
+            ("viewerNext", "simple.viewer.next", self._viewer_next),
+        )
+        for name, key, handler in specs:
+            button = widgets.QPushButton(tr(key))
+            button.setObjectName(name)
+            button.setAutoDefault(False)
+            button.setMinimumHeight(28)
+            button.clicked.connect(handler)
+            row.addWidget(button)
+        row.addStretch(1)
+        return bar
+
+    def _viewer_previous(self) -> None:
+        self._step_history(-1)
+
+    def _viewer_next(self) -> None:
+        self._step_history(1)
+
+    def _step_history(self, step: int) -> None:
+        history = self._layout.history
+        if not history:
+            return
+        ids = [item.item_id for item in history]
+        current = self._layout.selected
+        index = ids.index(current) if current in ids else 0
+        self._select(ids[(index + step) % len(ids)])
 
     def _action_button(self, name: str, label_key: str, handler: Callable[[], None]) -> object:
         button = self._widgets.QPushButton(tr(label_key))
@@ -1679,8 +1898,10 @@ class SimpleImageWidget:
     def _show_input(self, text: str) -> None:
         if self._prompt is not None:
             self._prompt.setPlainText(text)  # type: ignore[attr-defined]
-        if self._drop is not None and text.strip():
-            self._drop.setText(text)  # type: ignore[attr-defined]
+        if self._drop is not None:
+            hint = tr(self._surface.drop_key)
+            name = text.strip()
+            self._drop.setText(f"{hint}\n{name}" if name else hint)  # type: ignore[attr-defined]
         if self._model is None or not text.strip():
             return
         index = self._model.findText(text)  # type: ignore[attr-defined]
@@ -1825,21 +2046,15 @@ class SimpleImageWidget:
             return
         kind = self._surface.result_kind
         if kind is ResultKind.PICTURE:
-            self._source = _placeholder(self._gui, item.item_id, 960, 640)
+            self._scaled_to = None
             self._stack.setCurrentIndex(2)  # type: ignore[attr-defined]
             self._rescale()
             return
         if kind is ResultKind.PLAYER:
-            self._player.setPixmap(_bars(self._gui, item.item_id, 880, 180))  # type: ignore[attr-defined]
+            self._player.setPixmap(_bars(self._gui, item.item_id, 880, 220))  # type: ignore[attr-defined]
             self._chapters.setText(_chapters())  # type: ignore[attr-defined]
         elif kind is ResultKind.COMPARE:
-            align = int(self._qt.AlignCenter)
-            self._before.setPixmap(  # type: ignore[attr-defined]
-                _swatch(self._gui, 420, 240, tr("simple.compare.before"), True, align)
-            )
-            self._after.setPixmap(  # type: ignore[attr-defined]
-                _swatch(self._gui, 420, 240, tr("simple.compare.after"), False, align)
-            )
+            self._paint_wipe()
         elif kind is ResultKind.DOCUMENT:
             self._document.setPlainText(_chapter_text(item.prompt))  # type: ignore[attr-defined]
         elif kind is ResultKind.REPORT:
@@ -1848,20 +2063,31 @@ class SimpleImageWidget:
             assert_never(kind)
         self._stack.setCurrentIndex(2)  # type: ignore[attr-defined]
 
+    def _paint_wipe(self) -> None:
+        frame = self._compare
+        slider = self._wipe
+        if frame is None or slider is None:
+            return
+        size = frame.size()  # type: ignore[attr-defined]
+        width = max(int(size.width()), 2)
+        height = max(int(size.height()), 2)
+        split = int(slider.value()) / 1000  # type: ignore[attr-defined]
+        frame.setPixmap(_wipe(self._gui, width, height, split))  # type: ignore[attr-defined]
+
     def _rescale(self) -> None:
         if self._surface.result_kind is not ResultKind.PICTURE:
             return
-        if self._source is None or self._layout.phase is not Phase.READY:
+        if self._layout.phase is not Phase.READY or self._picture is None:
             return
         size = self._picture.size()  # type: ignore[attr-defined]
-        if size.width() < 2 or size.height() < 2:
+        width = int(size.width())
+        height = int(size.height())
+        if width < 2 or height < 2 or (width, height) == self._scaled_to:
             return
-        scaled = self._source.scaled(  # type: ignore[attr-defined]
-            size,
-            self._qt.KeepAspectRatio,
-            self._qt.SmoothTransformation,
-        )
-        self._picture.setPixmap(scaled)  # type: ignore[attr-defined]
+        item = self._layout.item(self._layout.selected)
+        item_id = "picture" if item is None else item.item_id
+        self._scaled_to = (width, height)
+        self._picture.setPixmap(_scene(self._gui, item_id, width, height))  # type: ignore[attr-defined]
 
     def _popup(self, item_id: str, source: object, pos: object) -> None:
         menu = self.history_menu(item_id)
@@ -1963,11 +2189,18 @@ def _fill_form(
         control = _control(widgets, spec, current)
         if on_change is not None:
             _watch(control, spec, on_change)
-        if spec.type is not SettingType.BOOL:
-            label = widgets.QLabel(tr(spec.label_key))  # type: ignore[attr-defined]
-            label.setObjectName("panel")
-            form.addWidget(label)  # type: ignore[attr-defined]
-        form.addWidget(control)  # type: ignore[attr-defined]
+        if spec.type is SettingType.BOOL:
+            form.addWidget(control)  # type: ignore[attr-defined]
+            continue
+        row = widgets.QHBoxLayout()  # type: ignore[attr-defined]
+        row.setSpacing(8)
+        label = widgets.QLabel(tr(spec.label_key))  # type: ignore[attr-defined]
+        label.setObjectName("panel")
+        label.setWordWrap(True)
+        label.setMinimumWidth(96)
+        row.addWidget(label, 1)
+        row.addWidget(control, 1)
+        form.addLayout(row)  # type: ignore[attr-defined]
 
 
 def _control(widgets: object, spec: SettingSpec, value: object) -> object:
@@ -1980,6 +2213,8 @@ def _control(widgets: object, spec: SettingSpec, value: object) -> object:
     elif kind is SettingType.ENUM:
         combo = widgets.QComboBox()  # type: ignore[attr-defined]
         combo.setObjectName(spec.setting_id)
+        combo.setSizeAdjustPolicy(combo.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        combo.setMinimumContentsLength(10)
         selected = 0
         for index, choice in enumerate(spec.choices):
             combo.addItem(tr(choice.label_key), choice.value)
@@ -1990,12 +2225,14 @@ def _control(widgets: object, spec: SettingSpec, value: object) -> object:
     elif kind is SettingType.INT:
         spin = widgets.QSpinBox()  # type: ignore[attr-defined]
         spin.setObjectName(spec.setting_id)
+        spin.setMinimumWidth(72)
         spin.setRange(int(spec.minimum or 0), int(spec.maximum or 0))
         spin.setValue(int(value) if isinstance(value, int) and not isinstance(value, bool) else 0)
         control = spin
     elif kind is SettingType.FLOAT:
         spin = widgets.QDoubleSpinBox()  # type: ignore[attr-defined]
         spin.setObjectName(spec.setting_id)
+        spin.setMinimumWidth(72)
         spin.setDecimals(1)
         spin.setRange(float(spec.minimum or 0), float(spec.maximum or 0))
         spin.setSingleStep(0.5)
@@ -2013,7 +2250,8 @@ def _control(widgets: object, spec: SettingSpec, value: object) -> object:
         edit = widgets.QPlainTextEdit()  # type: ignore[attr-defined]
         edit.setObjectName(spec.setting_id)
         edit.setPlainText(value if isinstance(value, str) else "")
-        edit.setFixedHeight(64)
+        edit.setMinimumWidth(0)
+        edit.setFixedHeight(48)
         control = edit
     else:
         assert_never(kind)
@@ -2187,6 +2425,102 @@ def _swatch(
     font.setPointSize(18)
     painter.setFont(font)
     painter.drawText(image.rect(), align, label)
+    painter.end()
+    return gui.QPixmap.fromImage(image)  # type: ignore[attr-defined]
+
+
+def _fit_chip(button: object) -> None:
+    text = str(button.text())  # type: ignore[attr-defined]
+    width = int(button.fontMetrics().horizontalAdvance(text)) + 28  # type: ignore[attr-defined]
+    button.setMinimumWidth(max(width, 36))  # type: ignore[attr-defined]
+
+
+def _darken(scroll: object, gui: object) -> None:
+    colour = gui.QColor(CARD_PLAIN)  # type: ignore[attr-defined]
+    role = gui.QPalette.ColorRole  # type: ignore[attr-defined]
+    for target in (scroll, scroll.viewport()):  # type: ignore[attr-defined]
+        palette = target.palette()
+        palette.setColor(role.Window, colour)
+        palette.setColor(role.Base, colour)
+        target.setPalette(palette)
+        target.setAutoFillBackground(True)
+
+
+def _hill(gui: object, points: tuple[tuple[float, float], ...]) -> object:
+    path = gui.QPainterPath()  # type: ignore[attr-defined]
+    path.moveTo(*points[0])
+    for point in points[1:]:
+        path.lineTo(*point)
+    path.closeSubpath()
+    return path
+
+
+def _scene(gui: object, item_id: str, width: int, height: int) -> object:
+    """Return a painted landscape. It is not a photograph."""
+    image = gui.QImage(  # type: ignore[attr-defined]
+        max(width, 1),
+        max(height, 1),
+        gui.QImage.Format.Format_RGB32,  # type: ignore[attr-defined]
+    )
+    shift = sum(ord(char) for char in item_id) % 18
+    painter = gui.QPainter(image)  # type: ignore[attr-defined]
+    sky = gui.QLinearGradient(0, 0, 0, height)  # type: ignore[attr-defined]
+    sky.setColorAt(0, gui.QColor(28, 42 + shift, 72))  # type: ignore[attr-defined]
+    sky.setColorAt(0.55, gui.QColor(186, 132 + shift, 86))  # type: ignore[attr-defined]
+    sky.setColorAt(1, gui.QColor(92, 78, 64))  # type: ignore[attr-defined]
+    painter.fillRect(image.rect(), sky)
+    sun = gui.QColor(245, 214, 140)  # type: ignore[attr-defined]
+    painter.setBrush(sun)
+    painter.setPen(gui.QPen(sun))  # type: ignore[attr-defined]
+    sun_size = max(18, width // 10)
+    painter.drawEllipse(int(width * 0.72), int(height * 0.16), sun_size, sun_size)
+    painter.setPen(gui.QPen(gui.QColor(0, 0, 0, 0)))  # type: ignore[attr-defined]
+    far = _hill(
+        gui,
+        (
+            (0, height * 0.72),
+            (width * 0.28, height * 0.48),
+            (width * 0.55, height * 0.7),
+            (width, height * 0.42),
+            (width, height),
+            (0, height),
+        ),
+    )
+    painter.setBrush(gui.QColor(58, 62, 74))  # type: ignore[attr-defined]
+    painter.drawPath(far)  # type: ignore[attr-defined]
+    near = _hill(
+        gui,
+        (
+            (0, height * 0.78),
+            (width * 0.4, height * 0.62),
+            (width, height * 0.8),
+            (width, height),
+            (0, height),
+        ),
+    )
+    painter.setBrush(gui.QColor(36, 40, 34))  # type: ignore[attr-defined]
+    painter.drawPath(near)  # type: ignore[attr-defined]
+    painter.setPen(gui.QPen(gui.QColor(214, 196, 150), max(2, width // 180)))  # type: ignore[attr-defined]
+    painter.drawLine(int(width * 0.5), height, int(width * 0.62), int(height * 0.7))
+    painter.end()
+    return gui.QPixmap.fromImage(image)  # type: ignore[attr-defined]
+
+
+def _wipe(gui: object, width: int, height: int, split: float) -> object:
+    """Return one frame with a before/after split. It is not a video."""
+    image = gui.QImage(  # type: ignore[attr-defined]
+        max(width, 1),
+        max(height, 1),
+        gui.QImage.Format.Format_RGB32,  # type: ignore[attr-defined]
+    )
+    painter = gui.QPainter(image)  # type: ignore[attr-defined]
+    painter.drawPixmap(0, 0, _scene(gui, "after", width, height))  # type: ignore[attr-defined]
+    cut = int(max(0.0, min(split, 1.0)) * width)
+    before = _scene(gui, "before", width, height)
+    painter.drawPixmap(0, 0, before, 0, 0, cut, height)  # type: ignore[attr-defined]
+    painter.fillRect(0, 0, cut, height, gui.QColor(8, 12, 20, 90))  # type: ignore[attr-defined]
+    painter.setPen(gui.QPen(gui.QColor(242, 242, 245), 2))  # type: ignore[attr-defined]
+    painter.drawLine(cut, 0, cut, height)
     painter.end()
     return gui.QPixmap.fromImage(image)  # type: ignore[attr-defined]
 

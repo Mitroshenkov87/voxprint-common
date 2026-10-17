@@ -130,7 +130,7 @@ def main() -> None:
         language="en",
         result=True,
         app_id="audiobook-builder",
-        prompt="A quiet chapter",
+        prompt="quiet-chapter.epub",
     )
     grab_shell(
         out / "audio-expert.png",
@@ -138,14 +138,14 @@ def main() -> None:
         expert=True,
         result=True,
         app_id="audiobook-builder",
-        prompt="A quiet chapter",
+        prompt="quiet-chapter.epub",
     )
     grab_shell(
         out / "video-simple.png",
         language="en",
         result=True,
         app_id="clarity",
-        prompt="A quiet clip",
+        prompt="quiet-clip.mp4",
     )
     grab_shell(
         out / "video-expert.png",
@@ -153,7 +153,7 @@ def main() -> None:
         expert=True,
         result=True,
         app_id="clarity",
-        prompt="A quiet clip",
+        prompt="quiet-clip.mp4",
     )
     grab_shell(
         out / "text-simple.png",
@@ -205,7 +205,7 @@ def main() -> None:
         language="ru",
         result=True,
         app_id="audiobook-builder",
-        prompt="Тихая глава",
+        prompt="тихая-глава.epub",
     )
     grab_shell(
         out / "ru-audio-expert.png",
@@ -213,7 +213,7 @@ def main() -> None:
         expert=True,
         result=True,
         app_id="audiobook-builder",
-        prompt="Тихая глава",
+        prompt="тихая-глава.epub",
     )
     grab_shell(
         out / "viewer-simple.png",
@@ -229,6 +229,73 @@ def main() -> None:
         result=True,
         app_id="viewer",
         prompt="A quiet hill at dusk",
+    )
+    for app_id, prompt in (
+        ("canvas", "A quiet hill at dusk"),
+        ("audiobook-builder", "quiet-chapter.epub"),
+        ("clarity", "quiet-clip.mp4"),
+        ("plotweaver", "A quiet hill at dusk"),
+        ("model-forge", "Standard"),
+        ("viewer", "A quiet hill at dusk"),
+    ):
+        stem = {
+            "canvas": "image",
+            "audiobook-builder": "audio",
+            "clarity": "video",
+            "plotweaver": "text",
+            "model-forge": "tool",
+            "viewer": "viewer",
+        }[app_id]
+        grab_shell(
+            out / f"{stem}-modified.png",
+            language="en",
+            expert=True,
+            result=True,
+            modified=True,
+            app_id=app_id,
+            prompt=prompt,
+        )
+    for app_id, prompt in (
+        ("clarity", "тихий-клип.mp4"),
+        ("plotweaver", "Тихий холм в сумерках"),
+        ("model-forge", "Стандарт"),
+        ("viewer", "Тихий холм в сумерках"),
+    ):
+        stem = {
+            "clarity": "video",
+            "plotweaver": "text",
+            "model-forge": "tool",
+            "viewer": "viewer",
+        }[app_id]
+        grab_shell(
+            out / f"ru-{stem}-simple.png",
+            language="ru",
+            result=True,
+            app_id=app_id,
+            prompt=prompt,
+        )
+        grab_shell(
+            out / f"ru-{stem}-expert.png",
+            language="ru",
+            expert=True,
+            result=True,
+            app_id=app_id,
+            prompt=prompt,
+        )
+    grab_shell(
+        out / "de-image-simple.png",
+        language="de",
+        result=True,
+        app_id="canvas",
+        prompt="Ein stiller Hügel",
+    )
+    grab_shell(
+        out / "de-image-expert.png",
+        language="de",
+        expert=True,
+        result=True,
+        app_id="canvas",
+        prompt="Ein stiller Hügel",
     )
 
 

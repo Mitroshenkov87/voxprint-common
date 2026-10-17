@@ -10,14 +10,22 @@
           "id": "fast",
           "label_key": "simple.preset.precision.fast",
           "values": {
-            "tool.precision": "fast"
+            "tool.precision": "fast",
+            "tool.model": "standard",
+            "tool.quant": "int4",
+            "tool.output": "package",
+            "tool.device": "cpu"
           }
         },
         {
           "id": "careful",
           "label_key": "simple.preset.precision.careful",
           "values": {
-            "tool.precision": "careful"
+            "tool.precision": "careful",
+            "tool.model": "standard",
+            "tool.quant": "int8",
+            "tool.output": "package",
+            "tool.device": "auto"
           }
         }
       ]

@@ -44,7 +44,7 @@ def test_every_surface_loads_plain_presets() -> None:
         settings = settings_for(surface)
         document = variant_presets(surface, settings)
         if surface.variant is VariantId.VIEWER:
-            assert document.groups == ()
+            assert document.group("view") is not None
         else:
             assert document.groups
         for group in document.groups:

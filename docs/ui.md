@@ -143,19 +143,25 @@ The code name is `SimpleLayout` / `SimpleWidget` in `voxprint_common.ui.simple_i
 
 ### Image
 
-Canvas, Enlarge, and the Lucent helper. Canvas and Lucent ask for a prompt and the action is Generate. Enlarge asks for a dropped picture and the action is Enlarge. The result is the picture. Presets are `presets/canvas.json` and `presets/enlarge.json`. Enlarge's 4x stays grey, with a reason and Install Enlarge, until Enlarge is present. The pictures below are Canvas.
+Canvas, Enlarge, and the Lucent helper. Canvas and Lucent ask for a prompt and the action is Generate. Enlarge asks for a dropped picture and the action is Enlarge. The result is the picture, and it is the largest region. Size is one row: Square, Landscape, or Portrait, then the ratios for that orientation. Quality, Style, Size, and the number of pictures stay visible. Detail shares a row with output size, and Install Enlarge stays on that row. The expert panel is titled Expert settings and shows the live preset: steps, guidance, seed, sampler, and Adult content (18+) off. The pictures below are Canvas. Every grab is 1200 by 900.
 
 ![English image screen](img/shell/image-simple.png)
 
 ![English image screen, Expert mode](img/shell/image-expert.png)
 
+![English image screen, preset with changes](img/shell/image-modified.png)
+
 ![Russian image screen](img/shell/ru-image-simple.png)
 
 ![Russian image screen, Expert mode](img/shell/ru-image-expert.png)
 
+![German image screen](img/shell/de-image-simple.png)
+
+![German image screen, Expert mode](img/shell/de-image-expert.png)
+
 ### Audio
 
-Audiobook Builder and Movie Dubber. The input is a book, a text file, or a video, plus a voice. The action is Create audiobook or Dub video. The result is a player with sound bars and chapters. History lists past jobs. The preset file is `presets/audio.json` (Pace). The expert panel adds the sample rate. The pictures below are Audiobook Builder.
+Audiobook Builder and Movie Dubber. The input is a Choose a book drop area that shows the file name once a book is chosen, plus a voice. The action is Create audiobook or Dub video. The result is a player with sound bars and chapters. History lists past jobs. The preset file is `presets/audio.json` (Pace). The expert panel shows sample rate, format, normalisation, and loudness. The pictures below are Audiobook Builder.
 
 ![English audio screen](img/shell/audio-simple.png)
 
@@ -165,37 +171,63 @@ Audiobook Builder and Movie Dubber. The input is a book, a text file, or a video
 
 ![Russian audio screen, Expert mode](img/shell/ru-audio-expert.png)
 
+![English audio screen, preset with changes](img/shell/audio-modified.png)
+
 ### Video
 
-Clarity. The input is a dropped video. The action is Improve video. The result is a before/after player with a slider. The preset file is `presets/video.json` (Strength). The expert panel adds Stabilize.
+Clarity. The input is a dropped video. The action is Improve video. The result is one frame with a before/after wipe. The divider is the slider. The preset file is `presets/video.json` (Strength). The expert panel shows the model, tile size, denoise strength, and encoder/CRF.
 
 ![English video screen](img/shell/video-simple.png)
 
 ![English video screen, Expert mode](img/shell/video-expert.png)
 
+![English video screen, preset with changes](img/shell/video-modified.png)
+
+![Russian video screen](img/shell/ru-video-simple.png)
+
+![Russian video screen, Expert mode](img/shell/ru-video-expert.png)
+
 ### Text
 
-Plotweaver. The input is an idea or an outline. The action is Write. The result is a chapter document. The preset file is `presets/text.json` (Length). The expert panel adds Tone.
+Plotweaver. The input is an idea or an outline. The action is Write. The result is a chapter document. The preset file is `presets/text.json` (Length). The expert panel shows the model, temperature, length target, and style.
 
 ![English text screen](img/shell/text-simple.png)
 
 ![English text screen, Expert mode](img/shell/text-expert.png)
 
+![English text screen, preset with changes](img/shell/text-modified.png)
+
+![Russian text screen](img/shell/ru-text-simple.png)
+
+![Russian text screen, Expert mode](img/shell/ru-text-expert.png)
+
 ### Tool
 
-Model Forge. The input is a model. The action is Prepare model. The result is a short status report. The preset file is `presets/tool.json` (Precision). The expert panel adds Device.
+Model Forge. The input is a model. The action is Prepare model. The result is a short status report. The preset file is `presets/tool.json` (Precision). The expert panel shows the model, quantisation, precision, and output.
 
 ![English tool screen](img/shell/tool-simple.png)
 
 ![English tool screen, Expert mode](img/shell/tool-expert.png)
 
+![English tool screen, preset with changes](img/shell/tool-modified.png)
+
+![Russian tool screen](img/shell/ru-tool-simple.png)
+
+![Russian tool screen, Expert mode](img/shell/ru-tool-expert.png)
+
 ### Viewer
 
-The viewer has no input and no primary action. The result fills that space. History can be hidden with `viewer.show_history`. The window minimum for this variant is 640 by 400. Other variants stay at 960 by 640. The first launch is 1200 by 900. Later launches restore the saved rectangle from `suite.json`.
+The viewer has no input and no primary action. A thin toolbar offers Open, Save, previous, and next. Presets are Fit, 100%, and Enhance. Enhance stays grey until Enlarge is installed. History is a strip of 88 px thumbnails and can be hidden with `viewer.show_history`. The window minimum for this variant is 640 by 400. Other variants stay at 960 by 640. The first launch is 1200 by 900. Later launches restore the saved rectangle from `suite.json`.
 
 ![English viewer](img/shell/viewer-simple.png)
 
 ![English viewer, Expert mode](img/shell/viewer-expert.png)
+
+![English viewer, preset with changes](img/shell/viewer-modified.png)
+
+![Russian viewer](img/shell/ru-viewer-simple.png)
+
+![Russian viewer, Expert mode](img/shell/ru-viewer-expert.png)
 
 ## Reference window
 
@@ -215,7 +247,7 @@ The viewer has no input and no primary action. The result fills that space. Hist
 
 The German picture shows the close control on the active side tab. Inactive tabs keep that control hidden until the pointer is over them. The splitter picture is the root divider while it is dragged: the resting line is one pixel in the border colour, and the drag stroke is a wider accent-blue line. The hit area stays wider than the stroke and stays invisible. The translucent Acrylic backgrounds are a stylesheet flag (`glass=True`). An offscreen grab cannot show operating-system blur, so these pictures use the solid background.
 
-Simple mode is the picture screen. Expert mode keeps that screen and adds the side panel. The result pictures are offscreen grabs of a neutral gradient, not a photograph. The English result strip holds four of those placeholders.
+Simple mode is the picture screen. Expert mode keeps that screen and adds the side panel. It does not change the window size. The result pictures are offscreen grabs of a painted landscape, not a photograph. The English result strip holds four of those placeholders. History uses the dark surface token.
 
 ![English simple mode, before a picture](img/shell/en-simple-empty.png)
 

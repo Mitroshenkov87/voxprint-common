@@ -120,6 +120,19 @@ def reference_panels() -> tuple[PanelSpec, ...]:
     )
 
 
+_MODIFIED: dict[str, tuple[str, object]] = {
+    "canvas": ("shell.steps", 24),
+    "lucent": ("shell.steps", 24),
+    "enlarge": ("shell.steps", 24),
+    "audiobook-builder": ("audio.loudness", -14.0),
+    "movie-dubber": ("audio.loudness", -14.0),
+    "clarity": ("video.crf", 20),
+    "plotweaver": ("text.temperature", 0.9),
+    "model-forge": ("tool.quant", "int4"),
+    "viewer": ("viewer.background", "grey"),
+}
+
+
 def grab_shell(
     path: Path,
     *,
@@ -178,8 +191,10 @@ def grab_shell(
     if result and not shell.full_layout:
         shell.show_result(prompt, pictures=4)
     if modified and not shell.full_layout:
-        shell.image.set_value("shell.steps", 24)
+        key, value = _MODIFIED.get(app_id, ("shell.steps", 24))
+        shell.image.set_value(key, value)
         shell.simple.refresh()
+    shell.resize(1200, 900)
     app.processEvents()
     if show_palette:
         shell.open_palette()

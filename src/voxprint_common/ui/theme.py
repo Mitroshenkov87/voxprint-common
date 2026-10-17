@@ -260,15 +260,26 @@ QWidget#shell {{ background: {root_bg}; }}
 QLabel#titlebar {{ font-size: 15px; font-weight: 600; background: transparent; }}
 QLabel#status {{ color: {TEXT_MUTED}; background: transparent; }}
 QLabel#expertChip {{
-    color: {TEXT_MUTED}; background: {CONTROL_BG};
-    border: {density.border_px}px solid {CONTROL_BORDER};
+    color: {TEXT}; background: {CONTROL_BG};
+    border: {density.border_px}px solid {ACCENT};
     border-radius: {radius}px; padding: 1px 8px; font-size: 11px;
 }}
-QLabel#panel {{ background: transparent; }}
-QLabel#settingGroup {{
-    color: {TEXT_MUTED}; font-weight: 600; background: transparent; padding-top: 6px;
+QLabel#expertTitle {{
+    color: {TEXT}; font-size: 15px; font-weight: 600; background: transparent;
 }}
-QCheckBox {{ background: transparent; spacing: 8px; }}
+QLabel#settingGroup {{
+    color: {TEXT_MUTED}; font-size: 11px; font-weight: 600; background: transparent;
+    padding: 10px 0 2px 0;
+}}
+QLabel#panel {{ color: {TEXT}; background: transparent; }}
+QCheckBox {{ background: transparent; spacing: 8px; color: {TEXT}; }}
+QCheckBox::indicator {{
+    width: 16px; height: 16px; border-radius: 3px;
+    border: {density.border_px}px solid {CONTROL_BORDER}; background: {CONTROL_BG};
+}}
+QCheckBox::indicator:checked {{
+    background: {PRIMARY}; border-color: {PRIMARY_BORDER};
+}}
 QSpinBox, QDoubleSpinBox, QComboBox {{
     background: {CONTROL_BG}; border: {density.border_px}px solid {CONTROL_BORDER};
     border-radius: {radius}px; padding: 2px 8px; min-height: {density.panel_header_px}px;
@@ -364,11 +375,21 @@ QDoubleSpinBox:focus, QListWidget:focus, QPushButton:focus {{
 QPushButton#primary:focus, QPushButton#generate:focus {{
     border: {density.focus_ring_px}px solid {TEXT_ON_PRIMARY};
 }}
-QPushButton#overflow, QPushButton#expertToggle {{
-    background: transparent; color: {TEXT_MUTED}; border: none; padding: 2px 10px;
-    min-height: 28px;
+QPushButton#overflow {{
+    background: {CONTROL_BG}; color: {TEXT};
+    border: {density.border_px}px solid {CONTROL_BORDER};
+    border-radius: {radius}px; padding: 2px 12px; min-height: 28px;
 }}
 QPushButton#overflow::menu-indicator {{ image: none; width: 0; }}
+QPushButton#expertToggle {{
+    background: {CONTROL_BG}; color: {TEXT_MUTED};
+    border: {density.border_px}px solid {CONTROL_BORDER};
+    border-radius: 14px; padding: 2px 14px; min-height: 28px;
+}}
+QPushButton#expertToggle:checked {{
+    background: {PRIMARY}; color: {TEXT_ON_PRIMARY}; border-color: {PRIMARY_BORDER};
+    font-weight: 600;
+}}
 QWidget#actionBar QPushButton {{ min-height: 34px; padding: 4px 14px; }}
 QPushButton[chip="true"] {{
     min-height: 30px; padding: 2px 14px; border-radius: 15px;
@@ -403,6 +424,25 @@ QLabel#result {{ background: transparent; }}
 QFrame#stage, QFrame#expertPanel, QFrame#settingsSheet {{
     background: {card_bg}; border: {density.border_px}px solid {CONTROL_BORDER};
     border-radius: 8px;
+}}
+QScrollArea#historyStrip, QScrollArea#expertScroll {{
+    background: {card_bg}; border: none;
+}}
+QScrollArea#historyStrip > QWidget > QWidget,
+QScrollArea#expertScroll > QWidget > QWidget,
+QWidget#historyRow, QWidget#expertForm {{
+    background: {card_bg}; color: {TEXT};
+}}
+QPushButton#expertReset {{
+    background: transparent; color: {TEXT}; text-align: left;
+    border: {density.border_px}px solid {CONTROL_BORDER}; padding: 4px 10px;
+}}
+QSlider#compareSlider {{ background: transparent; }}
+QSlider#compareSlider::groove:horizontal {{
+    height: 2px; background: rgba(255, 255, 255, 90); border: none;
+}}
+QSlider#compareSlider::handle:horizontal {{
+    width: 4px; margin: -220px 0; background: {TEXT}; border: none; border-radius: 1px;
 }}
 QProgressBar#progress {{
     border: none; background: {CONTROL_BG}; border-radius: 4px;
