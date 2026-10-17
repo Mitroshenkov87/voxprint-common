@@ -41,7 +41,9 @@ def test_headless_layout_and_adoption() -> None:
     assert tokens.density.control_radius_px == 4
     assert tokens.density.border_px == 1
     assert tokens.density.focus_ring_px == 2
+    assert tokens.density.chip_pad_px == 16
     style = build_shell_style(False)
+    assert f"padding: 2px {tokens.density.chip_pad_px}px" in style
     assert f"QPushButton:focus {{\n    border: {tokens.density.focus_ring_px}px solid" in style
     assert tokens.identity["audiobook-builder"] == "#f5d76e"
     assert tokens.identity["movie-dubber"] == "#b98cff"

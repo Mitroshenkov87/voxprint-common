@@ -1394,6 +1394,9 @@ def _check_chip_fit(app: object) -> None:
     from voxprint_common.i18n import set_language
     from voxprint_common.suite_settings import set_expert_mode
     from voxprint_common.ui.shell import _MODIFIED, ReferenceShell
+    from voxprint_common.ui.tokens import load
+
+    pad = load().density.chip_pad_px
 
     surfaces = (
         "canvas",
@@ -1426,6 +1429,20 @@ def _check_chip_fit(app: object) -> None:
                     continue
                 font = _painted_button_font(button)
                 advance = QFontMetrics(font).horizontalAdvance(text)  # type: ignore[arg-type]
+                pill = button.objectName() == "expertToggle" or button.property("chip") == "true"
+                if pill:
+                    side = (button.width() - advance) // 2
+                    assert side >= pad, (
+                        language,
+                        app_id,
+                        button.objectName(),
+                        text,
+                        advance,
+                        button.width(),
+                        side,
+                        pad,
+                    )
+                    continue
                 contents = button.contentsRect().width()
                 assert advance <= contents, (
                     language,

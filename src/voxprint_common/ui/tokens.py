@@ -71,6 +71,7 @@ _DENSITY = (
     "control_radius_px",
     "border_px",
     "focus_ring_px",
+    "chip_pad_px",
 )
 _IDENTITY = ("audiobook-builder", "movie-dubber", "enlarge", "clarity")
 
@@ -85,6 +86,7 @@ class Density:
     control_radius_px: int
     border_px: int
     focus_ring_px: int
+    chip_pad_px: int
 
 
 @dataclass(frozen=True)

@@ -30,6 +30,7 @@ from voxprint_common.ui.presets import (
 from voxprint_common.ui.safety import AdultPromptPolicy, SafetyGate, adult_prompt_policy
 from voxprint_common.ui.settings import Settings, SettingSpec, SettingType, reference_settings
 from voxprint_common.ui.theme import CARD_PLAIN
+from voxprint_common.ui.tokens import load
 from voxprint_common.ui.variants import (
     AppSurface,
     InputKind,
@@ -2193,35 +2194,39 @@ def _fill_form(
     values: dict[str, object] | None = None,
     on_change: Callable[[str, object], None] | None = None,
 ) -> None:
+    core, _gui, _widgets = _qt()
+    rows = widgets.QFormLayout()  # type: ignore[attr-defined]
+    rows.setContentsMargins(0, 0, 0, 0)
+    rows.setHorizontalSpacing(8)
+    rows.setVerticalSpacing(4)
+    rows.setFieldGrowthPolicy(widgets.QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)  # type: ignore[attr-defined]
+    rows.setRowWrapPolicy(widgets.QFormLayout.RowWrapPolicy.DontWrapRows)  # type: ignore[attr-defined]
+    rows.setLabelAlignment(  # type: ignore[attr-defined]
+        core.Qt.AlignmentFlag.AlignLeft | core.Qt.AlignmentFlag.AlignVCenter  # type: ignore[attr-defined]
+    )
+    rows.setFormAlignment(  # type: ignore[attr-defined]
+        core.Qt.AlignmentFlag.AlignLeft | core.Qt.AlignmentFlag.AlignTop  # type: ignore[attr-defined]
+    )
+    form.addLayout(rows)  # type: ignore[attr-defined]
     group = ""
     for spec in specs:
         if spec.group != group:
             group = spec.group
             heading = widgets.QLabel(tr(f"setting.group.{group}"))  # type: ignore[attr-defined]
             heading.setObjectName("settingGroup")
-            form.addWidget(heading)  # type: ignore[attr-defined]
+            rows.addRow(heading)
         current = spec.default if values is None else values.get(spec.setting_id, spec.default)
         control = _control(widgets, spec, current)
         if on_change is not None:
             _watch(control, spec, on_change)
         if spec.type is SettingType.BOOL:
-            form.addWidget(control)  # type: ignore[attr-defined]
+            rows.addRow(control)
             continue
-        row = widgets.QHBoxLayout()  # type: ignore[attr-defined]
-        row.setSpacing(8)
         label = widgets.QLabel(tr(spec.label_key))  # type: ignore[attr-defined]
         label.setObjectName("panel")
-        label.setWordWrap(True)
-        if spec.type is SettingType.ENUM:
-            # The value keeps the row. A long label wraps instead of squeezing it.
-            label.setMinimumWidth(0)
-            row.addWidget(label, 0)
-            row.addWidget(control, 1)
-        else:
-            label.setMinimumWidth(96)
-            row.addWidget(label, 1)
-            row.addWidget(control, 1)
-        form.addLayout(row)  # type: ignore[attr-defined]
+        label.setWordWrap(False)
+        label.setMinimumWidth(_label_width(label))
+        rows.addRow(label, control)
 
 
 def _control(widgets: object, spec: SettingSpec, value: object) -> object:
@@ -2245,6 +2250,7 @@ def _control(widgets: object, spec: SettingSpec, value: object) -> object:
         spin = widgets.QSpinBox()  # type: ignore[attr-defined]
         spin.setObjectName(spec.setting_id)
         spin.setMinimumWidth(72)
+        _expand(spin)
         spin.setRange(int(spec.minimum or 0), int(spec.maximum or 0))
         spin.setValue(int(value) if isinstance(value, int) and not isinstance(value, bool) else 0)
         control = spin
@@ -2252,6 +2258,7 @@ def _control(widgets: object, spec: SettingSpec, value: object) -> object:
         spin = widgets.QDoubleSpinBox()  # type: ignore[attr-defined]
         spin.setObjectName(spec.setting_id)
         spin.setMinimumWidth(72)
+        _expand(spin)
         spin.setDecimals(1)
         spin.setRange(float(spec.minimum or 0), float(spec.maximum or 0))
         spin.setSingleStep(0.5)
@@ -2264,6 +2271,7 @@ def _control(widgets: object, spec: SettingSpec, value: object) -> object:
         edit = widgets.QLineEdit()  # type: ignore[attr-defined]
         edit.setObjectName(spec.setting_id)
         edit.setText(value if isinstance(value, str) else "")
+        _expand(edit)
         control = edit
     elif kind is SettingType.TEXT:
         edit = widgets.QPlainTextEdit()  # type: ignore[attr-defined]
@@ -2467,6 +2475,9 @@ def _eliding_combo() -> object:
                 super().__init__(parent)  # type: ignore[arg-type]
                 self.setSizeAdjustPolicy(self.SizeAdjustPolicy.AdjustToContents)
                 self.setMinimumContentsLength(1)
+                policy = self.sizePolicy()
+                policy.setHorizontalPolicy(policy.Policy.Expanding)
+                self.setSizePolicy(policy)
                 self.currentIndexChanged.connect(lambda *_args: _note_combo_fit(self))
 
             def minimumSizeHint(self) -> object:  # type: ignore[override]
@@ -2552,6 +2563,21 @@ def _paint_elided_combo(combo: object) -> None:
     painter.end()
 
 
+def _expand(control: object) -> None:
+    """Let a field fill the value column."""
+    policy = control.sizePolicy()  # type: ignore[attr-defined]
+    policy.setHorizontalPolicy(policy.Policy.Expanding)
+    control.setSizePolicy(policy)  # type: ignore[attr-defined]
+
+
+def _label_width(label: object) -> int:
+    """Return the width of one label, measured in the body font."""
+    _core, gui, _widgets = _qt()
+    font = gui.QFont(label.font())  # type: ignore[attr-defined]
+    font.setPixelSize(load().density.body_px)
+    return int(gui.QFontMetrics(font).horizontalAdvance(str(label.text())))  # type: ignore[attr-defined]
+
+
 def _fit_bold(button: object, *, pad: int, pixel: int | None = None) -> None:
     """Reserve the bold label width, including the horizontal padding."""
     text = str(button.text())  # type: ignore[attr-defined]
@@ -2575,9 +2601,16 @@ def _fit_plain(button: object, *, pad: int) -> None:
 
 
 def _fit_chip(button: object) -> None:
-    """Reserve the bold label width. Selected chips are drawn at weight 600."""
-    # 14 px of padding on each side, plus the border.
-    _fit_bold(button, pad=32)
+    """Reserve bold text plus the same side padding as an unchecked pill."""
+    density = load().density
+    text = str(button.text())  # type: ignore[attr-defined]
+    _core, gui, _widgets = _qt()
+    button.ensurePolished()  # type: ignore[attr-defined]
+    font = gui.QFont(button.font())  # type: ignore[attr-defined]
+    font.setPixelSize(density.body_px)
+    font.setWeight(gui.QFont.Weight.DemiBold)  # type: ignore[attr-defined]
+    advance = int(gui.QFontMetrics(font).horizontalAdvance(text))  # type: ignore[attr-defined]
+    button.setMinimumWidth(advance + (density.chip_pad_px + density.border_px) * 2)  # type: ignore[attr-defined]
 
 
 def _darken(scroll: object, gui: object) -> None:

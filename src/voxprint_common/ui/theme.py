@@ -282,7 +282,7 @@ QCheckBox::indicator:checked {{
 }}
 QSpinBox, QDoubleSpinBox, QComboBox {{
     background: {CONTROL_BG}; border: {density.border_px}px solid {CONTROL_BORDER};
-    border-radius: {radius}px; padding: 2px 8px; min-height: {density.panel_header_px}px;
+    border-radius: {radius}px; padding: 2px 6px; min-height: {density.panel_header_px}px;
 }}
 QFrame#dock {{
     background: {card_bg}; border: {density.border_px}px solid {CONTROL_BORDER};
@@ -384,7 +384,7 @@ QPushButton#overflow::menu-indicator {{ image: none; width: 0; }}
 QPushButton#expertToggle {{
     background: {CONTROL_BG}; color: {TEXT_MUTED};
     border: {density.border_px}px solid {CONTROL_BORDER};
-    border-radius: 14px; padding: 2px 14px; min-height: 28px;
+    border-radius: 14px; padding: 2px {density.chip_pad_px}px; min-height: 28px;
 }}
 QPushButton#expertToggle:checked {{
     background: {PRIMARY}; color: {TEXT_ON_PRIMARY}; border-color: {PRIMARY_BORDER};
@@ -392,7 +392,7 @@ QPushButton#expertToggle:checked {{
 }}
 QWidget#actionBar QPushButton {{ min-height: 34px; padding: 4px 14px; }}
 QPushButton[chip="true"] {{
-    min-height: 30px; padding: 2px 14px; border-radius: 15px;
+    min-height: 30px; padding: 2px {density.chip_pad_px}px; border-radius: 15px;
 }}
 QPushButton[chip="true"]:checked {{
     background: {PRIMARY}; color: {TEXT_ON_PRIMARY};
