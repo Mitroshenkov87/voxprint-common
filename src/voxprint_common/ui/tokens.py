@@ -76,6 +76,7 @@ _DENSITY = (
     "border_px",
     "focus_ring_px",
     "chip_pad_px",
+    "field_min_px",
 )
 _IDENTITY = ("audiobook-builder", "movie-dubber", "enlarge", "clarity")
 PALETTE_ROLES = (
@@ -114,6 +115,7 @@ class Density:
     border_px: int
     focus_ring_px: int
     chip_pad_px: int
+    field_min_px: int
 
 
 @dataclass(frozen=True)

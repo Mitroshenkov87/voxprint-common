@@ -116,6 +116,9 @@ class Section:
 
     ``actions`` open wizards. A table's picker values use
     :func:`picker_key` in that section's settings namespace.
+    ``panel_row`` and ``panel_value`` together place this section's body
+    under that chip row. A screen leaves the widget to the app. A table
+    places the picker grid there and keeps the chips on screen.
     """
 
     section_id: str
@@ -125,6 +128,8 @@ class Section:
     columns: tuple[TableColumn, ...] = ()
     rows: tuple[TableRow, ...] = ()
     note_key: str = ""
+    panel_row: str = ""
+    panel_value: str = ""
 
     def __post_init__(self) -> None:
         """Reject a section that does not match its body."""
@@ -136,11 +141,15 @@ class Section:
         column_ids = [column.column_id for column in self.columns]
         if len(column_ids) != len(set(column_ids)):
             raise ValueError("section column ids must be unique")
+        if bool(self.panel_row) != bool(self.panel_value):
+            raise ValueError("a row panel needs both a row and a value")
         kind = self.body
         if kind is BodyKind.TABLE and not self.columns:
             raise ValueError("a table section needs columns")
         if kind is BodyKind.NOTE and not self.note_key:
             raise ValueError("a note section needs a note")
+        if kind is BodyKind.NOTE and self.panel_row:
+            raise ValueError("a note does not take a row panel")
         if kind is BodyKind.SCREEN and (self.columns or self.rows or self.note_key):
             raise ValueError("the shared screen does not take a table or a note")
         if kind is not BodyKind.SCREEN and kind is not BodyKind.TABLE and kind is not BodyKind.NOTE:
@@ -357,10 +366,17 @@ class SectionDeck:
         return self._wizard is not None and self._section.section_id == self._wizard.section_id
 
     def shows_screen(self) -> bool:
-        """Return whether the shared simple body should stay on screen."""
+        """Return whether the shared simple body should stay on screen.
+
+        A table that names a chip row stays on that screen and shows its
+        grid under the row, instead of replacing the screen.
+        """
         if self.shows_wizard():
             return False
-        return self._section.body is BodyKind.SCREEN
+        body = self._section.body
+        if body is BodyKind.SCREEN:
+            return True
+        return body is BodyKind.TABLE and bool(self._section.panel_row)
 
     def select(self, section_id: str) -> None:
         """Show ``section_id``.

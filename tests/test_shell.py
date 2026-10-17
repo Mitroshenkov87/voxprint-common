@@ -48,6 +48,7 @@ def test_headless_layout_and_adoption() -> None:
     assert tokens.density.border_px == 1
     assert tokens.density.focus_ring_px == 2
     assert tokens.density.chip_pad_px == 16
+    assert tokens.density.field_min_px == 72
     style = build_shell_style(False)
     assert f"padding: 2px {tokens.density.chip_pad_px}px" in style
     assert "QScrollArea > QWidget > QWidget" in style
@@ -55,7 +56,14 @@ def test_headless_layout_and_adoption() -> None:
     assert "QPlainTextEdit > QWidget" in style
     assert "QAbstractScrollArea > QWidget" in style
     assert "QAbstractScrollArea QScrollBar:vertical" in style
+    assert "QScrollBar::add-line:vertical" in style
+    assert "QScrollBar::sub-line:vertical" in style
+    assert "image: none" in style
+    assert "subcontrol-origin: margin" in style
     assert "QScrollArea#expertScroll QScrollBar:horizontal" in style
+    group_rule = style.split("QLabel#settingGroup", 1)[1].split("}", 1)[0]
+    assert "font-size: 15px" in group_rule
+    assert f"color: {tokens.colors['TEXT']}" in group_rule
     handle = f"QScrollBar::handle:vertical {{\n    background: {tokens.colors['CONTROL_BORDER']}"
     groove = f"QScrollBar::groove:vertical {{\n    background: {tokens.colors['CARD_PLAIN']}"
     assert handle in style

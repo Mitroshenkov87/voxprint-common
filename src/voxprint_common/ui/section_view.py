@@ -31,7 +31,9 @@ def install_sections(widget: object) -> None:
         widget: A simple screen whose layout has a section deck.
     """
     bar = _tab_bar(widget)
-    root = widget.root.layout()  # type: ignore[attr-defined]
+    column = getattr(widget, "_shell_column", None)
+    host = widget.root if column is None else column  # type: ignore[attr-defined]
+    root = host.layout()  # type: ignore[attr-defined]
     root.insertWidget(1, bar)  # type: ignore[attr-defined]
     widget._section_bar = bar  # type: ignore[attr-defined]
     _build_pages(widget)
@@ -52,16 +54,26 @@ def sync_sections(widget: object) -> None:
     _show_layout(widget._prompt_row, screen)  # type: ignore[attr-defined]
     rows = bool(widget._layout.rows)  # type: ignore[attr-defined]
     widget._preset_host.setVisible(screen and rows)  # type: ignore[attr-defined]
-    widget._history_scroll.setVisible(screen)  # type: ignore[attr-defined]
+    if screen:
+        widget._apply_history()  # type: ignore[attr-defined]
+    else:
+        widget._history_scroll.hide()  # type: ignore[attr-defined]
+        widget._history_scroll.setFixedHeight(0)  # type: ignore[attr-defined]
     widget._section_bar.relayout()  # type: ignore[attr-defined]
     if deck.shows_wizard():
+        _restore_table_grid(widget)
         _show_wizard(widget)
+    elif deck.current.body is BodyKind.TABLE and deck.current.panel_row:
+        _show_table_panel(widget)
     elif deck.current.body is BodyKind.TABLE:
+        _restore_table_grid(widget)
         _show_table(widget)
     elif deck.current.body is BodyKind.NOTE:
+        _restore_table_grid(widget)
         widget._note_label.setText(tr(deck.current.note_key))  # type: ignore[attr-defined]
         widget._stack.setCurrentWidget(widget._note_page)  # type: ignore[attr-defined]
     elif deck.current.body is BodyKind.SCREEN:
+        _restore_table_grid(widget)
         if widget._screen_signature != deck.current.section_id:  # type: ignore[attr-defined]
             _fill_actions(widget, widget._screen_actions, deck.current.actions)  # type: ignore[attr-defined]
             widget._screen_signature = deck.current.section_id  # type: ignore[attr-defined]
@@ -270,6 +282,27 @@ def _build_screen_actions(widget: object) -> None:
     widget._screen_actions = actions  # type: ignore[attr-defined]
     widget._screen_signature = ""  # type: ignore[attr-defined]
     row.insertLayout(row.count() - 1, actions)  # type: ignore[attr-defined]
+
+
+def _show_table_panel(widget: object) -> None:
+    """Keep the chips and place the table body under the section's chip row."""
+    deck = widget._layout.sections  # type: ignore[attr-defined]
+    section = deck.current
+    if widget._table_signature != section.section_id:  # type: ignore[attr-defined]
+        _fill_actions(widget, widget._table_actions, section.actions)  # type: ignore[attr-defined]
+        _fill_grid(widget, section)
+        widget._table_signature = section.section_id  # type: ignore[attr-defined]
+    widget.set_row_panel(section.panel_row, section.panel_value, widget._table_grid)  # type: ignore[attr-defined]
+
+
+def _restore_table_grid(widget: object) -> None:
+    """Put the table body back on its page when it is not under a chip row."""
+    grid = getattr(widget, "_table_grid", None)
+    page = getattr(widget, "_table_page", None)
+    if grid is None or page is None or grid.parent() is page:  # type: ignore[attr-defined]
+        return
+    widget.release_row_panel(grid)  # type: ignore[attr-defined]
+    page.layout().addWidget(grid, 1)  # type: ignore[attr-defined]
 
 
 def _show_table(widget: object) -> None:

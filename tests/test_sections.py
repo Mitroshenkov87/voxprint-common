@@ -17,6 +17,79 @@ from voxprint_common.ui.sections import (
 from voxprint_common.ui.variants import surface_for, variant_presets
 
 
+def test_row_panel_needs_a_row_and_a_value() -> None:
+    from voxprint_common.ui.sections import BodyKind, ColumnKind, Section, TableColumn, TableRow
+
+    Section("home", "section.narration", panel_row="style", panel_value="photo")
+    Section(
+        "cast",
+        "section.roles",
+        body=BodyKind.TABLE,
+        panel_row="style",
+        panel_value="cinematic",
+        columns=(TableColumn("name", "section.column.name", ColumnKind.LABEL),),
+        rows=(TableRow("mira", "section.row.mira"),),
+    )
+    try:
+        Section("home", "section.narration", panel_row="style")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("a row without a value was accepted")
+    try:
+        Section(
+            "note",
+            "section.maintenance",
+            body=BodyKind.NOTE,
+            note_key="section.note.maintenance",
+            panel_row="style",
+            panel_value="photo",
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("a note accepted a row panel")
+
+
+def test_a_table_panel_keeps_the_shared_screen(tmp_path: Path) -> None:
+    from voxprint_common.ui.presets import SettingState, reference_presets
+    from voxprint_common.ui.sections import (
+        BodyKind,
+        ColumnKind,
+        Section,
+        SectionDeck,
+        SectionSet,
+        TableColumn,
+        TableRow,
+    )
+    from voxprint_common.ui.settings import reference_settings
+
+    settings = reference_settings()
+    document = SectionSet(
+        sections=(
+            Section("home", "section.narration"),
+            Section(
+                "cast",
+                "section.roles",
+                body=BodyKind.TABLE,
+                panel_row="style",
+                panel_value="cinematic",
+                columns=(TableColumn("name", "section.column.name", ColumnKind.LABEL),),
+                rows=(TableRow("mira", "section.row.mira"),),
+            ),
+        ),
+        wizards=(),
+        settings=settings,
+    )
+    state = SettingState(reference_presets(settings), settings, state_dir=tmp_path)
+    deck = SectionDeck(document, state, state_dir=tmp_path)
+    assert deck.shows_screen() is True
+    deck.select("cast")
+    assert deck.shows_screen() is True
+    deck.select("home")
+    assert deck.current.body is BodyKind.SCREEN
+
+
 def test_tabs_that_do_not_fit_leave_room_for_more() -> None:
     assert fit_tabs((10, 10, 10), 30, 10, 0) == 3
     assert fit_tabs((10, 10, 10), 25, 10, 0) == 1
