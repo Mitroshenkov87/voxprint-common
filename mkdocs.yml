@@ -40,6 +40,7 @@ nav:
   - Migration: migration.md
   - CLI protocol: cli.md
   - Model downloader: mdl.md
+  - Memory: memory.md
   - MDL review 0.2.0: mdl-review-0.2.0.md
   - Shared UI: ui.md
   - API:

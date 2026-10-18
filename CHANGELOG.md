@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0 - 2026-10-18
+
+RAM tiers and a process-local model park. `memory.ram_mode` is `auto`, `ram32`, `ram64`, or `ram96` (default `auto`). `VOXPRINT_RAM_MODE` overrides it. Installed RAM is read with `GlobalMemoryStatusEx` on Windows and `/proc/meminfo` on Linux. 88 GiB and above is `ram96`, 44 GiB and above is `ram64`, and anything smaller is `ram32`. Below 24 GiB logs a warning and stays `ram32`.
+
+`ModelPark` keeps weights on disk, in pageable RAM, or in pinned RAM. `ram32` does not pin. Elsewhere the pin budget is the smaller of half of RAM on Windows (three fifths elsewhere) and RAM minus 12 GiB, and `ram64` is also capped at a quarter of RAM (48 GiB pins up to 12 GiB, 64 GiB up to 16 GiB). One pin is at most 2 GiB, or 4 GiB on `ram96`. A larger tensor stays pageable. `StagingRing` is two 256 MiB pinned buffers, created on first use, including `ram32`. `pin_memory` raising `RuntimeError` leaves the tensor pageable and lowers this process's budget to the bytes already pinned. Unreferenced weights are evicted least-recently-used: pinned becomes pageable, then pageable is dropped. Below 6 GiB available, the park frees weights until available RAM is above 8 GiB. `prefetch` warms keys on `ram64` and `ram96`.
+
+Pinned bytes are shared through `<home>/state/ram-park.json` under the suite file lock. A row names the pid, the app, and the pinned bytes. Rows whose pid is no longer running are removed. Torch is an optional extra, `voxprint-common[torch]`, and is imported only when a staging buffer is created.
+
+Note for installers: from 0.4.0, `paths.read_home()` no longer reads the legacy home folder (the read-through ended with the 0.3 line, `_LEGACY_READ_THROUGH = (0, 3)`). Installers must migrate first: `paths.home()` (or the home migration it calls) moves the legacy folder, while `read_home()` alone no longer sees it, so settings and models left in the old folder are not found.
+
 ## 0.3.2 - 2026-10-18
 
 `voxprint-mdl download` resolves each model id in a `voxprint-app-models/1` manifest to a `voxprint-model/1` descriptor from the signed index. The index row supplies the repository, revision, and sha256 of `voxprint-model.json`. The file is fetched with the same guarded opener as the index and cached under `<home>/state/mdl-descriptors`. The cached bytes must match that digest.

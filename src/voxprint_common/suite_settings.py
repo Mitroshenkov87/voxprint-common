@@ -19,6 +19,8 @@ key is preserved, so one app does not wipe another's settings.
 * ``ui.geometry``: ``x``, ``y``, ``w``, ``h``, ``maximized``, and ``fullscreen``
   for the last window. An older ``ui.window`` rectangle is copied here on read.
   Missing means the app uses its first-launch size.
+* ``memory.ram_mode``: ``auto``, ``ram32``, ``ram64``, or ``ram96``. ``auto``,
+  the default, follows the detected RAM tier.
 
 Writers take ``suite.json.lock`` beside the file, read the latest object, and
 replace only the keys they changed. The publish is a temporary file in the
@@ -55,6 +57,7 @@ __all__ = [
     "mdl_parallel_files",
     "models_dir",
     "normalize_gpu",
+    "ram_mode",
     "read",
     "set_expert_mode",
     "set_gpu",
@@ -62,6 +65,7 @@ __all__ = [
     "set_keymap",
     "set_mdl_parallel_files",
     "set_models_dir",
+    "set_ram_mode",
     "set_theme",
     "set_ui_language",
     "set_ui_theme",
@@ -87,7 +91,10 @@ KEYS = (
     "ui.theme",
     "ui.window",
     "ui.geometry",
+    "memory.ram_mode",
 )
+RAM_MODES = frozenset({"auto", "ram32", "ram64", "ram96"})
+DEFAULT_RAM_MODE = "auto"
 DEFAULT_PARALLEL_FILES = 2
 DEFAULT_THEME = "glass-dark"
 THEMES = frozenset({DEFAULT_THEME})
@@ -216,6 +223,32 @@ def set_expert_mode(enabled: bool) -> bool:
     return bool(set_value("ui.expert_mode", enabled))
 
 
+def ram_mode() -> str:
+    """Return the RAM mode, or ``auto`` when the file does not set one.
+
+    An invalid stored value is read as ``auto``. The file is not created.
+    """
+    stored = read().get("memory.ram_mode")
+    if isinstance(stored, str) and stored in RAM_MODES:
+        return stored
+    return DEFAULT_RAM_MODE
+
+
+def set_ram_mode(mode: str) -> str:
+    """Store ``memory.ram_mode``.
+
+    Args:
+        mode: ``auto``, ``ram32``, ``ram64``, or ``ram96``.
+
+    Returns:
+        The stored mode.
+
+    Raises:
+        ValueError: ``mode`` is not one of those four.
+    """
+    return str(set_value("memory.ram_mode", mode))
+
+
 def mdl_parallel_files() -> int:
     """Return how many model files to fetch at once.
 
@@ -258,6 +291,7 @@ def values() -> dict[str, Any]:
         "keep_awake_during_jobs": keep_awake_during_jobs(),
         "mdl_parallel_files": mdl_parallel_files(),
         "ui.expert_mode": expert_mode(),
+        "memory.ram_mode": ram_mode(),
     }
 
 
@@ -621,6 +655,10 @@ def _validate(key: str, value: object) -> object:
                 f"ui.geometry must be x, y, w, h, maximized, and fullscreen, got {value!r}"
             )
         return stored
+    if key == "memory.ram_mode":
+        if not isinstance(value, str) or value not in RAM_MODES:
+            raise ValueError(f"memory.ram_mode must be auto, ram32, ram64, or ram96, got {value!r}")
+        return value
     raise ValueError(f"not a shared setting: {key!r}")
 
 
