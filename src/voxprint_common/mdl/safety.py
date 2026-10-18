@@ -3,7 +3,12 @@
 Production transfers stay on Hugging Face (including its CDN), Kaggle,
 ModelScope, Google Drive, and GitHub release hosts. The scheme is HTTPS.
 A redirect whose host is not on that list is refused. Private, loopback,
-link-local, reserved, multicast, and unspecified addresses are refused.
+link-local, reserved, multicast, and unspecified addresses are refused, with
+two exceptions for an allowlisted HTTPS host: an address in ``198.18.0.0/15``
+(DNS that answers with placeholder addresses for a local tunnel), and any
+answer when the request goes through a configured proxy, because the proxy
+opens the connection. TLS verification stays on in both cases, so the
+certificate must still match the host name.
 """
 
 from __future__ import annotations
@@ -11,10 +16,11 @@ from __future__ import annotations
 import ipaddress
 import socket
 import urllib.parse
+import urllib.request
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
-__all__ = ["UnsafeUrl", "UrlGuard"]
+__all__ = ["FAKE_IP_NETWORK", "UnsafeUrl", "UrlGuard", "proxied"]
 
 Resolver = Callable[[str], Sequence[str]]
 
@@ -29,6 +35,9 @@ _SUFFIXES = (
     "github.com",
     "githubusercontent.com",
 )
+
+
+FAKE_IP_NETWORK = ipaddress.ip_network("198.18.0.0/15")
 
 
 class UnsafeUrl(ValueError):
@@ -48,11 +57,13 @@ class UrlGuard:
     extra_hosts: frozenset[str] = frozenset()
     resolve: Resolver | None = None
 
-    def check(self, url: str) -> str:
+    def check(self, url: str, *, via_proxy: bool = False) -> str:
         """Return ``url`` when it is safe to open.
 
         Args:
             url: Candidate URL, absolute.
+            via_proxy: The request goes through a system or environment proxy,
+                so the local DNS answer for the host is not used.
 
         Raises:
             UnsafeUrl: The scheme, host, credentials, or an address is refused.
@@ -66,8 +77,13 @@ class UrlGuard:
             raise UnsafeUrl("downloads must not include credentials")
         if not _host_allowed(host, self.extra_hosts):
             raise UnsafeUrl(f"downloads must come from an allowed host, not {host}")
+        https = parsed.scheme.lower() == "https"
+        if https and via_proxy:
+            return url.strip()
         for address in _addresses(host, self.resolve):
-            if _blocked(address) and not self.allow_private:
+            if self.allow_private:
+                continue
+            if _blocked(address) and not (https and _fake_ip(address)):
                 raise UnsafeUrl(f"downloads must not use a private address for {host}")
         return url.strip()
 
@@ -79,6 +95,26 @@ class UrlGuard:
             allow_private=True,
             extra_hosts=frozenset({"127.0.0.1", "localhost"}),
         )
+
+
+def proxied(url: str) -> bool:
+    """Return True when urllib's default proxy handler would proxy ``url``.
+
+    Proxies come from the environment and, on Windows, the registry.
+    """
+    parsed = urllib.parse.urlsplit(url)
+    proxies = urllib.request.getproxies()
+    if not proxies.get(parsed.scheme.lower()):
+        return False
+    host = parsed.hostname or ""
+    return not (host and urllib.request.proxy_bypass(host))
+
+
+def _fake_ip(address: str) -> bool:
+    try:
+        return ipaddress.ip_address(address) in FAKE_IP_NETWORK
+    except ValueError:
+        return False
 
 
 def _host_allowed(host: str, extra: frozenset[str]) -> bool:

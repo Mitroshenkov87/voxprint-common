@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1 - 2026-10-18
+
+Downloads work behind DNS that answers with placeholder addresses and behind proxies. The guard still requires an allowlisted host and HTTPS with certificate and host name checks. On top of that it accepts a resolution in `198.18.0.0/15`, and it skips the local DNS answer when the request goes through a proxy from the environment or the Windows settings (the proxy itself may be on loopback). Loopback, link-local, RFC 1918, and other private answers stay refused for direct connections, plain HTTP to `198.18.0.0/15` is refused, and redirects must stay on the allowlist. `100.64.0.0/10` was already allowed and is unchanged.
+
+Each mirror now has a `direct` and a `system` route. The probe measures both when a proxy applies and keeps the faster working one per host; the transfer switches to the other route after a connection error or stall before the source counts as failed. `VOXPRINT_MDL_ROUTE=direct|system|auto` (default `auto`) forces a route. The signed index fetch uses the same proxy rule. No source-address binding on Windows. BUILD.json is 0.3.1.
+
 ## 0.3.0 - 2026-10-18
 
 Model integration for ONNX apps. `runtime.engine` may be `onnxruntime` (no TensorRT engine). A model or a file may declare an optional `onnx_prebuilt` artifact (`path`, `sha256`, `size`, `url` or `sources`, `mirror_policy`, and `built_for: {onnxruntime, opset}`); it is separate from the 0.2.6 `prebuilt` list of fallback sets, which is unchanged. The app reports the installed onnxruntime through `voxprint_common.mdl.onnx_prebuilt.set_onnxruntime_probe`. A stale artifact (version or opset mismatch, no probe, or no size) is not downloaded; it is logged, shown by `voxprint-mdl --check` as `stale onnx_prebuilt`, and replaced by the source files plus `post_install`. A fresh one is downloaded and the model's own `post_install` is skipped.
