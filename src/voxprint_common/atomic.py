@@ -11,6 +11,7 @@ on the same thread.
 
 from __future__ import annotations
 
+import contextlib
 import errno
 import json
 import os
@@ -134,7 +135,9 @@ def exclusive_lock(path: Path, timeout: float = 30.0, poll: float = 0.05) -> Ite
         descriptor = os.open(str(path), os.O_CREAT | os.O_RDWR, 0o644)
         try:
             if os.lseek(descriptor, 0, os.SEEK_END) == 0:
-                os.write(descriptor, b"\0")
+                # Windows: another process may have seeded the byte and locked it first.
+                with contextlib.suppress(PermissionError):
+                    os.write(descriptor, b"\0")
             os.lseek(descriptor, 0, os.SEEK_SET)
             while True:
                 try:
