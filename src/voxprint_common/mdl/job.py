@@ -93,6 +93,8 @@ def plan(
     disk_free: DiskFree | None = None,
     on_status: StatusFn | None = None,
     only: Collection[str] | None = None,
+    opener: object | None = None,
+    guard: UrlGuard | None = None,
 ) -> Outcome:
     """Build the plan, check disk space, and publish a status file.
 
@@ -105,11 +107,21 @@ def plan(
         disk_free: Replacement for the free-space check.
         on_status: Called with each published snapshot.
         only: Model ids to include. ``None`` plans the tier.
+        opener: Passed through when an app manifest still needs descriptors.
+        guard: URL rules for that fetch.
     """
     try:
         parsed, tier, cards = _inputs(manifests, devices)
         memory_gib, compute = _card(cards)
-        files = plan_files(parsed, tier, memory_gib=memory_gib, compute=compute, only=only)
+        files = plan_files(
+            parsed,
+            tier,
+            memory_gib=memory_gib,
+            compute=compute,
+            only=only,
+            opener=opener,
+            guard=guard,
+        )
         status = _status_for(files, tier, JobState.PLANNED)
         _note_local(status, files)
         require_space(files, disk_free=disk_free, root=models_dir())
@@ -177,7 +189,15 @@ def download(
         else:
             parsed, tier, cards = _inputs(manifests, devices)
             memory_gib, compute = _card(cards)
-            files = plan_files(parsed, tier, memory_gib=memory_gib, compute=compute, only=only)
+            files = plan_files(
+                parsed,
+                tier,
+                memory_gib=memory_gib,
+                compute=compute,
+                only=only,
+                opener=opener,
+                guard=guard,
+            )
         status = _status_for(files, tier, JobState.DRY_RUN if dry_run else JobState.DOWNLOADING)
         if queue_jobs is not None:
             status.jobs = [dict(row) for row in queue_jobs]
@@ -252,6 +272,8 @@ def verify(
     devices: Sequence[GpuDevice] | None = None,
     on_status: StatusFn | None = None,
     only: Collection[str] | None = None,
+    opener: object | None = None,
+    guard: UrlGuard | None = None,
 ) -> Outcome:
     """Re-hash the planned files and publish whether they are ready.
 
@@ -260,11 +282,21 @@ def verify(
         devices: GPUs to plan for.
         on_status: Called with the published snapshot.
         only: Model ids to include. ``None`` plans the tier.
+        opener: Passed through when an app manifest still needs descriptors.
+        guard: URL rules for that fetch.
     """
     try:
         parsed, tier, cards = _inputs(manifests, devices)
         memory_gib, compute = _card(cards)
-        files = plan_files(parsed, tier, memory_gib=memory_gib, compute=compute, only=only)
+        files = plan_files(
+            parsed,
+            tier,
+            memory_gib=memory_gib,
+            compute=compute,
+            only=only,
+            opener=opener,
+            guard=guard,
+        )
     except (CatalogError, OSError) as exc:
         return _fail(str(exc), on_status)
     status = _status_for(files, tier, JobState.READY)

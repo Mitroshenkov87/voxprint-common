@@ -312,7 +312,7 @@ def _work(
         active = [job.id for job in pending]
         _set_states(active, "running")
         try:
-            files, jobs = _plan(pending, cards)
+            files, jobs = _plan(pending, cards, opener, guard)
         except (CatalogError, OSError) as exc:
             _set_states(active, "failed", str(exc))
             return Outcome(EXIT_FAILED, str(exc), _status_jobs())
@@ -344,6 +344,8 @@ def _work(
 def _plan(
     jobs: Sequence[QueueJob],
     devices: Sequence[GpuDevice] | None,
+    opener: object | None = None,
+    guard: UrlGuard | None = None,
 ) -> tuple[list[PlannedFile], list[dict[str, object]]]:
     cards = list(query_gpus() if devices is None else devices)
     tier = detect_tier(cards)
@@ -361,6 +363,8 @@ def _plan(
             only=job.models,
             memory_gib=memory_gib,
             compute=compute,
+            opener=opener,
+            guard=guard,
         )
         for item in files:
             current = merged.get(item.sha256)
@@ -569,6 +573,8 @@ def _prepare(
     models: tuple[str, ...] | None,
     manifests: tuple[str, ...],
     devices: Sequence[GpuDevice] | None,
+    opener: object | None = None,
+    guard: UrlGuard | None = None,
 ) -> tuple[list[PlannedFile], tuple[tuple[str, str, str], ...], tuple[str, ...] | None]:
     """Return files still needed, unavailable rows, and the model ids to store.
 
@@ -585,7 +591,15 @@ def _prepare(
     cards = list(query_gpus() if devices is None else devices)
     tier = detect_tier(cards)
     memory_gib, compute = _card(cards)
-    files = plan_files(parsed, tier, only=models, memory_gib=memory_gib, compute=compute)
+    files = plan_files(
+        parsed,
+        tier,
+        only=models,
+        memory_gib=memory_gib,
+        compute=compute,
+        opener=opener,
+        guard=guard,
+    )
     notices = tuple(unavailable_rows(parsed))
     waiting = files_awaiting_hooks(files)
     needed: list[PlannedFile] = []

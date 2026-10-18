@@ -32,6 +32,8 @@ __all__ = [
     "PostInstall",
     "RuntimeInfo",
     "TierInfo",
+    "TierRef",
+    "app_schema_bytes",
     "inside_relative",
     "parse_app_manifest",
     "parse_descriptor",
@@ -140,11 +142,13 @@ class FileGroup:
     """Files that share a source list and a mirror policy.
 
     Empty ``mirror_policy`` and empty ``sources`` inherit from the model.
+    ``name`` is empty when the group cannot be selected from an app manifest.
     """
 
     paths: tuple[str, ...]
     mirror_policy: str = ""
     sources: tuple[MirrorRef, ...] = ()
+    name: str = ""
 
 
 @dataclass(frozen=True)
@@ -233,6 +237,22 @@ class Descriptor:
 
 
 @dataclass(frozen=True)
+class TierRef:
+    """One model in a VRAM tier, and the files that tier keeps.
+
+    ``files`` are globs and ``file_groups`` are names of descriptor groups.
+    ``constrained`` is false when the entry is a bare id, which keeps every
+    file. An explicit ``files`` or ``file_groups`` list, even an empty one,
+    keeps only the matches.
+    """
+
+    id: str
+    files: tuple[str, ...] = ()
+    file_groups: tuple[str, ...] = ()
+    constrained: bool = False
+
+
+@dataclass(frozen=True)
 class OptionalRef:
     """A model the app can name, and the VRAM floor for that request."""
 
@@ -287,6 +307,7 @@ class AppModels:
     post_install: PostInstall | None = None
     model_hooks: tuple[PostInstall, ...] = ()
     unavailable: tuple[tuple[str, str], ...] = ()
+    selections: tuple[tuple[str, tuple[TierRef, ...]], ...] = ()
 
     def tier_ids(self, name: str) -> tuple[str, ...] | None:
         """Return the model ids listed for ``name``, or None when it is absent."""
@@ -295,10 +316,26 @@ class AppModels:
                 return ids
         return None
 
+    def tier_refs(self, name: str) -> tuple[TierRef, ...] | None:
+        """Return the tier entries for ``name``, or None when it is absent."""
+        for key, refs in self.selections:
+            if key == name:
+                return refs
+        ids = self.tier_ids(name)
+        if ids is None:
+            return None
+        return tuple(TierRef(model_id) for model_id in ids)
+
 
 def schema_bytes() -> bytes:
-    """Return the vendored schema file bytes, unchanged."""
+    """Return the vendored ``voxprint-model/1`` schema file bytes, unchanged."""
     return files("voxprint_common.mdl.schemas").joinpath("voxprint-model.schema.json").read_bytes()
+
+
+def app_schema_bytes() -> bytes:
+    """Return the vendored ``voxprint-app-models/1`` schema file bytes."""
+    name = "voxprint-app-models.schema.json"
+    return files("voxprint_common.mdl.schemas").joinpath(name).read_bytes()
 
 
 def parse_descriptor(payload: object) -> Descriptor:
@@ -378,14 +415,16 @@ def parse_app_manifest(payload: object) -> AppModels:
         raise DescriptorError(f"app manifest missing {', '.join(sorted(missing))}")
     if payload.get("schema") != APP_SCHEMA:
         raise DescriptorError("schema must be voxprint-app-models/1")
+    selections = _tiers(payload.get("tiers"))
     return AppModels(
         app_id=_ident(payload.get("app_id"), "app_id"),
-        tiers=_tiers(payload.get("tiers")),
+        tiers=tuple((key, tuple(ref.id for ref in refs)) for key, refs in selections),
         runtimes=_runtimes(payload.get("runtimes")),
         optional=_optional(payload.get("optional")),
         post_install=_post_install(payload.get("post_install"), "post_install"),
         model_hooks=_hooks(payload.get("hooks", [])),
         unavailable=_unavailable(payload.get("unavailable", [])),
+        selections=selections,
     )
 
 
@@ -437,23 +476,30 @@ def _file_groups(value: object, paths: set[str]) -> tuple[FileGroup, ...]:
     rows = _list(value, "file_groups", minimum=0)
     seen: set[str] = set()
     groups: list[FileGroup] = []
-    allowed = {"paths", "mirror_policy", "sources"}
+    allowed = {"name", "paths", "mirror_policy", "sources"}
+    named: set[str] = set()
     for row in rows:
         if not isinstance(row, dict) or not {"paths"} <= set(row) <= allowed:
             raise DescriptorError("file_groups entries need paths")
-        names: list[str] = []
+        group_name = ""
+        if "name" in row:
+            group_name = _ident(row.get("name"), "file_groups.name")
+            if group_name in named:
+                raise DescriptorError(f"duplicate file group {group_name}")
+            named.add(group_name)
+        paths_in_group: list[str] = []
         for item in _list(row.get("paths"), "file_groups.paths", minimum=1):
             if not isinstance(item, str) or item not in paths:
                 raise DescriptorError(f"file group path is not a file: {item!r}")
             if item in seen:
                 raise DescriptorError(f"file {item} is in more than one group")
             seen.add(item)
-            names.append(item)
+            paths_in_group.append(item)
         policy = ""
         if "mirror_policy" in row:
             policy = _named_policy(row.get("mirror_policy"), "file_groups.mirror_policy")
         sources = _mirrors(row.get("sources"), "sources") if "sources" in row else ()
-        groups.append(FileGroup(tuple(names), policy, sources))
+        groups.append(FileGroup(tuple(paths_in_group), policy, sources, group_name))
     return tuple(groups)
 
 
@@ -571,19 +617,44 @@ def _flags(value: object) -> tuple[str, ...]:
     return tuple(found)
 
 
-def _tiers(value: object) -> tuple[tuple[str, tuple[str, ...]], ...]:
+def _tiers(value: object) -> tuple[tuple[str, tuple[TierRef, ...]], ...]:
     if not isinstance(value, dict) or not value:
         raise DescriptorError("tiers must be an object")
-    rows: list[tuple[str, tuple[str, ...]]] = []
+    rows: list[tuple[str, tuple[TierRef, ...]]] = []
     for key, raw in value.items():
         if key not in _TIER_KEYS:
             raise DescriptorError("tiers keys must be 8gb, 16gb, or 24gb")
         ids = _list(raw, f"tiers.{key}", minimum=0)
-        names: list[str] = []
-        for item in ids:
-            names.append(_ident(item, f"tiers.{key}"))
-        rows.append((key, tuple(names)))
+        refs = tuple(_tier_ref(item, f"tiers.{key}") for item in ids)
+        rows.append((key, refs))
     return tuple(rows)
+
+
+def _tier_ref(value: object, label: str) -> TierRef:
+    if isinstance(value, str):
+        return TierRef(_ident(value, label))
+    if not isinstance(value, dict) or not {"id"} <= set(value) <= {"id", "files", "file_groups"}:
+        raise DescriptorError(f"{label} entry must be an id or an object with id")
+    model_id = _ident(value.get("id"), f"{label}.id")
+    globs: tuple[str, ...] = ()
+    groups: tuple[str, ...] = ()
+    constrained = "files" in value or "file_groups" in value
+    if "files" in value:
+        listed = _list(value.get("files"), f"{label}.files", minimum=0)
+        globs = tuple(_glob(item, f"{label}.files") for item in listed)
+    if "file_groups" in value:
+        listed_groups = _list(value.get("file_groups"), f"{label}.file_groups", minimum=0)
+        groups = tuple(_ident(item, f"{label}.file_groups") for item in listed_groups)
+    return TierRef(model_id, globs, groups, constrained)
+
+
+def _glob(value: object, label: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise DescriptorError(f"{label} must be a glob")
+    text = value.strip()
+    if text.startswith("/") or "\\" in text or ".." in PurePosixPath(text).parts:
+        raise DescriptorError(f"{label} must be a relative glob")
+    return text
 
 
 def _runtimes(value: object) -> tuple[str, ...]:

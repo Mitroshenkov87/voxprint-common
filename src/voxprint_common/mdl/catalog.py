@@ -16,6 +16,7 @@ of that digest. A side virtualenv uses
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import math
 import os
@@ -24,7 +25,7 @@ import shutil
 import sys
 import urllib.parse
 from collections.abc import Callable, Collection, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import assert_never
@@ -42,6 +43,7 @@ from voxprint_common.mdl.descriptor import (
     MirrorRef,
     OnnxPrebuilt,
     PostInstall,
+    TierRef,
     parse_app_manifest,
     parse_onnx_prebuilt,
     parse_post_install,
@@ -49,6 +51,8 @@ from voxprint_common.mdl.descriptor import (
 from voxprint_common.mdl.hooks import HookPlan
 from voxprint_common.mdl.names import DISPLAY_NAME
 from voxprint_common.mdl.onnx_prebuilt import note_stale, stale_reason
+from voxprint_common.mdl.resolve import ResolveError, resolve_descriptors
+from voxprint_common.mdl.safety import UrlGuard
 from voxprint_common.mdl.variants import chosen_variants
 from voxprint_common.paths import models_dir, state_dir
 
@@ -227,6 +231,7 @@ class Model:
     post_install: PostInstall | None = None
     fallbacks: tuple[FallbackVariant, ...] = ()
     onnx_prebuilts: tuple[OnnxPrebuiltFile, ...] = ()
+    groups: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -398,6 +403,8 @@ def plan_files(
     compute: tuple[int, int] | None = None,
     descriptors: Mapping[str, Descriptor] | None = None,
     variants: Mapping[str, str] | None = None,
+    opener: object | None = None,
+    guard: UrlGuard | None = None,
 ) -> list[PlannedFile]:
     """Select the variants that fit ``tier`` and deduplicate them by digest.
 
@@ -421,11 +428,16 @@ def plan_files(
         variants: ``{model id: fallback id}`` to use instead of the default
             files. Added to the choices saved by
             :func:`voxprint_common.mdl.variants.choose_variant`.
+        opener: Passed to the index when an app manifest still needs
+            descriptors. Defaults to urllib.
+        guard: URL rules for that fetch. Defaults to the production allowlist.
 
     Raises:
         CatalogError: The same digest is declared with two sizes, a model
-            does not fit the card, or a descriptor is missing.
+            does not fit the card, a descriptor is missing, or a tier
+            selection matches no files.
     """
+    manifests = _attach_resolved(manifests, tier, only, opener, guard, descriptors)
     root = models_root or models_dir()
     cap = _gpu_rank(tier)
     remembered = memory_gib if memory_gib is not None else _tier_gib(tier)
@@ -435,6 +447,7 @@ def plan_files(
     for manifest in manifests:
         prepared = _with_descriptors(manifest, descriptors)
         for model in _chosen(prepared, cap, tier, only):
+            model = _apply_selection(prepared, tier, model)
             try:
                 _check_fit(model, remembered, compute)
             except CatalogError:
@@ -519,7 +532,10 @@ def plan_files(
                 current.urls = tuple(merged)
                 if "strict-priority" in {current.mirror_policy, item.mirror_policy}:
                     current.mirror_policy = "strict-priority"
-    return [buckets[key] for key in order]
+    planned = [buckets[key] for key in order]
+    if not planned:
+        _refuse_unresolved(manifests, tier)
+    return planned
 
 
 def _planned(
@@ -906,6 +922,7 @@ def _model_from_descriptor(descriptor: Descriptor, tier: ModelTier, *, optional:
         onnx_prebuilts=tuple(
             _descriptor_onnx_prebuilt(descriptor, item) for item in descriptor.onnx_prebuilt
         ),
+        groups=tuple((group.name, group.paths) for group in descriptor.file_groups if group.name),
     )
 
 
@@ -1078,8 +1095,10 @@ def _chosen(
         if missing:
             raise CatalogError(f"model {missing[0]} has no voxprint-model descriptor")
         chosen = [by_id[model_id] for model_id in ids]
-    if wanted is None:
+    if wanted is None and manifest.app_models is None:
         chosen = [model for model in chosen if not model.on_demand and not model.optional]
+    elif wanted is None:
+        chosen = [model for model in chosen if not model.optional]
     blocked = [model for model in chosen if model.unavailable]
     if wanted is not None and blocked:
         first = blocked[0]
@@ -1093,6 +1112,109 @@ def _chosen(
     if missing:
         raise CatalogError(f"model {missing[0]} is not available for this card")
     return chosen
+
+
+def _attach_resolved(
+    manifests: Sequence[AppManifest],
+    tier: VramTier,
+    only: Collection[str] | None,
+    opener: object | None,
+    guard: UrlGuard | None,
+    descriptors: Mapping[str, Descriptor] | None,
+) -> list[AppManifest]:
+    if descriptors is not None:
+        return list(manifests)
+    attached: list[AppManifest] = []
+    for manifest in manifests:
+        document = manifest.app_models
+        if document is None or manifest.models:
+            attached.append(manifest)
+            continue
+        ids = _ids_to_resolve(document, tier, only)
+        if not ids:
+            attached.append(manifest)
+            continue
+        try:
+            found = resolve_descriptors(ids, opener=opener, guard=guard)
+        except ResolveError as exc:
+            raise CatalogError(str(exc)) from exc
+        models = _mark_unavailable(_models_from_descriptors(document, found), document.unavailable)
+        attached.append(
+            AppManifest(
+                manifest.app,
+                models,
+                manifest.path,
+                document,
+                manifest.app_hook,
+                runtimes=manifest.runtimes or document.runtimes,
+            )
+        )
+    return attached
+
+
+def _ids_to_resolve(
+    document: AppModels,
+    tier: VramTier,
+    only: Collection[str] | None,
+) -> list[str]:
+    blocked = {model_id for model_id, _reason in document.unavailable}
+    if only is None:
+        return [model_id for model_id in _listed_ids(document, tier) if model_id not in blocked]
+    known: list[str] = []
+    for _name, ids in document.tiers:
+        known.extend(ids)
+    known.extend(item.id for item in document.optional)
+    present = set(known)
+    return [model_id for model_id in only if model_id in present and model_id not in blocked]
+
+
+def _apply_selection(manifest: AppManifest, tier: VramTier, model: Model) -> Model:
+    document = manifest.app_models
+    if document is None:
+        return model
+    ref = next((item for item in _listed_refs(document, tier) if item.id == model.id), None)
+    if ref is None or not ref.constrained:
+        return model
+    files = _selected_files(model, ref)
+    if not files:
+        raise CatalogError(f"model {model.id} selection matches no files")
+    return replace(model, files=files)
+
+
+def _selected_files(model: Model, ref: TierRef) -> tuple[ModelFile, ...]:
+    wanted: set[str] = set()
+    named = dict(model.groups)
+    for name in ref.file_groups:
+        paths = named.get(name)
+        if paths is None:
+            raise CatalogError(f"model {model.id} has no file group {name}")
+        wanted.update(paths)
+    for pattern in ref.files:
+        for item in model.files:
+            if fnmatch.fnmatchcase(item.path, pattern):
+                wanted.add(item.path)
+    return tuple(item for item in model.files if item.path in wanted)
+
+
+def _refuse_unresolved(manifests: Sequence[AppManifest], tier: VramTier) -> None:
+    for manifest in manifests:
+        document = manifest.app_models
+        if document is None or manifest.models:
+            continue
+        blocked = {model_id for model_id, _reason in document.unavailable}
+        pending = [model_id for model_id in _listed_ids(document, tier) if model_id not in blocked]
+        if pending:
+            raise CatalogError(f"model {pending[0]} has no voxprint-model descriptor")
+
+
+def _listed_refs(document: AppModels, tier: VramTier) -> list[TierRef]:
+    name = _tier_key(tier)
+    order = {"24gb": ("24gb", "16gb", "8gb"), "16gb": ("16gb", "8gb"), "8gb": ("8gb",)}
+    for key in order[name]:
+        refs = document.tier_refs(key)
+        if refs is not None:
+            return list(refs)
+    return []
 
 
 def _listed_ids(document: AppModels, tier: VramTier) -> list[str]:

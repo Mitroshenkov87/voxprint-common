@@ -1,0 +1,233 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://voxprint.dev/schemas/voxprint-app-models/1",
+  "title": "voxprint-app-models/1",
+  "description": "App model list, schema id voxprint-app-models/1. tiers names the models for each VRAM tier. An entry is a model id, which keeps every file of that descriptor, or an object with id and files and/or file_groups. files are globs. file_groups are names declared on the descriptor. The tier keeps the union of the matches. optional models are fetched only when requested by id.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "app_id",
+    "tiers",
+    "runtimes",
+    "optional"
+  ],
+  "properties": {
+    "schema": {
+      "const": "voxprint-app-models/1"
+    },
+    "app_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "tiers": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "8gb": {
+          "$ref": "#/$defs/tierList"
+        },
+        "16gb": {
+          "$ref": "#/$defs/tierList"
+        },
+        "24gb": {
+          "$ref": "#/$defs/tierList"
+        }
+      }
+    },
+    "runtimes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9._-]*$"
+      }
+    },
+    "optional": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "min_vram_gib"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._-]*$"
+          },
+          "min_vram_gib": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "post_install": {
+      "$ref": "#/$defs/hook"
+    },
+    "hooks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "post_install"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._-]*$"
+          },
+          "post_install": {
+            "$ref": "#/$defs/hook"
+          }
+        }
+      }
+    },
+    "unavailable": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "reason"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._-]*$"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "tierList": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._-]*$"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9._-]*$"
+              },
+              "files": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "file_groups": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9._-]*$"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "hook": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "argv",
+            "timeout_s",
+            "produces"
+          ],
+          "properties": {
+            "argv": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string"
+              }
+            },
+            "timeout_s": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "produces": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "cli",
+            "args"
+          ],
+          "properties": {
+            "cli": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+            },
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "timeout_s": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "outputs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "path"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

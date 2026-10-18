@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "voxprint-common"
-version = "0.3.1"
+version = "0.3.2"
 description = "Shared Python library for the Voxprint AI Media Suite."
 readme = "README.md"
 requires-python = ">=3.14"
@@ -59,6 +59,7 @@ packages = ["src/voxprint_common"]
 "src/voxprint_common/ui/presets/text.json" = "voxprint_common/ui/presets/text.json"
 "src/voxprint_common/ui/presets/tool.json" = "voxprint_common/ui/presets/tool.json"
 "src/voxprint_common/mdl/schemas/voxprint-model.schema.json" = "voxprint_common/mdl/schemas/voxprint-model.schema.json"
+"src/voxprint_common/mdl/schemas/voxprint-app-models.schema.json" = "voxprint_common/mdl/schemas/voxprint-app-models.schema.json"
 "src/voxprint_common/mdl/data/model-index.json" = "voxprint_common/mdl/data/model-index.json"
 "src/voxprint_common/mdl/data/model-index.pin.json" = "voxprint_common/mdl/data/model-index.pin.json"
 "src/voxprint_common/mdl/data/index-public.pem" = "voxprint_common/mdl/data/index-public.pem"
