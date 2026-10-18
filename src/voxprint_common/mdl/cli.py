@@ -41,16 +41,18 @@ from voxprint_common.cli_protocol import (
     emit,
     result,
 )
-from voxprint_common.mdl.catalog import CatalogError, discover, load_manifest
+from voxprint_common.mdl.catalog import CatalogError, discover, load_manifest, plan_files
 from voxprint_common.mdl.events import TransferSession
+from voxprint_common.mdl.hooks import hook_problems
 from voxprint_common.mdl.index import (
     SuiteIndexError,
     load_index,
     verify_index_file,
     write_index_signature,
 )
-from voxprint_common.mdl.job import Outcome, download, plan, verify
+from voxprint_common.mdl.job import Outcome, detect_tier, download, plan, verify
 from voxprint_common.mdl.names import CLI_NAME, DISPLAY_NAME
+from voxprint_common.mdl.onnx_prebuilt import stale_rows
 from voxprint_common.mdl.queue import enqueue, load_queue, run_or_attach
 from voxprint_common.mdl.readiness import publish_presence
 from voxprint_common.mdl.status import JobState, StatusError, load_status
@@ -250,6 +252,13 @@ def _check() -> tuple[int, str, dict[str, object]]:
     ]
     if index.fallback:
         lines.append(f"fallback: {index.fallback}")
+    try:
+        parsed = [load_manifest(app.path) for app in discover()]
+        plan_files(parsed, detect_tier(None))
+    except (CatalogError, OSError) as exc:
+        lines.append(f"plan: {exc}")
+    lines.extend(f"stale onnx_prebuilt: {row}" for row in stale_rows())
+    lines.extend(f"not ready: {key}: {why}" for key, why in sorted(hook_problems().items()))
     return EXIT_OK, "\n".join(lines), {}
 
 

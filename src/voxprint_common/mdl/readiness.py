@@ -20,6 +20,7 @@ from voxprint_common.mdl.catalog import (
     load_manifest,
     plan_files,
 )
+from voxprint_common.mdl.hooks import files_awaiting_hooks
 from voxprint_common.mdl.job import _card, detect_tier
 from voxprint_common.mdl.status import JobState, Status, Step, load_status, save_status
 from voxprint_common.paths import shared_dir
@@ -85,6 +86,12 @@ def gaps_for(
     memory, compute = _card(cards or [])
     files = plan_files(parsed, tier, memory_gib=memory, compute=compute)
     found = [_file_gap(item) for item in files]
+    waiting = files_awaiting_hooks(files)
+    found.extend(
+        Gap(item.label, "needs preparing", "model")
+        for item in files
+        if id(item) in waiting and _file_gap(item) is None
+    )
     found.extend(_runtime_gaps(parsed))
     return [item for item in found if item is not None]
 

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://voxprint.dev/schemas/voxprint-model/1",
   "title": "voxprint-model/1",
-  "description": "Shared model manifest, schema id voxprint-model/1. The properties in required are mandatory. mirror_policy and file_groups are optional; a missing mirror_policy means race. license is the SPDX id, spelled license. VRAM fields are GiB: a 24 GB card is recorded as about 23.5 GiB (GB * 1000 / 1024, nearest 0.5). files[].path is relative to the repo root and is the same string on every mirror. sources on a file or a file group replaces mirrors for those paths. voxprint-model.json is not listed in files. prebuilt is an optional list of recorded alternatives (id, role, replaces, files, note); an entry with role fallback replaces the default files under replaces when the default source fails or the fallback is chosen. A mirror may set ours: true.",
+  "description": "Shared model manifest, schema id voxprint-model/1. The properties in required are mandatory. mirror_policy and file_groups are optional; a missing mirror_policy means race. license is the SPDX id, spelled license. VRAM fields are GiB: a 24 GB card is recorded as about 23.5 GiB (GB * 1000 / 1024, nearest 0.5). files[].path is relative to the repo root and is the same string on every mirror. sources on a file or a file group replaces mirrors for those paths. voxprint-model.json is not listed in files. prebuilt is an optional list of recorded alternatives (id, role, replaces, files, note); an entry with role fallback replaces the default files under replaces when the default source fails or the fallback is chosen. A mirror may set ours: true. onnx_prebuilt (on the model or on a file) is an optional pre-built ONNX artifact with built_for.onnxruntime and built_for.opset; a stale one falls back to the source files and post_install. post_install runs the owning app's own installed CLI with only the {id} {model_dir} {source_path} {prebuilt_path} {cache_dir} placeholders; outputs are relative to the model folder.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -87,6 +87,9 @@
           },
           "sources": {
             "$ref": "#/$defs/mirrors"
+          },
+          "onnx_prebuilt": {
+            "$ref": "#/$defs/onnx_prebuilt"
           }
         }
       }
@@ -135,6 +138,12 @@
         "$ref": "#/$defs/fallbackSet"
       }
     },
+    "onnx_prebuilt": {
+      "$ref": "#/$defs/onnx_prebuilt"
+    },
+    "post_install": {
+      "$ref": "#/$defs/post_install"
+    },
     "tier": {
       "type": "object",
       "additionalProperties": false,
@@ -170,7 +179,8 @@
           "enum": [
             "llama.cpp",
             "diffusers",
-            "nunchaku"
+            "nunchaku",
+            "onnxruntime"
           ]
         },
         "version_req": {
@@ -317,6 +327,120 @@
               },
               "sources": {
                 "$ref": "#/$defs/mirrors"
+              }
+            }
+          }
+        }
+      }
+    },
+    "onnx_prebuilt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "built_for"
+      ],
+      "oneOf": [
+        {
+          "required": [
+            "url"
+          ]
+        },
+        {
+          "required": [
+            "sources"
+          ]
+        }
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!voxprint-model\\.json$)(?!/)(?!.*\\\\)(?!.*\\.\\./)[^\\\\]+$"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "url": {
+          "type": "string",
+          "pattern": "^https://\\S+$"
+        },
+        "sources": {
+          "$ref": "#/$defs/mirrors"
+        },
+        "mirror_policy": {
+          "enum": [
+            "race",
+            "strict-priority"
+          ]
+        },
+        "built_for": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "onnxruntime",
+            "opset"
+          ],
+          "properties": {
+            "onnxruntime": {
+              "type": "string",
+              "minLength": 1
+            },
+            "opset": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      }
+    },
+    "post_install": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cli",
+        "args"
+      ],
+      "properties": {
+        "cli": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(?:[^{}]|\\{(?:id|model_dir|source_path|prebuilt_path|cache_dir)\\})*$"
+          }
+        },
+        "timeout_s": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 3600
+        },
+        "outputs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^(?![A-Za-z]:)(?!/)(?!.*\\\\)(?!(?:.*/)?\\.\\.(?:/|$)).+$"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
               }
             }
           }
