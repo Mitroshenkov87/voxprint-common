@@ -99,6 +99,7 @@ class _Pin:
     head: str
     serial: int
     generated_at: str
+    sha256: str = ""
 
 
 @dataclass(frozen=True)
@@ -292,6 +293,8 @@ def public_key_pem(key: bytes) -> str:
 
 
 def _from_bundled(raw: bytes, pin: _Pin, reason: str) -> SuiteIndex:
+    if pin.sha256 and sha256_bytes(raw) != pin.sha256:
+        raise SuiteIndexError("bundled index does not match its pin")
     if reason:
         logger.warning("using the bundled model index; %s", reason)
     document = _document(_decode(raw))
@@ -417,7 +420,15 @@ def _read_pin() -> _Pin:
         raise SuiteIndexError("bundled index pin needs a head")
     if "serial" not in payload or "generated_at" not in payload:
         raise SuiteIndexError("bundled index pin needs serial and generated_at")
-    return _Pin(head, _serial(payload.get("serial")), _generated_at(payload.get("generated_at")))
+    digest = payload.get("sha256", "")
+    if not isinstance(digest, str):
+        raise SuiteIndexError("bundled index pin sha256 must be a string")
+    return _Pin(
+        head,
+        _serial(payload.get("serial")),
+        _generated_at(payload.get("generated_at")),
+        digest,
+    )
 
 
 def _bundled_public_keys() -> tuple[bytes, ...]:

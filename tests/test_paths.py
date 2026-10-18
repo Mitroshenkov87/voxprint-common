@@ -39,7 +39,7 @@ def test_localappdata_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> N
     monkeypatch.delenv("VOXPRINT_HOME", raising=False)
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     assert paths.home() == tmp_path / "VOXPrint AI Suite"
-    assert paths.trt_cache_dir() == tmp_path / "Voxprint" / "trt-cache"
+    assert paths.trt_cache_dir() == tmp_path / "VOXPrint AI Suite" / "trt-cache"
 
 
 def test_home_override_and_children(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

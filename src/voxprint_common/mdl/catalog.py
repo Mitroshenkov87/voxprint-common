@@ -38,6 +38,7 @@ from voxprint_common.mdl.descriptor import (
     AppModels,
     Descriptor,
     DescriptorError,
+    DescriptorFile,
     MirrorRef,
     PostInstall,
     parse_app_manifest,
@@ -45,6 +46,7 @@ from voxprint_common.mdl.descriptor import (
 )
 from voxprint_common.mdl.hooks import HookPlan
 from voxprint_common.mdl.names import DISPLAY_NAME
+from voxprint_common.mdl.variants import chosen_variants
 from voxprint_common.paths import models_dir, state_dir
 
 __all__ = [
@@ -175,6 +177,21 @@ class ModelFile:
 
 
 @dataclass(frozen=True)
+class FallbackVariant:
+    """Files that replace some default files when the fallback is used."""
+
+    id: str
+    replaces: str
+    files: tuple[ModelFile, ...]
+
+    def covers(self, path: str) -> bool:
+        """Return whether default file ``path`` is replaced by this variant."""
+        if self.replaces.endswith("/"):
+            return path.startswith(self.replaces)
+        return path == self.replaces
+
+
+@dataclass(frozen=True)
 class Model:
     """One variant of a model id."""
 
@@ -191,6 +208,7 @@ class Model:
     unavailable: bool = False
     reason: str = ""
     post_install: PostInstall | None = None
+    fallbacks: tuple[FallbackVariant, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -223,6 +241,8 @@ class PlannedFile:
     model_id: str = ""
     hooks: tuple[HookPlan, ...] = ()
     mirror_policy: str = "race"
+    fallback_key: str = ""
+    fallback_files: tuple[PlannedFile, ...] = ()
 
     @property
     def label(self) -> str:
@@ -359,6 +379,7 @@ def plan_files(
     memory_gib: float | None = None,
     compute: tuple[int, int] | None = None,
     descriptors: Mapping[str, Descriptor] | None = None,
+    variants: Mapping[str, str] | None = None,
 ) -> list[PlannedFile]:
     """Select the variants that fit ``tier`` and deduplicate them by digest.
 
@@ -379,6 +400,9 @@ def plan_files(
             capability is not checked.
         descriptors: Model documents for app manifests that were loaded
             without them.
+        variants: ``{model id: fallback id}`` to use instead of the default
+            files. Added to the choices saved by
+            :func:`voxprint_common.mdl.variants.choose_variant`.
 
     Raises:
         CatalogError: The same digest is declared with two sizes, a model
@@ -389,6 +413,7 @@ def plan_files(
     remembered = memory_gib if memory_gib is not None else _tier_gib(tier)
     buckets: dict[str, PlannedFile] = {}
     order: list[str] = []
+    chosen = {**chosen_variants(), **dict(variants or {})}
     for manifest in manifests:
         prepared = _with_descriptors(manifest, descriptors)
         for model in _chosen(prepared, cap, tier, only):
@@ -399,7 +424,21 @@ def plan_files(
                     raise
                 continue
             label = model.display_name or model.id
-            for item in model.files:
+            variant = next((v for v in model.fallbacks if v.id == chosen.get(model.id)), None)
+            chosen_files = model.files
+            if variant is not None:
+                kept = tuple(f for f in model.files if not variant.covers(f.path))
+                chosen_files = (*kept, *variant.files)
+            spare = None if variant is not None else next(iter(model.fallbacks), None)
+            spare_plans = (
+                tuple(
+                    _planned(f, root, prepared.app, model, label, _hook_plans(prepared, model))
+                    for f in spare.files
+                )
+                if spare is not None
+                else ()
+            )
+            for item in chosen_files:
                 current = buckets.get(item.sha256)
                 if current is None:
                     planned = PlannedFile(
@@ -418,6 +457,9 @@ def plan_files(
                         hooks=_hook_plans(prepared, model),
                         mirror_policy=item.mirror_policy,
                     )
+                    if spare is not None and spare.covers(item.path):
+                        planned.fallback_key = f"{model.id}:{spare.id}"
+                        planned.fallback_files = spare_plans
                     buckets[item.sha256] = planned
                     order.append(item.sha256)
                     continue
@@ -444,6 +486,32 @@ def plan_files(
                 if "strict-priority" in {current.mirror_policy, item.mirror_policy}:
                     current.mirror_policy = "strict-priority"
     return [buckets[key] for key in order]
+
+
+def _planned(
+    item: ModelFile,
+    root: Path,
+    app: str,
+    model: Model,
+    label: str,
+    hooks: tuple[HookPlan, ...],
+) -> PlannedFile:
+    return PlannedFile(
+        component_id=f"model-{item.sha256[:MODEL_PREFIX]}",
+        sha256=item.sha256,
+        size=item.size,
+        version=item.sha256,
+        name=item.path,
+        destination=root / "blobs" / item.sha256,
+        urls=item.urls,
+        apps=[app],
+        model_ids=[model.id],
+        tier=model.tier.value,
+        display_name=label,
+        model_id=model.id,
+        hooks=hooks,
+        mirror_policy=item.mirror_policy,
+    )
 
 
 def require_space(
@@ -775,7 +843,36 @@ def _model_from_descriptor(descriptor: Descriptor, tier: ModelTier, *, optional:
         min_vram_gib=descriptor.tier.min_vram_gib,
         display_name=descriptor.display_name,
         gpu_min_cc=descriptor.tier.gpu_min_cc,
+        fallbacks=tuple(
+            FallbackVariant(
+                group.id,
+                group.replaces,
+                tuple(
+                    ModelFile(
+                        item.path,
+                        item.size,
+                        item.sha256,
+                        _fallback_urls(descriptor, item),
+                        item.mirror_policy or descriptor.mirror_policy,
+                    )
+                    for item in group.files
+                ),
+            )
+            for group in descriptor.fallbacks
+            if group.role == "fallback"
+        ),
     )
+
+
+def _fallback_urls(descriptor: Descriptor, item: DescriptorFile) -> tuple[str, ...]:
+    mirrors = item.sources or descriptor.mirrors
+    _check_licence_split(descriptor, mirrors)
+    urls = tuple(
+        _descriptor_mirror(ref.kind, ref.ref, ref.revision, item.path, len(descriptor.files))
+        for ref in mirrors
+    )
+    _reject_gated(descriptor.id, urls)
+    return urls
 
 
 def _descriptor_urls(descriptor: Descriptor, filename: str) -> tuple[str, ...]:

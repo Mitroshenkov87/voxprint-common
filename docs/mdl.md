@@ -120,7 +120,9 @@ An entry whose only URL is a gated upstream (`pyannote/speaker-diarization-commu
 
 ## Model index
 
-The bundled index is the `d2325ed` snapshot of `Mitroshenkov87/voxprint-model-index` (17 models, sha256 `8a98babc1133d540229273d0a51df43c2e85dca33c50c7affd435ee78ede25b9`). `model-index.pin.json` records head `d2325ed8de2eec808b22a88381bfb35055f84203`, serial `1`, and `generated_at` `2026-10-17T10:42:07Z`.
+The bundled index is the serial 9 snapshot of `Mitroshenkov87/voxprint-model-index` (head `15edeab0f7a874c27d2b38ef6ecb69106ff94df8`, 29 models, sha256 `104742f9d8cc7c8f693f963dbd871471a3e57fda3d585d52b105b3855d49f45f`), signed with Model Forge's key. `model-index.pin.json` records the head, serial `9`, `generated_at` `2026-10-18T04:09:36Z`, and the sha256, which the bundled file must match. A remote index may be the object `{head, serial, generated_at, models}` or a plain list.
+
+A model document may list `prebuilt` alternatives. An entry with `role: "fallback"` and `replaces: "transformer/"` (a folder prefix, or one path) swaps those default files for its own `files` when a default file fails after the normal mirror rules, or when `choose_variant(model_id, fallback_id)` picks it. The choice is saved in `<home>/state/mdl-variants.json`.
 
 A remote `index.json` is used when the detached `index.json.sig` verifies under a public key in `index-public.pem` and the document is at least that pin. `serial`, when present, is the comparison. `generated_at` is used only when `serial` is absent, and it must be a timezone-aware ISO-8601 timestamp. The signed document is an object with `head`, `serial`, `generated_at`, and `models`. A bare list has no freshness and is refused.
 

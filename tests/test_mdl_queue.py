@@ -215,7 +215,7 @@ def _descriptor_doc(**overrides: object) -> dict[str, object]:
 
 def test_vendored_schema_accepts_the_forge_shape() -> None:
     raw = schema_bytes()
-    assert sha256_bytes(raw) == ("202f1ba1af5858fd050a74ae143db3524ef4697c2052235d590a9e141269b3cb")
+    assert sha256_bytes(raw) == ("ef2c02776934b1b849e391d2f31cea712c866bce60d6ce73a2b36c5af7494b72")
     schema = json.loads(raw)
     validator = jsonschema.Draft202012Validator(schema)
     document = _descriptor_doc()
@@ -320,16 +320,16 @@ def test_app_manifest_skips_optional_and_checks_the_card(tmp_path: Path) -> None
 
 def test_unsigned_remote_index_falls_back_to_the_bundle() -> None:
     pinned = bundled_index_bytes()
-    rows = json.loads(pinned)
-    assert len(rows) == 17
-    assert rows[0]["id"] == "gemma4-31b"
+    rows = json.loads(pinned)["models"]
+    assert len(rows) == 29
+    assert rows[0]["id"] == "dinov2-base"
     assert sha256_bytes(pinned) == (
-        "8a98babc1133d540229273d0a51df43c2e85dca33c50c7affd435ee78ede25b9"
+        "104742f9d8cc7c8f693f963dbd871471a3e57fda3d585d52b105b3855d49f45f"
     )
     bundled = load_index(remote=False)
     assert bundled.source == "bundled"
     assert bundled.fallback == ""
-    assert len(bundled.entries) == 17
+    assert len(bundled.entries) == 29
     assert bundled.get("gemma4-31b") is not None
     other = json.dumps(
         [{"id": "painter", "repo": "org/painter", "revision": "main", "sha256": "ab" * 32}]
@@ -342,7 +342,7 @@ def test_unsigned_remote_index_falls_back_to_the_bundle() -> None:
         server.server_close()
     assert unsigned.source == "bundled"
     assert unsigned.fallback
-    assert len(unsigned.entries) == 17
+    assert len(unsigned.entries) == 29
     with pytest.raises(Exception, match="duplicate"):
         parse_index(
             [

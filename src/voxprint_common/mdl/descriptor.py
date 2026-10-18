@@ -22,6 +22,7 @@ __all__ = [
     "Descriptor",
     "DescriptorError",
     "DescriptorFile",
+    "FallbackSet",
     "FileGroup",
     "MirrorRef",
     "OptionalRef",
@@ -68,7 +69,8 @@ _MODEL_KEYS = frozenset(
         "build",
     }
 )
-_MODEL_OPTIONAL = frozenset({"mirror_policy", "file_groups"})
+_MODEL_OPTIONAL = frozenset({"mirror_policy", "file_groups", "prebuilt"})
+_MIRROR_KEYS = frozenset({"kind", "ref", "revision", "ours"})
 
 
 class DescriptorError(ValueError):
@@ -97,6 +99,28 @@ class MirrorRef:
     kind: str
     ref: str
     revision: str
+    ours: bool = False
+
+
+@dataclass(frozen=True)
+class FallbackSet:
+    """A recorded alternative for some default files, from ``prebuilt``.
+
+    ``replaces`` is a path, or a folder prefix ending in ``/``. Only entries
+    with ``role`` ``fallback`` are used by the downloader.
+    """
+
+    id: str
+    role: str
+    replaces: str
+    files: tuple[DescriptorFile, ...]
+    note: str = ""
+
+    def covers(self, path: str) -> bool:
+        """Return whether ``path`` is one of the default files this set replaces."""
+        if self.replaces.endswith("/"):
+            return path.startswith(self.replaces)
+        return path == self.replaces
 
 
 @dataclass(frozen=True)
@@ -157,6 +181,7 @@ class Descriptor:
     build: BuildInfo
     mirror_policy: str = "race"
     file_groups: tuple[FileGroup, ...] = ()
+    fallbacks: tuple[FallbackSet, ...] = ()
 
     def policy_for(self, path: str) -> str:
         """Return the mirror policy for one file.
@@ -273,6 +298,7 @@ def parse_descriptor(payload: object) -> Descriptor:
         flags=_flags(row.get("flags")),
         on_demand=_bool(row.get("on_demand"), "on_demand"),
         build=_build(row.get("build")),
+        fallbacks=_fallbacks(row.get("prebuilt"), {item.path for item in files}),
     )
 
 
@@ -392,6 +418,39 @@ def _file_groups(value: object, paths: set[str]) -> tuple[FileGroup, ...]:
     return tuple(groups)
 
 
+def _fallbacks(value: object, paths: set[str]) -> tuple[FallbackSet, ...]:
+    if value is None:
+        return ()
+    found: list[FallbackSet] = []
+    seen: set[str] = set()
+    for row in _list(value, "prebuilt", minimum=0):
+        if not isinstance(row, dict) or not {"id", "role", "replaces", "files"} <= set(row) <= {
+            "id",
+            "role",
+            "replaces",
+            "files",
+            "note",
+        }:
+            raise DescriptorError("prebuilt entries need id, role, replaces, and files")
+        set_id = _ident(row.get("id"), "prebuilt.id")
+        if set_id in seen:
+            raise DescriptorError(f"duplicate prebuilt id {set_id}")
+        seen.add(set_id)
+        role = _text(row.get("role"), "prebuilt.role")
+        replaces = row.get("replaces")
+        if not isinstance(replaces, str) or not replaces or _PATH.fullmatch(replaces) is None:
+            raise DescriptorError(f"prebuilt.replaces is not allowed: {replaces!r}")
+        note = row.get("note", "")
+        if not isinstance(note, str):
+            raise DescriptorError("prebuilt.note must be a string")
+        files = _files(row.get("files"))
+        group = FallbackSet(set_id, role, replaces, files, note)
+        if not any(group.covers(path) for path in paths):
+            raise DescriptorError(f"prebuilt {set_id} replaces no default file")
+        found.append(group)
+    return tuple(found)
+
+
 def _named_policy(value: object, label: str) -> str:
     if value not in _POLICIES:
         raise DescriptorError(f"{label} must be race or strict-priority")
@@ -402,8 +461,12 @@ def _mirrors(value: object, label: str = "mirrors") -> tuple[MirrorRef, ...]:
     rows = _list(value, label, minimum=1)
     mirrors: list[MirrorRef] = []
     for row in rows:
-        if not isinstance(row, dict) or set(row) != {"kind", "ref", "revision"}:
+        keys = set(row) if isinstance(row, dict) else set()
+        if not isinstance(row, dict) or not {"kind", "ref", "revision"} <= keys <= _MIRROR_KEYS:
             raise DescriptorError(f"{label} entries need kind, ref, and revision")
+        ours = row.get("ours", False)
+        if not isinstance(ours, bool):
+            raise DescriptorError(f"{label} ours must be a boolean")
         kind = row.get("kind")
         if kind not in _KINDS:
             raise DescriptorError(f"unknown mirror kind {kind!r}")
@@ -413,7 +476,7 @@ def _mirrors(value: object, label: str = "mirrors") -> tuple[MirrorRef, ...]:
             raise DescriptorError("mirror ref is required")
         if not isinstance(revision, str):
             raise DescriptorError("mirror revision must be a string")
-        mirrors.append(MirrorRef(str(kind), ref, revision))
+        mirrors.append(MirrorRef(str(kind), ref, revision, ours))
     return tuple(mirrors)
 
 
