@@ -24,7 +24,7 @@ from pathlib import Path
 
 from voxprint_common.hashing import HASH_RE, sha256_bytes
 from voxprint_common.mdl.ed25519 import public_key, sign, verify
-from voxprint_common.mdl.safety import UnsafeUrl, UrlGuard
+from voxprint_common.mdl.safety import UnsafeUrl, UrlGuard, proxied
 
 __all__ = [
     "INDEX_REPO",
@@ -454,7 +454,7 @@ def _missing(exc: BaseException) -> bool:
 
 
 def _fetch(url: str, opener: object | None, guard: UrlGuard) -> bytes:
-    checked = guard.check(url)
+    checked = guard.check(url, via_proxy=opener is None and proxied(url))
     request = urllib.request.Request(checked, method="GET", headers={"User-Agent": "voxprint-mdl"})
     open_url = opener or urllib.request.urlopen
     try:

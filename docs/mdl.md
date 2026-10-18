@@ -114,7 +114,11 @@ A side virtualenv uses `runtime-py<major><minor>-<stack>-cu<version>`, from `run
 
 A model may set `status` to `unavailable` with a `reason` such as `model_in_preparation`. It is shown in the progress list, left out of the byte total, and never downloaded. Asking for that id by name is an error. `voxprint-app-models/1` can list the same fact under `unavailable`.
 
-Hugging Face mirrors need a revision. `main` is accepted when the manifest says it. An empty or missing revision is refused. Downloads are HTTPS and stay on the host allowlist (`huggingface.co`, `hf.co`, `kaggle.com`, `modelscope.cn`, `drive.google.com`, `docs.google.com`, `googleusercontent.com`, `github.com`, `githubusercontent.com`), including redirects. Private, loopback, and link-local addresses are refused. Tests opt in with `UrlGuard.loopback()` or `VOXPRINT_MDL_TEST_GUARD=loopback`.
+Hugging Face mirrors need a revision. `main` is accepted when the manifest says it. An empty or missing revision is refused. Downloads are HTTPS and stay on the host allowlist (`huggingface.co`, `hf.co`, `kaggle.com`, `modelscope.cn`, `drive.google.com`, `docs.google.com`, `googleusercontent.com`, `github.com`, `githubusercontent.com`), including redirects. Private, loopback, and link-local addresses are refused, with two exceptions for an allowlisted HTTPS host: an answer in `198.18.0.0/15` (DNS that hands out placeholder addresses for a local tunnel), and any answer when the request goes through a proxy from the environment or the Windows settings, because the proxy opens the connection. TLS verification stays on, so the certificate must match the host name. Plain HTTP to such an address is refused.
+
+Each mirror is reached over a `direct` route (no proxy) or a `system` route (the configured proxy). The probe tries both when a proxy applies, keeps the faster working one for that host, and the transfer moves to the other route after a connection error or stall before the mirror counts as failed. `VOXPRINT_MDL_ROUTE=direct` or `system` forces one route; the default is `auto`.
+
+Tests opt in with `UrlGuard.loopback()` or `VOXPRINT_MDL_TEST_GUARD=loopback`.
 
 An entry whose only URL is a gated upstream (`pyannote/speaker-diarization-community-1`, `pyannote/embedding`) is rejected. The public copies are `Mitroshenkov87/voxprint-pyannote-speaker-diarization-community-1` and `Mitroshenkov87/voxprint-pyannote-embedding`, with the same dataset names under the Kaggle owner `mitroshenkov87`. `public_mirror_urls` builds those URLs and does not read `HF_TOKEN`.
 

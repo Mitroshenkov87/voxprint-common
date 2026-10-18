@@ -7,18 +7,27 @@ next batch switches back to it. Hugging Face URLs use ``hf_xet`` when the
 package is installed, ``HF_HUB_DISABLE_XET`` is not set, and the response
 carries ``X-Xet-Hash``. Any other mirror, or a missing package, uses HTTP
 Range.
+
+Each mirror can be reached over two routes: ``direct`` (no proxy) and
+``system`` (proxies from the environment and, on Windows, the registry). The
+probe tries both, keeps the faster working one for that host, and the
+transfer switches to the other route after a connection error or stall
+before the mirror counts as failed. ``VOXPRINT_MDL_ROUTE`` set to ``direct``
+or ``system`` forces one route. The default is ``auto``.
 """
 
 from __future__ import annotations
 
+import functools
 import os
 import re
+import ssl
 import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -26,7 +35,7 @@ from voxprint_common import __version__
 from voxprint_common.atomic import replace
 from voxprint_common.hashing import HASH_RE, HashMismatch, verify
 from voxprint_common.mdl.events import TransferCancelled, TransferSession
-from voxprint_common.mdl.safety import UnsafeUrl, UrlGuard
+from voxprint_common.mdl.safety import UnsafeUrl, UrlGuard, proxied
 from voxprint_common.mdl.segments import (
     SEGMENT_MIN_BYTES,
     SPEED_FLOOR_BPS,
@@ -38,6 +47,7 @@ from voxprint_common.mdl.segments import (
 
 __all__ = [
     "PROBE_HEADER",
+    "ROUTE_ENV",
     "Cancelled",
     "FetchError",
     "FetchProgress",
@@ -49,6 +59,8 @@ PROBE_HEADER = "X-Voxprint-Probe"
 _USER_AGENT = f"voxprint-mdl/{__version__}"
 _CHUNK = 256 * 1024
 _HF_HOSTS = {"huggingface.co", "hf.co"}
+ROUTE_ENV = "VOXPRINT_MDL_ROUTE"
+_ROUTES = ("direct", "system")
 
 Opener = Callable[..., object]
 ProgressFn = Callable[["FetchProgress"], None]
@@ -93,6 +105,13 @@ class _Mirror:
     poisoned: bool = False
     batch_bytes: int = 0
     batch_seconds: float = 0.0
+    routes: tuple[str, ...] = ("direct",)
+    route: str | None = None
+    failed_routes: set[str] = field(default_factory=set)
+
+    def opener(self, openers: Mapping[str, Opener]) -> Opener:
+        """Return the opener for the current route, or the first allowed one."""
+        return openers[self.route or self.routes[0]]
 
 
 @dataclass
@@ -105,6 +124,7 @@ class _Offer:
 class _Pull:
     mirrors: list[_Mirror] = field(default_factory=list)
     failures: list[str] = field(default_factory=list)
+    hosts: dict[str, str] = field(default_factory=dict)
 
 
 def fetch_file(
@@ -135,6 +155,7 @@ def fetch_file(
     budget: ConnectionBudget | None = None,
     speed_floor: float = SPEED_FLOOR_BPS,
     mirror_policy: str = "race",
+    routes: Mapping[str, Opener] | None = None,
 ) -> Path:
     """Download ``destination`` from the fastest mirror whose bytes match ``sha256``.
 
@@ -180,6 +201,9 @@ def fetch_file(
             until it returns 404, the hash does not match, or that source is
             unavailable after its own retries. A 404 skips the source
             immediately in both policies.
+        routes: ``{"direct": opener, "system": opener}``. Replaces the default
+            route openers; ``opener`` is used as the only route when this is
+            omitted.
 
     Returns:
         ``destination`` after the digest has been checked.
@@ -202,10 +226,16 @@ def fetch_file(
     if mirror_policy not in {"race", "strict-priority"}:
         raise FetchError("mirror_policy must be race or strict-priority")
     policy = guard if guard is not None else UrlGuard()
-    try:
-        checked = [policy.check(url) for url in urls]
-    except UnsafeUrl as exc:
-        raise FetchError(str(exc)) from exc
+    if routes is not None:
+        openers, names, collapse = dict(routes), tuple(routes), False
+    elif opener is not None:
+        openers, names, collapse = {"direct": opener}, ("direct",), False
+    else:
+        names = _route_names()
+        openers = {name: _route_opener(policy, name) for name in names}
+        collapse = True
+    allowed = [(url.strip(), _allowed_routes(url, names, policy, collapse)) for url in urls]
+    checked = [url for url, _ in allowed]
     if not checked:
         raise FetchError("at least one mirror URL is required")
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -217,7 +247,6 @@ def fetch_file(
         else:
             _notify(progress, _host(checked[0]), size, size, 0.0)
             return destination
-    open_url = opener or _guarded_opener(policy)
     now = clock or time.monotonic
     pause = sleep or time.sleep
     partial = destination.with_name(destination.name + ".partial")
@@ -225,7 +254,7 @@ def fetch_file(
     if have > size:
         partial.unlink()
         have = 0
-    state = _Pull([_Mirror(url) for url in checked])
+    state = _Pull([_Mirror(url, routes=found) for url, found in allowed])
     current: _Mirror | None = None
     xet_tried: set[str] = set()
     while True:
@@ -253,7 +282,7 @@ def fetch_file(
                     have,
                     size,
                     probe_bytes,
-                    open_url,
+                    openers,
                     timeout,
                     chunk_size,
                     now,
@@ -267,6 +296,7 @@ def fetch_file(
                 if chosen is None:
                     continue
             strict = mirror_policy == "strict-priority"
+            open_url = chosen.opener(openers)
             if (
                 use_xet
                 and have == 0
@@ -330,6 +360,10 @@ def fetch_file(
                 )
             except (SegmentFailed, _SourceFailed) as exc:
                 have = _partial_size(partial)
+                if _switch_route(chosen, exc, state.failures):
+                    continue
+                chosen.route = None
+                chosen.failed_routes.clear()
                 _note_failure(
                     chosen,
                     exc,
@@ -348,6 +382,7 @@ def fetch_file(
                 chosen.bps = chosen.batch_bytes / chosen.batch_seconds
             chosen.failures = 0
             chosen.down_until = 0.0
+            chosen.failed_routes.clear()
             current = chosen
             for other in state.mirrors:
                 if other is not chosen and not other.poisoned:
@@ -392,7 +427,7 @@ def _measure(
     have: int,
     size: int,
     probe_bytes: int,
-    opener: Opener,
+    openers: Mapping[str, Opener],
     timeout: float,
     chunk_size: int,
     clock: Clock,
@@ -406,16 +441,115 @@ def _measure(
         if mirror.bps is not None:
             continue
         _raise_if_cancelled(cancel)
+        host = _host(mirror.url)
+        if mirror.route is None and state.hosts.get(host) in mirror.routes:
+            mirror.route = state.hosts[host]
         try:
-            mirror.bps = _probe(
-                mirror.url, have, size, probe_bytes, opener, timeout, chunk_size, clock
+            mirror.bps = _probe_routes(
+                mirror, have, size, probe_bytes, openers, timeout, chunk_size, clock
             )
+            state.hosts[host] = mirror.route or mirror.routes[0]
         except _SourceFailed as exc:
+            mirror.route = None
             state.failures.append(f"{mirror.url}: {exc}")
             if exc.status == 404:
                 _drop(mirror)
             else:
                 _mark_down(mirror, clock(), backoff_base, backoff_max, max_failures)
+
+
+def _probe_routes(
+    mirror: _Mirror,
+    have: int,
+    size: int,
+    probe_bytes: int,
+    openers: Mapping[str, Opener],
+    timeout: float,
+    chunk_size: int,
+    clock: Clock,
+) -> float:
+    """Probe ``mirror`` and keep the faster working route.
+
+    A known route is tried first and kept when it works. Otherwise every
+    allowed route is measured. An HTTP status is the server's answer, so it
+    is raised at once; a connection error moves on to the next route.
+    """
+    known = mirror.route
+    order = [known] if known else []
+    order += [name for name in mirror.routes if name != known]
+    best: tuple[str, float] | None = None
+    last: _SourceFailed | None = None
+    for name in order:
+        try:
+            bps = _probe(
+                mirror.url, have, size, probe_bytes, openers[name], timeout, chunk_size, clock
+            )
+        except _SourceFailed as exc:
+            if exc.status is not None:
+                raise
+            last = exc
+            continue
+        if best is None or bps > best[1]:
+            best = (name, bps)
+        if known:
+            break
+    if best is None:
+        raise last or _SourceFailed("no route")
+    mirror.route = best[0]
+    return best[1]
+
+
+def _switch_route(mirror: _Mirror, exc: BaseException, failures: list[str]) -> bool:
+    """Move ``mirror`` to its other route after a connection error or stall.
+
+    Returns:
+        True when another route is left to try.
+    """
+    if getattr(exc, "status", None) is not None:
+        return False
+    current = mirror.route or mirror.routes[0]
+    mirror.failed_routes.add(current)
+    left = [name for name in mirror.routes if name not in mirror.failed_routes]
+    if not left:
+        return False
+    failures.append(f"{mirror.url} via {current}: {exc}")
+    mirror.route = left[0]
+    return True
+
+
+def _route_names() -> tuple[str, ...]:
+    forced = os.environ.get(ROUTE_ENV, "").strip().lower()
+    if forced in _ROUTES:
+        return (forced,)
+    return _ROUTES
+
+
+def _allowed_routes(
+    url: str, names: Sequence[str], guard: UrlGuard, collapse: bool
+) -> tuple[str, ...]:
+    """Return the routes on which the guard accepts ``url``.
+
+    With ``collapse``, ``system`` is dropped when no proxy applies to ``url``,
+    because it would be the same connection as ``direct``.
+
+    Raises:
+        FetchError: No route is accepted.
+    """
+    found: list[str] = []
+    error: UnsafeUrl | None = None
+    for name in names:
+        via = name == "system" and proxied(url)
+        if collapse and name == "system" and not via and "direct" in names:
+            continue
+        try:
+            guard.check(url, via_proxy=via)
+        except UnsafeUrl as exc:
+            error = error or exc
+            continue
+        found.append(name)
+    if not found:
+        raise FetchError(str(error or "no download route"))
+    return tuple(found)
 
 
 def _probe(
@@ -794,9 +928,9 @@ def _checkpoint(control: TransferSession | None) -> None:
         raise Cancelled("cancelled") from exc
 
 
-def _guarded_opener(guard: UrlGuard) -> Opener:
+def _route_opener(guard: UrlGuard, route: str) -> Opener:
     def open_url(request: urllib.request.Request, timeout: float) -> object:
-        return _urlopen(request, timeout, guard)
+        return _urlopen(request, timeout, guard, route)
 
     return open_url
 
@@ -849,26 +983,42 @@ def _header(headers: object, name: str) -> str | None:
     return str(value).strip()
 
 
-def _urlopen(request: urllib.request.Request, timeout: float, guard: UrlGuard) -> object:
+@functools.cache
+def _tls() -> ssl.SSLContext:
+    """Return a verifying TLS context: CA check and host name match stay on."""
+    return ssl.create_default_context()
+
+
+def _urlopen(
+    request: urllib.request.Request, timeout: float, guard: UrlGuard, route: str = "system"
+) -> object:
     try:
-        guard.check(request.full_url)
+        guard.check(request.full_url, via_proxy=route == "system" and proxied(request.full_url))
     except UnsafeUrl as exc:
         raise FetchError(str(exc)) from exc
-    opener = urllib.request.build_opener(_GuardedRedirect(guard))
+    handlers: list[urllib.request.BaseHandler] = [
+        _GuardedRedirect(guard, route),
+        urllib.request.HTTPSHandler(context=_tls()),
+    ]
+    if route == "direct":
+        handlers.append(urllib.request.ProxyHandler({}))
+    opener = urllib.request.build_opener(*handlers)
     return opener.open(request, timeout=timeout)
 
 
 class _GuardedRedirect(urllib.request.HTTPRedirectHandler):
     """Follow a redirect only when the target stays on the allowlist."""
 
-    def __init__(self, guard: UrlGuard) -> None:
+    def __init__(self, guard: UrlGuard, route: str = "system") -> None:
         """Remember the rules applied to ``newurl``.
 
         Args:
             guard: The same guard that accepted the original URL.
+            route: ``direct`` or ``system``. Only ``system`` can be proxied.
         """
         super().__init__()
         self._guard = guard
+        self._route = route
 
     def redirect_request(
         self,
@@ -881,7 +1031,7 @@ class _GuardedRedirect(urllib.request.HTTPRedirectHandler):
     ) -> urllib.request.Request | None:
         """Reject a redirect that leaves the allowlist or uses a private address."""
         try:
-            self._guard.check(newurl)
+            self._guard.check(newurl, via_proxy=self._route == "system" and proxied(newurl))
         except UnsafeUrl as exc:
             raise FetchError(str(exc)) from exc
         return super().redirect_request(req, fp, code, msg, headers, newurl)
