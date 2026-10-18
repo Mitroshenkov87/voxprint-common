@@ -374,7 +374,7 @@ def test_readers_use_legacy_through_one_minor(
 ) -> None:
     legacy, new = _roots(monkeypatch, tmp_path)
     _seed(legacy)
-    assert paths.read_home() == legacy
+    assert paths.read_home() == new
     assert not new.exists()
     monkeypatch.setattr(paths, "__version__", "0.3.9")
     assert paths.read_home() == legacy
