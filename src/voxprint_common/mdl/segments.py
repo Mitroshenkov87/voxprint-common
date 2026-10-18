@@ -47,15 +47,17 @@ class RangeIgnored(Exception):
 class SegmentFailed(Exception):
     """One segment failed, or the mirror is under the speed floor."""
 
-    def __init__(self, message: str, *, slow: bool = False) -> None:
+    def __init__(self, message: str, *, slow: bool = False, status: int | None = None) -> None:
         """Record whether the caller should switch mirrors.
 
         Args:
             message: Short failure text.
             slow: True when throughput is at or under the floor.
+            status: HTTP status, or None when the failure was not an HTTP response.
         """
         super().__init__(message)
         self.slow = slow
+        self.status = status
 
 
 class ConnectionBudget:
@@ -256,7 +258,7 @@ def _fetch_part(
             if status == 200:
                 raise RangeIgnored(url)
             if status != 206:
-                raise SegmentFailed(f"HTTP {status}")
+                raise SegmentFailed(f"HTTP {status}", status=status)
             with part.open("ab" if have else "wb") as handle:
                 while written < need - have:
                     if cancelled():

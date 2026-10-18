@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "voxprint-common"
-version = "0.2.5"
+version = "0.2.6"
 description = "Shared Python library for the Voxprint AI Media Suite."
 readme = "README.md"
 requires-python = ">=3.14"
@@ -20,7 +20,7 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
     "Typing :: Typed",
 ]
-dependencies = ["jeepney>=0.8"]
+dependencies = ["cryptography>=44", "jeepney>=0.8"]
 
 [project.optional-dependencies]
 ui = ["PySide6>=6.8"]
@@ -60,6 +60,8 @@ packages = ["src/voxprint_common"]
 "src/voxprint_common/ui/presets/tool.json" = "voxprint_common/ui/presets/tool.json"
 "src/voxprint_common/mdl/schemas/voxprint-model.schema.json" = "voxprint_common/mdl/schemas/voxprint-model.schema.json"
 "src/voxprint_common/mdl/data/model-index.json" = "voxprint_common/mdl/data/model-index.json"
+"src/voxprint_common/mdl/data/model-index.pin.json" = "voxprint_common/mdl/data/model-index.pin.json"
+"src/voxprint_common/mdl/data/index-public.pem" = "voxprint_common/mdl/data/index-public.pem"
 "src/voxprint_common/mdl/data/examples/pyannote-embedding.json" = "voxprint_common/mdl/data/examples/pyannote-embedding.json"
 "src/voxprint_common/mdl/data/examples/pyannote-speaker-diarization-community-1.json" = "voxprint_common/mdl/data/examples/pyannote-speaker-diarization-community-1.json"
 "src/voxprint_common/ui/locales/en.json" = "voxprint_common/ui/locales/en.json"

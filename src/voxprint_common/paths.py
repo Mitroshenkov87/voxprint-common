@@ -183,7 +183,7 @@ def projects_dir() -> Path:
 def cache_dir() -> Path:
     """Return ``<home>/cache``, the suite cache root.
 
-    The TensorRT cache is :func:`trt_cache_dir` and does not follow this path.
+    The TensorRT cache is :func:`trt_cache_dir`, ``<home>/trt-cache``.
     """
     return home() / "cache"
 
@@ -209,23 +209,18 @@ def manifest_file() -> Path:
 
 
 def trt_cache_dir() -> Path:
-    """Return the TensorRT engine cache root.
+    """Return the TensorRT engine cache root, ``<home>/trt-cache``.
 
-    ``VOXPRINT_TRT_CACHE`` wins. Otherwise the cache is
-    ``%LOCALAPPDATA%\\Voxprint\\trt-cache`` on Windows and
-    ``$XDG_CACHE_HOME/voxprint/trt-cache`` elsewhere (``~/.cache/voxprint/trt-cache``
-    when that variable is unset). Engines are rebuilt from ONNX, so this cache
-    is not refcounted and does not follow ``VOXPRINT_HOME``.
+    ``VOXPRINT_TRT_CACHE`` wins. Otherwise the cache lives under :func:`home`,
+    so it never recreates the old ``%LOCALAPPDATA%\\Voxprint`` folder. On
+    Windows the old ``Voxprint\\trt-cache`` moves with the home migration to
+    this same path. Elsewhere the old ``~/.cache/voxprint/trt-cache`` is left
+    alone and engines are rebuilt from ONNX. The cache is not refcounted.
     """
     env = os.environ.get("VOXPRINT_TRT_CACHE", "").strip()
     if env:
         return Path(env)
-    if _windows():
-        local = os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))
-        return Path(local) / "Voxprint" / "trt-cache"
-    xdg = os.environ.get("XDG_CACHE_HOME", "").strip()
-    base = Path(xdg) if xdg and os.path.isabs(xdg) else Path.home() / ".cache"
-    return base / "voxprint" / "trt-cache"
+    return home() / "trt-cache"
 
 
 def models_dir() -> Path:

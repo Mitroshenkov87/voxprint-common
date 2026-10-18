@@ -32,17 +32,21 @@ from typing import assert_never
 from voxprint_common.download import DownloadError, huggingface_url, modelscope_url
 from voxprint_common.gpu_probe import VramTier
 from voxprint_common.hashing import HASH_RE
+from voxprint_common.licence import is_allowed
 from voxprint_common.mdl.descriptor import (
     APP_SCHEMA,
     AppModels,
     Descriptor,
     DescriptorError,
+    DescriptorFile,
+    MirrorRef,
     PostInstall,
     parse_app_manifest,
     parse_post_install,
 )
 from voxprint_common.mdl.hooks import HookPlan
 from voxprint_common.mdl.names import DISPLAY_NAME
+from voxprint_common.mdl.variants import chosen_variants
 from voxprint_common.paths import models_dir, state_dir
 
 __all__ = [
@@ -169,6 +173,22 @@ class ModelFile:
     size: int
     sha256: str
     urls: tuple[str, ...]
+    mirror_policy: str = "race"
+
+
+@dataclass(frozen=True)
+class FallbackVariant:
+    """Files that replace some default files when the fallback is used."""
+
+    id: str
+    replaces: str
+    files: tuple[ModelFile, ...]
+
+    def covers(self, path: str) -> bool:
+        """Return whether default file ``path`` is replaced by this variant."""
+        if self.replaces.endswith("/"):
+            return path.startswith(self.replaces)
+        return path == self.replaces
 
 
 @dataclass(frozen=True)
@@ -188,6 +208,7 @@ class Model:
     unavailable: bool = False
     reason: str = ""
     post_install: PostInstall | None = None
+    fallbacks: tuple[FallbackVariant, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -219,6 +240,9 @@ class PlannedFile:
     display_name: str = ""
     model_id: str = ""
     hooks: tuple[HookPlan, ...] = ()
+    mirror_policy: str = "race"
+    fallback_key: str = ""
+    fallback_files: tuple[PlannedFile, ...] = ()
 
     @property
     def label(self) -> str:
@@ -355,6 +379,7 @@ def plan_files(
     memory_gib: float | None = None,
     compute: tuple[int, int] | None = None,
     descriptors: Mapping[str, Descriptor] | None = None,
+    variants: Mapping[str, str] | None = None,
 ) -> list[PlannedFile]:
     """Select the variants that fit ``tier`` and deduplicate them by digest.
 
@@ -375,6 +400,9 @@ def plan_files(
             capability is not checked.
         descriptors: Model documents for app manifests that were loaded
             without them.
+        variants: ``{model id: fallback id}`` to use instead of the default
+            files. Added to the choices saved by
+            :func:`voxprint_common.mdl.variants.choose_variant`.
 
     Raises:
         CatalogError: The same digest is declared with two sizes, a model
@@ -385,6 +413,7 @@ def plan_files(
     remembered = memory_gib if memory_gib is not None else _tier_gib(tier)
     buckets: dict[str, PlannedFile] = {}
     order: list[str] = []
+    chosen = {**chosen_variants(), **dict(variants or {})}
     for manifest in manifests:
         prepared = _with_descriptors(manifest, descriptors)
         for model in _chosen(prepared, cap, tier, only):
@@ -395,7 +424,21 @@ def plan_files(
                     raise
                 continue
             label = model.display_name or model.id
-            for item in model.files:
+            variant = next((v for v in model.fallbacks if v.id == chosen.get(model.id)), None)
+            chosen_files = model.files
+            if variant is not None:
+                kept = tuple(f for f in model.files if not variant.covers(f.path))
+                chosen_files = (*kept, *variant.files)
+            spare = None if variant is not None else next(iter(model.fallbacks), None)
+            spare_plans = (
+                tuple(
+                    _planned(f, root, prepared.app, model, label, _hook_plans(prepared, model))
+                    for f in spare.files
+                )
+                if spare is not None
+                else ()
+            )
+            for item in chosen_files:
                 current = buckets.get(item.sha256)
                 if current is None:
                     planned = PlannedFile(
@@ -412,7 +455,11 @@ def plan_files(
                         display_name=label,
                         model_id=model.id,
                         hooks=_hook_plans(prepared, model),
+                        mirror_policy=item.mirror_policy,
                     )
+                    if spare is not None and spare.covers(item.path):
+                        planned.fallback_key = f"{model.id}:{spare.id}"
+                        planned.fallback_files = spare_plans
                     buckets[item.sha256] = planned
                     order.append(item.sha256)
                     continue
@@ -436,7 +483,35 @@ def plan_files(
                     if url not in merged:
                         merged.append(url)
                 current.urls = tuple(merged)
+                if "strict-priority" in {current.mirror_policy, item.mirror_policy}:
+                    current.mirror_policy = "strict-priority"
     return [buckets[key] for key in order]
+
+
+def _planned(
+    item: ModelFile,
+    root: Path,
+    app: str,
+    model: Model,
+    label: str,
+    hooks: tuple[HookPlan, ...],
+) -> PlannedFile:
+    return PlannedFile(
+        component_id=f"model-{item.sha256[:MODEL_PREFIX]}",
+        sha256=item.sha256,
+        size=item.size,
+        version=item.sha256,
+        name=item.path,
+        destination=root / "blobs" / item.sha256,
+        urls=item.urls,
+        apps=[app],
+        model_ids=[model.id],
+        tier=model.tier.value,
+        display_name=label,
+        model_id=model.id,
+        hooks=hooks,
+        mirror_policy=item.mirror_policy,
+    )
 
 
 def require_space(
@@ -754,6 +829,7 @@ def _model_from_descriptor(descriptor: Descriptor, tier: ModelTier, *, optional:
             item.size,
             item.sha256,
             _descriptor_urls(descriptor, item.path),
+            descriptor.policy_for(item.path),
         )
         for item in descriptor.files
     )
@@ -767,18 +843,84 @@ def _model_from_descriptor(descriptor: Descriptor, tier: ModelTier, *, optional:
         min_vram_gib=descriptor.tier.min_vram_gib,
         display_name=descriptor.display_name,
         gpu_min_cc=descriptor.tier.gpu_min_cc,
+        fallbacks=tuple(
+            FallbackVariant(
+                group.id,
+                group.replaces,
+                tuple(
+                    ModelFile(
+                        item.path,
+                        item.size,
+                        item.sha256,
+                        _fallback_urls(descriptor, item),
+                        item.mirror_policy or descriptor.mirror_policy,
+                    )
+                    for item in group.files
+                ),
+            )
+            for group in descriptor.fallbacks
+            if group.role == "fallback"
+        ),
     )
 
 
+def _fallback_urls(descriptor: Descriptor, item: DescriptorFile) -> tuple[str, ...]:
+    mirrors = item.sources or descriptor.mirrors
+    _check_licence_split(descriptor, mirrors)
+    urls = tuple(
+        _descriptor_mirror(ref.kind, ref.ref, ref.revision, item.path, len(descriptor.files))
+        for ref in mirrors
+    )
+    _reject_gated(descriptor.id, urls)
+    return urls
+
+
 def _descriptor_urls(descriptor: Descriptor, filename: str) -> tuple[str, ...]:
+    mirrors = descriptor.mirrors_for(filename)
+    _check_licence_split(descriptor, mirrors)
     urls = tuple(
         _descriptor_mirror(
             mirror.kind, mirror.ref, mirror.revision, filename, len(descriptor.files)
         )
-        for mirror in descriptor.mirrors
+        for mirror in mirrors
     )
     _reject_gated(descriptor.id, urls)
     return urls
+
+
+def _check_licence_split(descriptor: Descriptor, mirrors: tuple[MirrorRef, ...]) -> None:
+    """Keep a restrictive licence on the author's own source.
+
+    Args:
+        descriptor: The model document.
+        mirrors: Sources that would be used for one file.
+
+    Raises:
+        CatalogError: The model is not an optional plug-in, or it lists a
+            suite mirror or more than one source.
+    """
+    if is_allowed(descriptor.license):
+        return
+    if not descriptor.on_demand:
+        raise CatalogError(
+            f"model {descriptor.id} has a restrictive licence and must be an optional plug-in"
+        )
+    if len(mirrors) != 1 or _suite_ref(mirrors[0]):
+        raise CatalogError(
+            f"model {descriptor.id} has a restrictive licence; "
+            "use the official source only, with no mirror"
+        )
+
+
+def _suite_ref(mirror: MirrorRef) -> bool:
+    """Return whether ``mirror`` is a suite copy rather than the author's repo."""
+    ref = mirror.ref.strip()
+    if mirror.kind == "hf":
+        return ref.lower().startswith("mitroshenkov87/")
+    if mirror.kind == "kaggle":
+        owner, _slash, _rest = ref.partition("/")
+        return owner.lower() == "mitroshenkov87"
+    return False
 
 
 def _descriptor_mirror(kind: str, ref: str, revision: str, filename: str, count: int) -> str:
@@ -1009,13 +1151,20 @@ def _model(value: object) -> Model:
     if status == "unavailable" and not reason.strip():
         raise CatalogError(f"model {model_id} needs a reason when it is unavailable")
     hook = _optional_hook(value.get("post_install"), model_id)
+    model_policy = "race"
+    if "mirror_policy" in value:
+        model_policy = _mirror_policy(value.get("mirror_policy"), f"model {model_id} mirror_policy")
+    groups = _mdl_groups(model_id, value.get("file_groups"))
     rows = value.get("files", [])
     if status == "unavailable":
         files = ()
     elif not isinstance(rows, list) or not rows:
         raise CatalogError(f"model {model_id} needs at least one file")
     else:
-        files = tuple(_file(model_id, row) for row in rows)
+        files = tuple(_file(model_id, row, model_policy, groups) for row in rows)
+        missing = [path for path in groups if path not in {item.path for item in files}]
+        if missing:
+            raise CatalogError(f"file group path is not a file: {missing[0]!r}")
     if status != "unavailable" and not files:
         raise CatalogError(f"model {model_id} needs at least one file")
     return Model(
@@ -1034,7 +1183,12 @@ def _model(value: object) -> Model:
     )
 
 
-def _file(model_id: str, value: object) -> ModelFile:
+def _file(
+    model_id: str,
+    value: object,
+    model_policy: str = "race",
+    groups: dict[str, _MdlGroup] | None = None,
+) -> ModelFile:
     if not isinstance(value, dict):
         raise CatalogError(f"model {model_id} file must be an object")
     name = _rel(str(value.get("path") or "model.bin"))
@@ -1044,12 +1198,66 @@ def _file(model_id: str, value: object) -> ModelFile:
     digest = str(value.get("sha256") or "").strip().lower()
     if HASH_RE.fullmatch(digest) is None:
         raise CatalogError(f"model {model_id} sha256 must be 64 hexadecimal characters")
-    mirrors = value.get("mirrors")
-    if not isinstance(mirrors, list) or not mirrors:
-        raise CatalogError(f"model {model_id} needs at least one mirror")
-    urls = tuple(_mirror(row) for row in mirrors)
+    group = (groups or {}).get(name)
+    own_policy = ""
+    if "mirror_policy" in value:
+        own_policy = _mirror_policy(value.get("mirror_policy"), f"model {model_id} mirror_policy")
+    if "sources" in value:
+        urls = _mirror_list(model_id, value.get("sources"))
+    elif group is not None and group.sources is not None:
+        urls = group.sources
+    else:
+        urls = _mirror_list(model_id, value.get("mirrors"))
+    inherited = group.policy if group is not None and group.policy else ""
+    policy = own_policy or inherited or model_policy
     _reject_gated(model_id, urls)
-    return ModelFile(name, size, digest, urls)
+    return ModelFile(name, size, digest, urls, policy)
+
+
+def _mirror_list(model_id: str, value: object) -> tuple[str, ...]:
+    if not isinstance(value, list) or not value:
+        raise CatalogError(f"model {model_id} needs at least one mirror")
+    return tuple(_mirror(row) for row in value)
+
+
+def _mirror_policy(value: object, label: str) -> str:
+    if value not in {"race", "strict-priority"}:
+        raise CatalogError(f"{label} must be race or strict-priority")
+    return str(value)
+
+
+@dataclass(frozen=True)
+class _MdlGroup:
+    """A file group's policy and optional replacement source list."""
+
+    policy: str
+    sources: tuple[str, ...] | None
+
+
+def _mdl_groups(model_id: str, value: object) -> dict[str, _MdlGroup]:
+    if value is None:
+        return {}
+    if not isinstance(value, list):
+        raise CatalogError(f"model {model_id} file_groups must be a list")
+    found: dict[str, _MdlGroup] = {}
+    allowed = {"paths", "mirror_policy", "sources"}
+    for row in value:
+        if not isinstance(row, dict) or not {"paths"} <= set(row) <= allowed:
+            raise CatalogError(f"model {model_id} file group needs paths")
+        paths = row.get("paths")
+        if not isinstance(paths, list) or not paths:
+            raise CatalogError(f"model {model_id} file group needs paths")
+        policy = ""
+        if "mirror_policy" in row:
+            policy = _mirror_policy(row.get("mirror_policy"), f"model {model_id} mirror_policy")
+        sources = _mirror_list(model_id, row.get("sources")) if "sources" in row else None
+        for path in paths:
+            if not isinstance(path, str) or not path:
+                raise CatalogError(f"file group path is not a file: {path!r}")
+            if path in found:
+                raise CatalogError(f"file {path} is in more than one group")
+            found[path] = _MdlGroup(policy, sources)
+    return found
 
 
 def _mirror(value: object) -> str:

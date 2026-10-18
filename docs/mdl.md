@@ -106,6 +106,8 @@ Schema 1. One file per app, named `mdl.json`.
 
 A mirror may also be an `http` or `https` URL string, or `{"source": "url", "url": "https://..."}`. `..` in a file path is rejected.
 
+A model may set `mirror_policy` to `race` or `strict-priority`. A file may set `mirror_policy` and `sources`. `sources` uses the same objects as `mirrors` and replaces them for that file. A model may also set `file_groups`: each group has `paths` and may set `mirror_policy` and `sources`. The file wins, then the group, then the model. A missing policy means `race`. The same fields exist on `voxprint-model/1`.
+
 Files that share a sha256 across apps are stored once, at `<models_dir>/blobs/<sha256>`. Each app is a ref on that runtime-manifest component. The component id is `model-` plus the first 12 hex characters of the file sha256. An older `model-` id that already records that digest is reused. The component version is the full sha256, so a second app reuses the bytes instead of writing over them.
 
 A side virtualenv uses `runtime-py<major><minor>-<stack>-cu<version>`, from `runtime_component_id`. Examples: `runtime-py311-nunchaku-cu130` and `runtime-py314-torch2.11-cu130`.
@@ -114,7 +116,31 @@ A model may set `status` to `unavailable` with a `reason` such as `model_in_prep
 
 Hugging Face mirrors need a revision. `main` is accepted when the manifest says it. An empty or missing revision is refused. Downloads are HTTPS and stay on the host allowlist (`huggingface.co`, `hf.co`, `kaggle.com`, `modelscope.cn`, `drive.google.com`, `docs.google.com`, `googleusercontent.com`, `github.com`, `githubusercontent.com`), including redirects. Private, loopback, and link-local addresses are refused. Tests opt in with `UrlGuard.loopback()` or `VOXPRINT_MDL_TEST_GUARD=loopback`.
 
-An entry whose only URL is a gated upstream (`pyannote/speaker-diarization-community-1`, `pyannote/embedding`) is rejected. The suite copies live at `Mitroshenkov87/voxprint-pyannote-speaker-diarization-community-1` (revision `9c851af7`) and `Mitroshenkov87/voxprint-pyannote-embedding` (revision `4655ca65`), with the same dataset names under the Kaggle owner `mitroshenkov87`. `public_mirror_urls` builds those URLs and does not read `HF_TOKEN`. The bundled index pins the example descriptors in this package until Forge publishes `voxprint-model.json` in the weight repos. A remote index is used only when its sha256 matches that pin.
+An entry whose only URL is a gated upstream (`pyannote/speaker-diarization-community-1`, `pyannote/embedding`) is rejected. The public copies are `Mitroshenkov87/voxprint-pyannote-speaker-diarization-community-1` and `Mitroshenkov87/voxprint-pyannote-embedding`, with the same dataset names under the Kaggle owner `mitroshenkov87`. `public_mirror_urls` builds those URLs and does not read `HF_TOKEN`.
+
+## Model index
+
+The bundled index is the serial 9 snapshot of `Mitroshenkov87/voxprint-model-index` (head `15edeab0f7a874c27d2b38ef6ecb69106ff94df8`, 29 models, sha256 `104742f9d8cc7c8f693f963dbd871471a3e57fda3d585d52b105b3855d49f45f`), signed with Model Forge's key. `model-index.pin.json` records the head, serial `9`, `generated_at` `2026-10-18T04:09:36Z`, and the sha256, which the bundled file must match. A remote index may be the object `{head, serial, generated_at, models}` or a plain list.
+
+A model document may list `prebuilt` alternatives. An entry with `role: "fallback"` and `replaces: "transformer/"` (a folder prefix, or one path) swaps those default files for its own `files` when a default file fails after the normal mirror rules, or when `choose_variant(model_id, fallback_id)` picks it. The choice is saved in `<home>/state/mdl-variants.json`.
+
+A remote `index.json` is used when the detached `index.json.sig` verifies under a public key in `index-public.pem` and the document is at least that pin. `serial`, when present, is the comparison. `generated_at` is used only when `serial` is absent, and it must be a timezone-aware ISO-8601 timestamp. The signed document is an object with `head`, `serial`, `generated_at`, and `models`. A bare list has no freshness and is refused.
+
+A missing signature, a bad signature, a fetch error, or an older index is logged (`using the bundled model index; …`) and the snapshot is used. The download still runs. `voxprint-mdl --check` prints `source`, `head`, `serial`, `generated_at`, `entries`, `sha256`, and `fallback:` with that reason. Exit code 0 means the snapshot is usable.
+
+```bash
+openssl genpkey -algorithm ED25519 -out index-private.pem
+openssl pkey -in index-private.pem -pubout -out index-public.pem
+export VOXPRINT_MDL_INDEX_KEY_FILE=/path/to/index-private.pem
+voxprint-mdl index sign index.json
+voxprint-mdl index verify index.json
+```
+
+`index sign` reads `VOXPRINT_MDL_INDEX_KEY_FILE`, or `VOXPRINT_MDL_INDEX_KEY` (PEM text, raw or base64 seed, or a path to a key file), or `--key-file`. It writes `index.json.sig` beside the file: base64 of the 64-byte signature over the exact file bytes. Publish that file next to `index.json` on the Hugging Face dataset. The private key stays out of this repository.
+
+`index-public.pem` may hold several keys, one PEM block after another. To rotate: add the new public key, ship a release, point CI at the new private key, then ship a later release that drops the old key. A signature that matches none of the bundled keys falls back to the snapshot. The key shipped here has no private half stored in this repo. Model Forge replaces `index-public.pem` with the public key that matches its CI secret before a client will accept a remote index. Until that replacement, every remote index falls back and `--check` says why.
+
+A model whose licence is outside the suite allow-list stays an optional plug-in (`on_demand`) with exactly one source, and that source is the author's. A suite mirror (a Hugging Face ref starting with `mitroshenkov87/`, or the Kaggle owner `mitroshenkov87`) is refused for that model.
 
 A model, or the app, may declare `post_install`:
 
@@ -128,7 +154,15 @@ The worker runs it after the digest check and the atomic rename. `{id}`, `{model
 
 Before the first request, free space must cover the bytes still missing times 1.10, plus 2 GiB. Nothing is fetched when that check fails. The error names VOXPrint MDL and both byte counts. Bytes already in a finished file of the expected size are not counted again.
 
-Transfers use HTTP Range and keep the `.partial` file across a dropped connection. A file larger than 256 MiB is split into 4 to 8 ranges when the server answers 206, with a per-host cap and a shared connection budget. Each part resumes from `.partial.parts`. A server that ignores Range falls back to one stream. Mirrors are timed. A mirror at or under 84 KiB/s is dropped when another mirror is faster, and a mirror that recovers and measures faster is selected again. After the digest matches, the file is renamed into place. A mismatch deletes the partial and tries another mirror.
+Transfers use HTTP Range and keep the `.partial` file across a dropped connection. A file larger than 256 MiB is split into 4 to 8 ranges when the server answers 206, with a per-host cap and a shared connection budget. Each part resumes from `.partial.parts`. A server that ignores Range falls back to one stream. After the digest matches, the file is renamed into place. A mismatch deletes the partial and tries the next source.
+
+`mirror_policy` is `race` or `strict-priority`. It sits on the model and can be overridden on a file or a `file_groups` entry. `sources` on a file or a group replaces the model `mirrors` for those paths, in the listed order. Our own quantizations list only our mirrors there, so the author is left out of that file.
+
+`race` is the default. Mirrors are probed and a mirror is used when its throughput is at least 1.25 times the current one. Equal speed keeps the earlier mirror. A mirror at or under 84 KiB/s is dropped when another mirror is faster. A mirror that recovers and measures faster is selected again.
+
+`strict-priority` stays on the first source. A later source is used when the current one returns 404, the hash does not match, or the source is unavailable: a connection failure or an HTTP 5xx after that source's own retries. Speed leaves the current source in place. Another 4xx, such as 403, stops the download.
+
+In both policies a 404 skips that source immediately, with no retry and no backoff.
 
 Hugging Face URLs use `hf_xet` when that package is installed, `HF_HUB_DISABLE_XET` is unset, and the response offers an xet hash. Otherwise the transfer stays on HTTP Range. Install the package beside the library when you want it: `python -m pip install hf-xet`.
 

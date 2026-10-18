@@ -22,6 +22,8 @@ __all__ = [
     "Descriptor",
     "DescriptorError",
     "DescriptorFile",
+    "FallbackSet",
+    "FileGroup",
     "MirrorRef",
     "OptionalRef",
     "PostInstall",
@@ -45,6 +47,7 @@ _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _SHA = re.compile(r"^[0-9a-f]{64}$")
 _ENGINES = frozenset({"llama.cpp", "diffusers", "nunchaku"})
 _KINDS = frozenset({"hf", "kaggle", "gdrive", "modelscope", "url"})
+_POLICIES = frozenset({"race", "strict-priority"})
 _TIER_KEYS = frozenset({"8gb", "16gb", "24gb"})
 
 _MODEL_KEYS = frozenset(
@@ -66,6 +69,8 @@ _MODEL_KEYS = frozenset(
         "build",
     }
 )
+_MODEL_OPTIONAL = frozenset({"mirror_policy", "file_groups", "prebuilt"})
+_MIRROR_KEYS = frozenset({"kind", "ref", "revision", "ours"})
 
 
 class DescriptorError(ValueError):
@@ -74,11 +79,17 @@ class DescriptorError(ValueError):
 
 @dataclass(frozen=True)
 class DescriptorFile:
-    """One weight file. The path is the same string on every mirror."""
+    """One weight file. The path is the same string on every mirror.
+
+    ``mirror_policy`` and ``sources`` are empty when the file inherits the
+    model, or its file group.
+    """
 
     path: str
     size: int
     sha256: str
+    mirror_policy: str = ""
+    sources: tuple[MirrorRef, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -88,6 +99,40 @@ class MirrorRef:
     kind: str
     ref: str
     revision: str
+    ours: bool = False
+
+
+@dataclass(frozen=True)
+class FallbackSet:
+    """A recorded alternative for some default files, from ``prebuilt``.
+
+    ``replaces`` is a path, or a folder prefix ending in ``/``. Only entries
+    with ``role`` ``fallback`` are used by the downloader.
+    """
+
+    id: str
+    role: str
+    replaces: str
+    files: tuple[DescriptorFile, ...]
+    note: str = ""
+
+    def covers(self, path: str) -> bool:
+        """Return whether ``path`` is one of the default files this set replaces."""
+        if self.replaces.endswith("/"):
+            return path.startswith(self.replaces)
+        return path == self.replaces
+
+
+@dataclass(frozen=True)
+class FileGroup:
+    """Files that share a source list and a mirror policy.
+
+    Empty ``mirror_policy`` and empty ``sources`` inherit from the model.
+    """
+
+    paths: tuple[str, ...]
+    mirror_policy: str = ""
+    sources: tuple[MirrorRef, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -134,6 +179,43 @@ class Descriptor:
     flags: tuple[str, ...]
     on_demand: bool
     build: BuildInfo
+    mirror_policy: str = "race"
+    file_groups: tuple[FileGroup, ...] = ()
+    fallbacks: tuple[FallbackSet, ...] = ()
+
+    def policy_for(self, path: str) -> str:
+        """Return the mirror policy for one file.
+
+        A file override wins, then its file group, then the model. A missing
+        policy is ``race``.
+
+        Args:
+            path: File path inside the repo.
+        """
+        for item in self.files:
+            if item.path == path and item.mirror_policy:
+                return item.mirror_policy
+        for group in self.file_groups:
+            if path in group.paths and group.mirror_policy:
+                return group.mirror_policy
+        return self.mirror_policy or "race"
+
+    def mirrors_for(self, path: str) -> tuple[MirrorRef, ...]:
+        """Return the ordered sources for one file.
+
+        A file ``sources`` list wins, then its file group, then the model
+        mirrors.
+
+        Args:
+            path: File path inside the repo.
+        """
+        for item in self.files:
+            if item.path == path and item.sources:
+                return item.sources
+        for group in self.file_groups:
+            if path in group.paths and group.sources:
+                return group.sources
+        return self.mirrors
 
 
 @dataclass(frozen=True)
@@ -192,10 +274,13 @@ def parse_descriptor(payload: object) -> Descriptor:
     Raises:
         DescriptorError: The document does not match the schema.
     """
-    row = _object(payload, _MODEL_KEYS, "voxprint-model")
+    row = _object(payload, _MODEL_KEYS, "voxprint-model", _MODEL_OPTIONAL)
     if row.get("schema") != MODEL_SCHEMA:
         raise DescriptorError("schema must be voxprint-model/1")
     files = _files(row.get("files"))
+    policy = "race"
+    if "mirror_policy" in row:
+        policy = _named_policy(row.get("mirror_policy"), "mirror_policy")
     return Descriptor(
         id=_ident(row.get("id"), "id"),
         display_name=_text(row.get("display_name"), "display_name"),
@@ -204,6 +289,8 @@ def parse_descriptor(payload: object) -> Descriptor:
         license=_license(row.get("license")),
         files=files,
         mirrors=_mirrors(row.get("mirrors")),
+        mirror_policy=policy,
+        file_groups=_file_groups(row.get("file_groups"), {item.path for item in files}),
         tier=_tier(row.get("tier")),
         runtime=_runtime(row.get("runtime")),
         base_model=_plain(row.get("base_model"), "base_model"),
@@ -211,6 +298,7 @@ def parse_descriptor(payload: object) -> Descriptor:
         flags=_flags(row.get("flags")),
         on_demand=_bool(row.get("on_demand"), "on_demand"),
         build=_build(row.get("build")),
+        fallbacks=_fallbacks(row.get("prebuilt"), {item.path for item in files}),
     )
 
 
@@ -262,15 +350,20 @@ def parse_app_manifest(payload: object) -> AppModels:
     )
 
 
-def _object(value: object, keys: frozenset[str], label: str) -> dict[str, Any]:
+def _object(
+    value: object,
+    keys: frozenset[str],
+    label: str,
+    optional: frozenset[str] = frozenset(),
+) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise DescriptorError(f"{label} must be an object")
     present = set(value)
-    if present != keys:
-        missing = keys - present
-        extra = present - keys
-        if missing:
-            raise DescriptorError(f"{label} missing {', '.join(sorted(missing))}")
+    missing = keys - present
+    extra = present - keys - optional
+    if missing:
+        raise DescriptorError(f"{label} missing {', '.join(sorted(missing))}")
+    if extra:
         raise DescriptorError(f"{label} has unknown fields: {', '.join(sorted(extra))}")
     return value
 
@@ -278,8 +371,9 @@ def _object(value: object, keys: frozenset[str], label: str) -> dict[str, Any]:
 def _files(value: object) -> tuple[DescriptorFile, ...]:
     rows = _list(value, "files", minimum=1)
     files: list[DescriptorFile] = []
+    allowed = {"path", "size", "sha256", "mirror_policy", "sources"}
     for row in rows:
-        if not isinstance(row, dict) or set(row) != {"path", "size", "sha256"}:
+        if not isinstance(row, dict) or not {"path", "size", "sha256"} <= set(row) <= allowed:
             raise DescriptorError("files entries need path, size, and sha256")
         path = row.get("path")
         if not isinstance(path, str) or _PATH.fullmatch(path) is None:
@@ -290,16 +384,89 @@ def _files(value: object) -> tuple[DescriptorFile, ...]:
         digest = row.get("sha256")
         if not isinstance(digest, str) or _SHA.fullmatch(digest) is None:
             raise DescriptorError("file sha256 must be 64 lowercase hex characters")
-        files.append(DescriptorFile(path, size, digest))
+        policy = ""
+        if "mirror_policy" in row:
+            policy = _named_policy(row.get("mirror_policy"), "files.mirror_policy")
+        sources = _mirrors(row.get("sources"), "sources") if "sources" in row else ()
+        files.append(DescriptorFile(path, size, digest, policy, sources))
     return tuple(files)
 
 
-def _mirrors(value: object) -> tuple[MirrorRef, ...]:
-    rows = _list(value, "mirrors", minimum=1)
+def _file_groups(value: object, paths: set[str]) -> tuple[FileGroup, ...]:
+    if value is None:
+        return ()
+    rows = _list(value, "file_groups", minimum=0)
+    seen: set[str] = set()
+    groups: list[FileGroup] = []
+    allowed = {"paths", "mirror_policy", "sources"}
+    for row in rows:
+        if not isinstance(row, dict) or not {"paths"} <= set(row) <= allowed:
+            raise DescriptorError("file_groups entries need paths")
+        names: list[str] = []
+        for item in _list(row.get("paths"), "file_groups.paths", minimum=1):
+            if not isinstance(item, str) or item not in paths:
+                raise DescriptorError(f"file group path is not a file: {item!r}")
+            if item in seen:
+                raise DescriptorError(f"file {item} is in more than one group")
+            seen.add(item)
+            names.append(item)
+        policy = ""
+        if "mirror_policy" in row:
+            policy = _named_policy(row.get("mirror_policy"), "file_groups.mirror_policy")
+        sources = _mirrors(row.get("sources"), "sources") if "sources" in row else ()
+        groups.append(FileGroup(tuple(names), policy, sources))
+    return tuple(groups)
+
+
+def _fallbacks(value: object, paths: set[str]) -> tuple[FallbackSet, ...]:
+    if value is None:
+        return ()
+    found: list[FallbackSet] = []
+    seen: set[str] = set()
+    for row in _list(value, "prebuilt", minimum=0):
+        if not isinstance(row, dict) or not {"id", "role", "replaces", "files"} <= set(row) <= {
+            "id",
+            "role",
+            "replaces",
+            "files",
+            "note",
+        }:
+            raise DescriptorError("prebuilt entries need id, role, replaces, and files")
+        set_id = _ident(row.get("id"), "prebuilt.id")
+        if set_id in seen:
+            raise DescriptorError(f"duplicate prebuilt id {set_id}")
+        seen.add(set_id)
+        role = _text(row.get("role"), "prebuilt.role")
+        replaces = row.get("replaces")
+        if not isinstance(replaces, str) or not replaces or _PATH.fullmatch(replaces) is None:
+            raise DescriptorError(f"prebuilt.replaces is not allowed: {replaces!r}")
+        note = row.get("note", "")
+        if not isinstance(note, str):
+            raise DescriptorError("prebuilt.note must be a string")
+        files = _files(row.get("files"))
+        group = FallbackSet(set_id, role, replaces, files, note)
+        if not any(group.covers(path) for path in paths):
+            raise DescriptorError(f"prebuilt {set_id} replaces no default file")
+        found.append(group)
+    return tuple(found)
+
+
+def _named_policy(value: object, label: str) -> str:
+    if value not in _POLICIES:
+        raise DescriptorError(f"{label} must be race or strict-priority")
+    return str(value)
+
+
+def _mirrors(value: object, label: str = "mirrors") -> tuple[MirrorRef, ...]:
+    rows = _list(value, label, minimum=1)
     mirrors: list[MirrorRef] = []
     for row in rows:
-        if not isinstance(row, dict) or set(row) != {"kind", "ref", "revision"}:
-            raise DescriptorError("mirrors entries need kind, ref, and revision")
+        keys = set(row) if isinstance(row, dict) else set()
+        if not isinstance(row, dict) or not {"kind", "ref", "revision"} <= keys <= _MIRROR_KEYS:
+            raise DescriptorError(f"{label} entries need kind, ref, and revision")
+        ours = row.get("ours", False)
+        if not isinstance(ours, bool):
+            raise DescriptorError(f"{label} ours must be a boolean")
         kind = row.get("kind")
         if kind not in _KINDS:
             raise DescriptorError(f"unknown mirror kind {kind!r}")
@@ -309,7 +476,7 @@ def _mirrors(value: object) -> tuple[MirrorRef, ...]:
             raise DescriptorError("mirror ref is required")
         if not isinstance(revision, str):
             raise DescriptorError("mirror revision must be a string")
-        mirrors.append(MirrorRef(str(kind), ref, revision))
+        mirrors.append(MirrorRef(str(kind), ref, revision, ours))
     return tuple(mirrors)
 
 

@@ -8,6 +8,7 @@ manifest with one ref per app.
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 import urllib.parse
@@ -44,6 +45,7 @@ from voxprint_common.mdl.priority import background_priority
 from voxprint_common.mdl.safety import UrlGuard
 from voxprint_common.mdl.segments import ConnectionBudget, segment_count
 from voxprint_common.mdl.status import JobState, Status, Step, load_status, save_status
+from voxprint_common.mdl.variants import choose_variant
 from voxprint_common.paths import models_dir
 from voxprint_common.power import keep_awake
 from voxprint_common.runtime_manifest import ManifestError, add_ref, load
@@ -63,6 +65,9 @@ class Outcome:
     code: int
     message: str
     status: Status
+
+
+logger = logging.getLogger(__name__)
 
 
 def detect_tier(devices: Sequence[GpuDevice] | None = None) -> VramTier:
@@ -207,15 +212,19 @@ def download(
             if priority:
                 stack.enter_context(background_priority())
             stack.enter_context(keep_awake(DISPLAY_NAME, display=display))
-            _fetch_all(
-                files,
-                status,
-                publisher,
-                options,
-                cancel,
-                session,
-                workers,
-            )
+            try:
+                _fetch_all(files, status, publisher, options, cancel, session, workers)
+            except Cancelled:
+                raise
+            except FetchError, CatalogError, ManifestError, OSError:
+                switched = _use_fallback(files, status)
+                if switched is None:
+                    raise
+                files = switched
+                status = _status_for(files, tier, JobState.DOWNLOADING)
+                publisher = _Publisher(status, on_status, on_progress, session)
+                publisher.push(force=True)
+                _fetch_all(files, status, publisher, options, cancel, session, workers)
             apply_hooks(files)
     except HookError as exc:
         _mark_hook(status, exc)
@@ -279,6 +288,35 @@ def verify(
         return _publish(status, EXIT_FAILED, str(exc), on_status)
     status.error = ""
     return _publish(status, EXIT_OK, _ready_message(status), on_status)
+
+
+def _use_fallback(files: Sequence[PlannedFile], status: Status) -> list[PlannedFile] | None:
+    """Swap failed default files for their recorded fallback, or return None.
+
+    A default file that failed (404, hash mismatch, or a source still
+    unavailable after its retries) and is covered by a ``prebuilt`` fallback
+    switches every file of that set. The choice is saved, so later plans use
+    the fallback too. The fallback files keep the model's mirror policy.
+    """
+    keys = {
+        item.fallback_key
+        for item, step in zip(files, status.steps, strict=False)
+        if step.state == "failed" and item.fallback_key
+    }
+    if not keys:
+        return None
+    kept = [item for item in files if item.fallback_key not in keys]
+    known = {item.sha256 for item in kept}
+    for key in sorted(keys):
+        model_id, _sep, variant_id = key.partition(":")
+        logger.warning("default files for %s failed; using fallback %s", model_id, variant_id)
+        choose_variant(model_id, variant_id)
+        spare = next(item.fallback_files for item in files if item.fallback_key == key)
+        for item in spare:
+            if item.sha256 not in known:
+                kept.append(item)
+                known.add(item.sha256)
+    return kept
 
 
 def _fetch_all(
@@ -347,6 +385,7 @@ def _fetch_all(
             extra = dict(options)
             concurrent = 1 if workers == 1 else min(workers, max(1, len(files)))
             extra.setdefault("segments", segment_count(item.size, concurrent, parallel))
+            extra.setdefault("mirror_policy", item.mirror_policy)
             fetch_file(
                 item.destination,
                 item.urls,

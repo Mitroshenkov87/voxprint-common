@@ -308,8 +308,9 @@ def test_windows_paths_are_injected(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     _seed(legacy, _manifest(legacy))
     assert paths.legacy_home() == legacy
     assert paths.final_home() == new
-    assert paths.trt_cache_dir() == tmp_path / "local" / "Voxprint" / "trt-cache"
     assert paths.home() == new
+    assert paths.trt_cache_dir() == new / "trt-cache"
+    assert paths.trt_cache_dir().is_relative_to(paths.home())
     assert (new / "state" / "suite.json").is_file()
     assert not legacy.exists()
     document = json.loads((new / "shared" / "manifest.json").read_text(encoding="utf-8"))
