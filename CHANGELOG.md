@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.2 - 2026-10-18
+
+`voxprint-mdl download` resolves each model id in a `voxprint-app-models/1` manifest to a `voxprint-model/1` descriptor from the signed index. The index row supplies the repository, revision, and sha256 of `voxprint-model.json`. The file is fetched with the same guarded opener as the index and cached under `<home>/state/mdl-descriptors`. The cached bytes must match that digest.
+
+A tier entry may be a model id, which keeps every file, or an object with `id` and `files` (globs) and/or `file_groups` (names on the descriptor). Readiness, verify, and refcounts use that subset. A model listed for the active tier is fetched even when its descriptor sets `on_demand`. A descriptor that does not resolve, or a selection that matches no files, exits nonzero instead of reporting `nothing to download`.
+
+The vendored `voxprint-app-models.schema.json` sha256 is `ed451b995e39ebba061f4604fcfc05d13a4000909769e931e700bb3f35c1c420`. A `file_groups` entry may set `name`. The vendored `voxprint-model.schema.json` sha256 is `e46ae56a06516ff127d6d7c45669873ad268e60a8b2c3a96c1b3e1f3919f5138`.
+
 ## 0.3.1 - 2026-10-18
 
 Downloads work behind DNS that answers with placeholder addresses and behind proxies. The guard still requires an allowlisted host and HTTPS with certificate and host name checks. On top of that it accepts a resolution in `198.18.0.0/15`, and it skips the local DNS answer when the request goes through a proxy from the environment or the Windows settings (the proxy itself may be on loopback). Loopback, link-local, RFC 1918, and other private answers stay refused for direct connections, plain HTTP to `198.18.0.0/15` is refused, and redirects must stay on the allowlist. `100.64.0.0/10` was already allowed and is unchanged.

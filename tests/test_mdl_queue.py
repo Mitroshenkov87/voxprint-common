@@ -27,6 +27,7 @@ from voxprint_common.mdl.catalog import (
 from voxprint_common.mdl.cli import main
 from voxprint_common.mdl.descriptor import (
     DescriptorError,
+    app_schema_bytes,
     parse_descriptor,
     parse_post_install,
     schema_bytes,
@@ -215,11 +216,27 @@ def _descriptor_doc(**overrides: object) -> dict[str, object]:
 
 def test_vendored_schema_accepts_the_forge_shape() -> None:
     raw = schema_bytes()
-    assert sha256_bytes(raw) == ("08dc67f30991c9558abedd9adbcd9ae77d8e6cd429520f2a9a548bfc2beeec08")
+    assert sha256_bytes(raw) == ("e46ae56a06516ff127d6d7c45669873ad268e60a8b2c3a96c1b3e1f3919f5138")
+    app_raw = app_schema_bytes()
+    assert sha256_bytes(app_raw) == (
+        "ed451b995e39ebba061f4604fcfc05d13a4000909769e931e700bb3f35c1c420"
+    )
     schema = json.loads(raw)
     validator = jsonschema.Draft202012Validator(schema)
     document = _descriptor_doc()
     validator.validate(document)
+    named = _descriptor_doc()
+    named["file_groups"] = [{"name": "lite", "paths": ["weights/model.bin"]}]
+    validator.validate(named)
+    assert parse_descriptor(named).file_groups[0].name == "lite"
+    tiered = {
+        "schema": "voxprint-app-models/1",
+        "app_id": "canvas",
+        "tiers": {"16gb": [{"id": "painter", "files": ["*lite*"], "file_groups": ["lite"]}]},
+        "runtimes": [],
+        "optional": [],
+    }
+    jsonschema.Draft202012Validator(json.loads(app_raw)).validate(tiered)
     parsed = parse_descriptor(document)
     assert parsed.tier.min_vram_gib == 23.5
     assert parsed.mirrors[0].revision == "main"

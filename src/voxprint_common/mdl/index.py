@@ -32,6 +32,7 @@ __all__ = [
     "SuiteIndex",
     "SuiteIndexError",
     "bundled_index_bytes",
+    "fetch_indexed",
     "load_index",
     "parse_index",
     "private_key_pem",
@@ -108,6 +109,26 @@ class _Document:
     head: str
     serial: int | None
     generated_at: str
+
+
+def fetch_indexed(
+    url: str,
+    *,
+    opener: object | None = None,
+    guard: UrlGuard | None = None,
+) -> bytes:
+    """GET ``url`` through the same guarded opener that loads the index.
+
+    Args:
+        url: Absolute URL. The guard checks it before the opener runs.
+        opener: ``opener(request, timeout) -> response``. Defaults to urllib.
+        guard: URL rules. Defaults to the production allowlist.
+
+    Raises:
+        OSError: The response is an HTTP error or the body cannot be read.
+        UnsafeUrl: ``url`` is not allowed.
+    """
+    return _fetch(url, opener, guard or UrlGuard())
 
 
 def bundled_index_bytes() -> bytes:

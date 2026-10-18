@@ -173,6 +173,12 @@ The bundled index is the serial 9 snapshot of `Mitroshenkov87/voxprint-model-ind
 
 A model document may list `prebuilt` alternatives. An entry with `role: "fallback"` and `replaces: "transformer/"` (a folder prefix, or one path) swaps those default files for its own `files` when a default file fails after the normal mirror rules, or when `choose_variant(model_id, fallback_id)` picks it. The choice is saved in `<home>/state/mdl-variants.json`.
 
+A `voxprint-app-models/1` manifest names model ids. Download loads each id's `voxprint-model/1` descriptor from the signed index. The index row gives the repository, the revision, and the sha256 of `voxprint-model.json`. That file is fetched with the same guarded request as the index and stored under `<home>/state/mdl-descriptors`. Bytes that do not match the index digest are refused.
+
+A tier entry is a model id, which keeps every file, or an object with `id` plus `files` and/or `file_groups`. `files` are globs matched against descriptor paths. `file_groups` are `name` values on the descriptor's file groups. The tier keeps the union of those matches. Readiness, verify, and refcounts use that subset. A model listed for the active tier is fetched even when the descriptor sets `on_demand`.
+
+A missing descriptor, a digest that does not match, or a selection that matches no files fails the download. The command does not report `nothing to download` while those models are missing.
+
 A remote `index.json` is used when the detached `index.json.sig` verifies under a public key in `index-public.pem` and the document is at least that pin. `serial`, when present, is the comparison. `generated_at` is used only when `serial` is absent, and it must be a timezone-aware ISO-8601 timestamp. The signed document is an object with `head`, `serial`, `generated_at`, and `models`. A bare list has no freshness and is refused.
 
 A missing signature, a bad signature, a fetch error, or an older index is logged (`using the bundled model index; …`) and the snapshot is used. The download still runs. `voxprint-mdl --check` prints `source`, `head`, `serial`, `generated_at`, `entries`, `sha256`, and `fallback:` with that reason. Exit code 0 means the snapshot is usable.
