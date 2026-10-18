@@ -1,4 +1,6 @@
 src/voxprint_common/mdl/schemas/voxprint-model.schema.json text eol=lf
+src/voxprint_common/mdl/schemas/voxprint-app-models.schema.json text eol=lf
+tests/fixtures/dinov2-base-voxprint-model.json -text
 src/voxprint_common/mdl/data/** text eol=lf
 tests/fixtures/live-index.json* -text
 src/voxprint_common/mdl/data/model-index.json -text
