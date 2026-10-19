@@ -163,6 +163,9 @@ def test_install_dirs_and_discovery(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert windows.name == "Enlarge"
     linux = install_dir(enlarge, Path("/opt/voxprint-ai-suite"), platform="linux")
     assert linux.as_posix() == "/opt/voxprint-ai-suite/enlarge"
+    forge = next(app for app in SUITE_APPS if app.id == "model-forge")
+    forge_dir = install_dir(forge, Path(r"C:\Program Files\VOXPrint AI Suite"), platform="win32")
+    assert forge_dir.name == "Model Forge"
     monkeypatch.setenv("VOXPRINT_SUITE_ROOT", str(tmp_path))
     _manifest(tmp_path / "enlarge", "https://example.invalid/weights.bin")
     found = discover()

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import urllib.parse
+from dataclasses import replace
 from pathlib import Path
 
-from voxprint_common.gpu_probe import GpuDevice
+from voxprint_common.gpu_probe import GpuDevice, VramTier
 from voxprint_common.hashing import sha256_bytes
+from voxprint_common.mdl.catalog import load_manifest, plan_files
 from voxprint_common.mdl.descriptor import Descriptor, parse_descriptor
 from voxprint_common.mdl.job import download, verify
 from voxprint_common.mdl.readiness import disk_ready, gaps_for
@@ -193,3 +195,32 @@ def test_missing_descriptor_exits_nonzero(tmp_path: Path) -> None:
     assert outcome.code != 0
     assert "nothing to download" not in outcome.message
     assert "not-a-real-model" in outcome.message
+
+
+def test_tier_plan_resolves_only_its_ids(monkeypatch, tmp_path: Path) -> None:
+    lite, lite_sha, full_sha = _weights()
+    base = _descriptor(lite_sha, full_sha, len(lite))
+    asked: list[str] = []
+
+    def resolve(model_ids, *, opener=None, guard=None, index=None):
+        del opener, guard, index
+        asked.extend(model_ids)
+        return {model_id: replace(base, id=model_id) for model_id in model_ids}
+
+    monkeypatch.setattr("voxprint_common.mdl.catalog.resolve_descriptors", resolve)
+    path = tmp_path / "voxprint-app-models.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema": "voxprint-app-models/1",
+                "app_id": "canvas",
+                "tiers": {"16gb": ["big-model"], "8gb": [_MODEL]},
+                "runtimes": [],
+                "optional": [{"id": "extra-model", "min_vram_gib": None}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    files = plan_files([load_manifest(path)], VramTier.GB8)
+    assert asked == [_MODEL]
+    assert {item.model_id for item in files} == {_MODEL}

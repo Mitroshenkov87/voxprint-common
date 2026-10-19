@@ -41,7 +41,13 @@ from voxprint_common.cli_protocol import (
     emit,
     result,
 )
-from voxprint_common.mdl.catalog import CatalogError, discover, load_manifest, plan_files
+from voxprint_common.mdl.catalog import (
+    CatalogError,
+    discover,
+    listed_ids,
+    load_manifest,
+    plan_files,
+)
 from voxprint_common.mdl.events import TransferSession
 from voxprint_common.mdl.hooks import hook_problems
 from voxprint_common.mdl.index import (
@@ -225,6 +231,10 @@ def _run(args: argparse.Namespace, session: Session | None) -> tuple[int, str, d
         outcome = verify(manifests, only=models)
     elif args.command == "download":
         if args.dry_run:
+            if manifests is None and args.app:
+                manifests = [app.path for app in discover() if app.id == args.app]
+                if not manifests:
+                    return EXIT_USAGE, f"no installed manifest for {args.app}", {}
             outcome = download(
                 manifests,
                 dry_run=True,
@@ -306,8 +316,16 @@ def _queue_download(args: argparse.Namespace, session: TransferSession | None) -
         found = discover()
         if not found and not load_queue():
             return download(None, display=args.gui, session=session, only=models)
+        known = {item.id: listed_ids(load_manifest(item.path)) for item in found}
+        if models is not None and set(models).difference(*known.values()):
+            return download(None, display=False, dry_run=True, only=models)
         for installed in found:
-            enqueue(installed.id, models)
+            listed = None
+            if models is not None:
+                listed = tuple(model for model in models if model in known[installed.id])
+                if not listed:
+                    continue
+            enqueue(installed.id, listed)
     return run_or_attach(None, session=session, display=args.gui)
 
 
@@ -352,20 +370,25 @@ def _bare_gui(argv: Sequence[str]) -> bool:
 
 
 def _open_named_window(argv: Sequence[str]) -> int:
-    app = ""
     tokens = list(argv)
-    if "--app" in tokens:
-        index = tokens.index("--app")
-        if index + 1 < len(tokens):
-            app = tokens[index + 1]
+    app = _flag_value(tokens, "--app")
+    manifest = _flag_value(tokens, "--manifest")
     if not app:
         return EXIT_USAGE
     try:
-        outcome = run_manage_window(app)
+        outcome = run_manage_window(app, manifest=manifest or None)
     except ImportError as exc:
         print(f"{DISPLAY_NAME} needs the ui extra for --gui ({exc})", file=sys.stderr)
         return EXIT_FAILED
     return _window_code(outcome)
+
+
+def _flag_value(tokens: Sequence[str], flag: str) -> str:
+    if flag in tokens:
+        index = tokens.index(flag)
+        if index + 1 < len(tokens):
+            return tokens[index + 1]
+    return ""
 
 
 def _window_code(outcome: WindowResult) -> int:

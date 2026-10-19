@@ -79,6 +79,7 @@ __all__ = [
     "install_dir",
     "is_gated_source",
     "kaggle_url",
+    "listed_ids",
     "load_manifest",
     "plan_files",
     "public_mirror_urls",
@@ -161,6 +162,7 @@ SUITE_APPS: tuple[SuiteApp, ...] = (
     SuiteApp("clarity", "Clarity"),
     SuiteApp("enlarge", "Enlarge"),
     SuiteApp("canvas", "Canvas"),
+    SuiteApp("model-forge", "Model Forge"),
 )
 
 
@@ -444,9 +446,17 @@ def plan_files(
     buckets: dict[str, PlannedFile] = {}
     order: list[str] = []
     chosen = {**chosen_variants(), **dict(variants or {})}
+    if only is not None:
+        unlisted = set(only).difference(*(listed_ids(item) for item in manifests))
+        if unlisted:
+            first = next(model_id for model_id in only if model_id in unlisted)
+            raise CatalogError(f"model {first} is not available for this card")
     for manifest in manifests:
         prepared = _with_descriptors(manifest, descriptors)
-        for model in _chosen(prepared, cap, tier, only):
+        wanted = None if only is None else [m for m in only if m in listed_ids(manifest)]
+        if wanted == []:
+            continue
+        for model in _chosen(prepared, cap, tier, wanted):
             model = _apply_selection(prepared, tier, model)
             try:
                 _check_fit(model, remembered, compute)
@@ -744,6 +754,21 @@ def _find_manifest(folder: Path) -> Path | None:
     return None
 
 
+def listed_ids(manifest: AppManifest) -> frozenset[str]:
+    """Return every model id that ``manifest`` lists, resolved or not.
+
+    Args:
+        manifest: A parsed app manifest.
+    """
+    found = {model.id for model in manifest.models}
+    document = manifest.app_models
+    if document is not None:
+        for _name, ids in document.tiers:
+            found.update(ids)
+        found.update(item.id for item in document.optional)
+    return frozenset(found)
+
+
 def _resolve_manifest(path: Path) -> Path:
     if not path.is_dir():
         return path
@@ -775,6 +800,7 @@ def _load_app_models(
 def _models_from_descriptors(
     document: AppModels,
     descriptors: Mapping[str, Descriptor],
+    resolved: Collection[str] | None = None,
 ) -> tuple[Model, ...]:
     order: list[str] = []
     for _name, ids in document.tiers:
@@ -789,6 +815,8 @@ def _models_from_descriptors(
     blocked = {model_id for model_id, _reason in document.unavailable}
     for model_id in order:
         if model_id in blocked:
+            continue
+        if resolved is not None and model_id not in resolved:
             continue
         descriptor = descriptors.get(model_id)
         if descriptor is None:
@@ -1138,7 +1166,10 @@ def _attach_resolved(
             found = resolve_descriptors(ids, opener=opener, guard=guard)
         except ResolveError as exc:
             raise CatalogError(str(exc)) from exc
-        models = _mark_unavailable(_models_from_descriptors(document, found), document.unavailable)
+        models = _mark_unavailable(
+            _models_from_descriptors(document, found, resolved=set(ids)),
+            document.unavailable,
+        )
         attached.append(
             AppManifest(
                 manifest.app,
