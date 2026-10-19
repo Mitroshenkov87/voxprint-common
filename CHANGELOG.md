@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+Buttons are rectangles with small corners: `ui/tokens.json` density `button_radius_px` (4) sets the radius of every push button, tool button, chip, segment, and the Expert toggle in `build_style` and `build_shell_style`; no button is pill-shaped.
+
 ## 0.4.1 - 2026-10-19
 
 `model-forge` (`Model Forge`) is a suite app, so `voxprint-mdl --app model-forge` and `voxprint-mdl --gui --app model-forge` find its `mdl.json` in the install folder. A `voxprint-app-models/1` plan builds models only from the descriptors it resolved for the active tier or the requested ids, instead of failing on ids listed for other tiers or unrequested optional ids. `--model` ids are planned only against the manifests that list them; an id that no manifest lists still fails. `download --dry-run --app <id>` plans only that app's installed manifest. Bare `--gui --app <id> --manifest <path>` opens the manage page for that manifest.

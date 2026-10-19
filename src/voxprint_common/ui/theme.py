@@ -8,7 +8,8 @@ translucent in the Acrylic stylesheet.
 
 :func:`build_style` is the wizard and download-window stylesheet. The editor
 shell uses :func:`build_shell_style` and the density block in the same file
-(13 px body, 28 px panel headers, 4 px control radius). Both read one colour
+(13 px body, 28 px panel headers, 4 px control radius, 4 px button radius).
+Every push button, tool button, chip, and segment uses ``button_radius_px``. Both read one colour
 map.
 
 The splash bar is not one of these tokens. Each app passes its own identity
@@ -105,8 +106,9 @@ QLabel#chip[state="ready"] {{
 }}
 QPushButton {{
     background: {control}; border: 1px solid {border};
-    border-radius: 8px; padding: 8px 16px;
+    border-radius: {button_radius}px; padding: 8px 16px;
 }}
+QToolButton {{ border-radius: {button_radius}px; }}
 QPushButton:hover {{ background: {hover}; }}
 QPushButton:disabled {{
     color: {disabled}; background: #1f1f28; border-color: #34343f;
@@ -422,6 +424,7 @@ def build_shell_style(glass: bool, *, more: bool = False, light: bool = False) -
     scroll_bg = card_bg
     density = load().density
     radius = density.control_radius_px
+    button = density.button_radius_px
     return f"""
 * {{ font-family: {_FONT}; font-size: {density.body_px}px; color: {TEXT}; }}
 QWidget#shell {{ background: {root_bg}; }}
@@ -475,8 +478,9 @@ QTabBar::tab:selected {{
 }}
 QPushButton {{
     background: {CONTROL_BG}; border: {density.border_px}px solid {CONTROL_BORDER};
-    border-radius: {radius}px; padding: 4px 12px; min-height: {density.panel_header_px}px;
+    border-radius: {button}px; padding: 4px 12px; min-height: {density.panel_header_px}px;
 }}
+QToolButton {{ border-radius: {button}px; }}
 QPushButton:hover {{ background: {CONTROL_HOVER}; }}
 QPushButton#primary {{
     background: {PRIMARY}; color: {TEXT_ON_PRIMARY};
@@ -531,7 +535,7 @@ QPlainTextEdit#promptBox {{ font-size: 16px; padding: 10px 12px; }}
 QPushButton#generate {{
     background: {PRIMARY}; color: {TEXT_ON_PRIMARY};
     border: {density.border_px}px solid {PRIMARY_BORDER};
-    border-radius: 8px; font-size: 16px; font-weight: 600; padding: 8px 18px;
+    border-radius: {button}px; font-size: 16px; font-weight: 600; padding: 8px 18px;
 }}
 QPushButton#generate:disabled {{
     background: {CONTROL_BG}; color: {TEXT_MUTED}; border-color: {CONTROL_BORDER};
@@ -546,13 +550,13 @@ QPushButton#primary:focus, QPushButton#generate:focus {{
 QPushButton#overflow {{
     background: {CONTROL_BG}; color: {TEXT};
     border: {density.border_px}px solid {CONTROL_BORDER};
-    border-radius: {radius}px; padding: 2px 12px; min-height: 28px;
+    border-radius: {button}px; padding: 2px 12px; min-height: 28px;
 }}
 QPushButton#overflow::menu-indicator {{ image: none; width: 0; }}
 QPushButton#expertToggle {{
     background: {CONTROL_BG}; color: {TEXT_MUTED};
     border: {density.border_px}px solid {CONTROL_BORDER};
-    border-radius: 14px; padding: 2px {density.chip_pad_px}px; min-height: 28px;
+    border-radius: {button}px; padding: 2px {density.chip_pad_px}px; min-height: 28px;
 }}
 QPushButton#expertToggle:checked {{
     background: {PRIMARY}; color: {TEXT_ON_PRIMARY}; border-color: {PRIMARY_BORDER};
@@ -560,7 +564,7 @@ QPushButton#expertToggle:checked {{
 }}
 QWidget#actionBar QPushButton {{ min-height: 34px; padding: 4px 14px; }}
 QPushButton[chip="true"] {{
-    min-height: 30px; padding: 2px {density.chip_pad_px}px; border-radius: 15px;
+    min-height: 30px; padding: 2px {density.chip_pad_px}px; border-radius: {button}px;
 }}
 QPushButton[chip="true"]:checked {{
     background: {PRIMARY}; color: {TEXT_ON_PRIMARY};
@@ -569,7 +573,7 @@ QPushButton[chip="true"]:checked {{
 QPushButton[chip="true"]:disabled {{
     background: {CONTROL_BG}; color: {TEXT_MUTED}; border-color: {CONTROL_BORDER};
 }}
-QPushButton[thumb="true"] {{ padding: 2px; border-radius: 8px; }}
+QPushButton[thumb="true"] {{ padding: 2px; border-radius: {button}px; }}
 QPushButton[thumb="true"]:checked {{
     border: 2px solid {PRIMARY}; background: {CONTROL_BG};
 }}
@@ -688,7 +692,7 @@ QPushButton#sectionTab:checked {{
 QPushButton#sectionMore, QPushButton#sectionAction, QPushButton#sectionPreview {{
     background: {CONTROL_BG}; color: {TEXT};
     border: {density.border_px}px solid {CONTROL_BORDER};
-    border-radius: {radius}px; padding: 2px 12px; min-height: 28px;
+    border-radius: {button}px; padding: 2px 12px; min-height: 28px;
 }}
 QPushButton#sectionMore::menu-indicator {{ image: none; width: 0; }}
 QPushButton#expertReset {{
@@ -782,6 +786,7 @@ def build_style(glass: bool, *, more: bool = False) -> str:
         menu_sel=MENU_SELECTION,
         root_bg=root_bg,
         card_bg=card_bg,
+        button_radius=load().density.button_radius_px,
     )
 
 
