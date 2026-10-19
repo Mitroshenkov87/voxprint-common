@@ -7,7 +7,7 @@ Every suite app installs the same way on Windows. The names come from `voxprint_
 | Display name | `VOXPrint AI <App>` | `VOXPrint AI Canvas` |
 | Install folder | `%ProgramFiles%\VOXPrint AI Suite\<App>` | `C:\Program Files\VOXPrint AI Suite\Canvas` |
 | GUI / CLI executable | lower-case kebab | `voxprint-canvas.exe`, `voxprint-canvas-cli.exe` |
-| Icon | `{app}\assets\voxprint-<app>.ico` | `assets\voxprint-canvas.ico` |
+| Icon | `{app}\assets\voxprint-<app>.ico` for new icons; an existing installed `.ico` path may stay | `assets\voxprint-canvas.ico` |
 | Start menu | `VOXPrint AI Suite\VOXPrint AI <App>.lnk` | `VOXPrint AI Suite\VOXPrint AI Canvas.lnk` |
 | AppUserModelID | `VOXPrint.AISuite.<App without spaces>` | `VOXPrint.AISuite.Canvas` |
 | Publisher | `Aleksandr Mitroshenkov` | |
@@ -16,7 +16,7 @@ Every suite app installs the same way on Windows. The names come from `voxprint_
 
 - One folder, `VOXPrint AI Suite`, shared by every app. Per-machine installs put it in the all-users Programs folder (`{group}` with `DefaultGroupName=VOXPrint AI Suite`, or `{autoprograms}\VOXPrint AI Suite`).
 - The folder holds only app launchers, one per app, named `VOXPrint AI <App>`. No Uninstall shortcut, no guide, readme, diagnostics, or website shortcuts. Guides open from the app's Help menu. Uninstall goes through Settings > Apps > Installed apps.
-- No per-app subfolder.
+- No per-app subfolder. Desktop shortcuts are optional and use the same icon and id.
 - An upgrade deletes shortcuts that older builds created (`[InstallDelete]`), because Setup does not remove shortcuts that the new script no longer lists.
 - Uninstall removes only this app's shortcut. The folder goes away only when it is empty, that is, when the last suite app is uninstalled. Inno Setup and WiX `RemoveFolder` already remove it only when empty. Never delete it outright (`[UninstallDelete]` on `{group}`, or `Remove-Item` from an uninstall script).
 
