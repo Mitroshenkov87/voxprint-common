@@ -16,7 +16,8 @@ Every suite app installs the same way on Windows. The names come from `voxprint_
 
 - One folder, `VOXPrint AI Suite`, shared by every app. Per-machine installs put it in the all-users Programs folder (`{group}` with `DefaultGroupName=VOXPrint AI Suite`, or `{autoprograms}\VOXPrint AI Suite`).
 - The folder holds only app launchers, one per app, named `VOXPrint AI <App>`. No Uninstall shortcut, no guide, readme, diagnostics, or website shortcuts. Guides open from the app's Help menu. Uninstall goes through Settings > Apps > Installed apps.
-- No per-app subfolder. Desktop shortcuts are optional and use the same icon and id.
+- No per-app subfolder.
+- Desktop shortcut: one optional Setup checkbox, `Create a desktop shortcut`, off by default, the same in every app (Inno `[Tasks] Name: desktopicon; Flags: unchecked`). It uses the same icon and id as the Start menu launcher.
 - An upgrade deletes shortcuts that older builds created (`[InstallDelete]`), because Setup does not remove shortcuts that the new script no longer lists.
 - Uninstall removes only this app's shortcut. The folder goes away only when it is empty, that is, when the last suite app is uninstalled. Inno Setup and WiX `RemoveFolder` already remove it only when empty. Never delete it outright (`[UninstallDelete]` on `{group}`, or `Remove-Item` from an uninstall script).
 
@@ -24,6 +25,15 @@ Every suite app installs the same way on Windows. The names come from `voxprint_
 
 - One multi-size `.ico` per app, frames 16, 24, 32, 48, 64, 128, and 256 px, 32-bit RGBA. PNG-compressed frames are fine on Windows 11.
 - Render the frames from the app's master artwork (1024 px PNG). Small sizes may be hand-tuned.
+
+### Icon style
+
+Every app icon belongs to one set:
+
+- A rounded-square tile filling the canvas (corner radius about 18% of the side, 4% transparent margin), dark background `#1b1b23` with a faint top-to-bottom lift to `#2c2c38`.
+- One simple glyph for what the app does, centred, about 60% of the tile, in the app's identity colour (`identity` in `ui/tokens.json`). An app without one proposes a colour distinct from the others in its icon review; it is added to `tokens.json`.
+- Flat shapes with at most one soft highlight. No text, letters, photos, people, or fine detail; the glyph must still read at 16 px.
+- Final masters are reviewed by Components for consistency with the set before the `.ico` ships.
 - `python -m voxprint_common.branding pack out.ico 16.png 24.png ... 256.png` packs pre-rendered frames. `python -m voxprint_common.branding check out.ico` fails when a size is missing; run it in the app's release check. Apps that scale one PNG with Pillow (Enlarge `tools/make_icon.py`) may keep that and run `check`.
 - The same `.ico` is used for the executable, the shortcut, the uninstall entry, the setup program (`SetupIconFile`), and the window.
 
@@ -112,6 +122,10 @@ app.setWindowIcon(QIcon(str(app_dir / "assets" / ident.icon_file)))
 ```
 
 The shortcut carries the same id (`AppUserModelID:` in Inno Setup `[Icons]`, `System.AppUserModel.ID` in WiX).
+
+## Moving a per-user install
+
+An app that used to install per user (for example under `%LOCALAPPDATA%`) moves to the per-machine layout. Setup finds the old install from its per-user uninstall key (`HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall`), runs its uninstaller silently, removes leftover per-user shortcuts, and keeps user settings and data in the suite home (`voxprint_common.paths.home()`). It fails the install with a clear message if the old uninstaller fails.
 
 ## Apps & features
 
