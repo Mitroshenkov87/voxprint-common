@@ -316,18 +316,16 @@ def _queue_download(args: argparse.Namespace, session: TransferSession | None) -
         found = discover()
         if not found and not load_queue():
             return download(None, display=args.gui, session=session, only=models)
-        queued = False
+        known = {item.id: listed_ids(load_manifest(item.path)) for item in found}
+        if models is not None and set(models).difference(*known.values()):
+            return download(None, display=False, dry_run=True, only=models)
         for installed in found:
             listed = None
             if models is not None:
-                known = listed_ids(load_manifest(installed.path))
-                listed = tuple(model for model in models if model in known)
+                listed = tuple(model for model in models if model in known[installed.id])
                 if not listed:
                     continue
             enqueue(installed.id, listed)
-            queued = True
-        if found and not queued and not load_queue():
-            return download(None, display=args.gui, session=session, only=models)
     return run_or_attach(None, session=session, display=args.gui)
 
 
