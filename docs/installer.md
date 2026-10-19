@@ -32,6 +32,7 @@ Every app icon belongs to one set:
 
 - A rounded-square tile filling the canvas (corner radius about 18% of the side, 4% transparent margin), dark background `#1b1b23` with a faint top-to-bottom lift to `#2c2c38`.
 - One simple glyph for what the app does, centred, about 60% of the tile, in the app's identity colour (`identity` in `ui/tokens.json`). An app without one proposes a colour distinct from the others in its icon review; it is added to `tokens.json`.
+- A small flat scene inside an identity-colour frame is allowed instead of a single glyph (Canvas), as long as the identity colour stays dominant and the shapes are flat with no text.
 - Flat shapes with at most one soft highlight. No text, letters, photos, people, or fine detail; the glyph must still read at 16 px.
 - Final masters are reviewed by Components for consistency with the set before the `.ico` ships.
 - `python -m voxprint_common.branding pack out.ico 16.png 24.png ... 256.png` packs pre-rendered frames. `python -m voxprint_common.branding check out.ico` fails when a size is missing; run it in the app's release check. Apps that scale one PNG with Pillow (Enlarge `tools/make_icon.py`) may keep that and run `check`.
