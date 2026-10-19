@@ -110,13 +110,15 @@ def pack_ico(frames: Sequence[bytes]) -> bytes:
         The ``.ico`` bytes, smallest frame first.
 
     Raises:
-        IconError: A frame is not a square PNG, or a size is missing or repeated.
+        IconError: A frame is not a square PNG, is over 256px, or a size is missing or repeated.
     """
     by_size: dict[int, bytes] = {}
     for data in frames:
         width, height = _png_size(data)
         if width != height:
             raise IconError(f"frame is {width}x{height}, not square")
+        if width > 256:
+            raise IconError(f"frame of {width}px is larger than 256px")
         if width in by_size:
             raise IconError(f"two frames of {width}px")
         by_size[width] = data
@@ -126,7 +128,7 @@ def pack_ico(frames: Sequence[bytes]) -> bytes:
     offset = 6 + 16 * len(sizes)
     for size in sizes:
         data = by_size[size]
-        dim = 0 if size >= 256 else size
+        dim = size % 256
         out += struct.pack("<BBBBHHII", dim, dim, 0, 0, 1, 32, len(data), offset)
         offset += len(data)
     for size in sizes:
