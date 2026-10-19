@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+Windows installer and branding standard in `docs/installer.md`: one `VOXPrint AI Suite` Start menu folder with only `VOXPrint AI <App>` launchers and no Uninstall shortcut, a 16 to 256 px `.ico` on the launcher, the shortcut, the uninstall entry, and the window, and a matching AppUserModelID. `voxprint_common.branding` returns each app's installer names, packs and checks `.ico` files (`python -m voxprint_common.branding check|pack`), and sets the process AppUserModelID.
+
 ## 0.4.0 - 2026-10-18
 
 RAM tiers and a process-local model park. `memory.ram_mode` is `auto`, `ram32`, `ram64`, or `ram96` (default `auto`). `VOXPRINT_RAM_MODE` overrides it. Installed RAM is read with `GlobalMemoryStatusEx` on Windows and `/proc/meminfo` on Linux. 88 GiB and above is `ram96`, 44 GiB and above is `ram64`, and anything smaller is `ram32`. Below 24 GiB logs a warning and stays `ram32`.
