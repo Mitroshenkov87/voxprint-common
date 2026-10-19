@@ -46,7 +46,7 @@ def test_headless_layout_and_adoption() -> None:
     assert tokens.density.panel_header_px == 28
     assert tokens.density.control_radius_px == 4
     assert tokens.density.button_radius_px == 4
-    from voxprint_common.ui.theme import build_shell_style, build_style
+    from voxprint_common.ui.theme import build_style
 
     for style in (build_style(False), build_shell_style(False)):
         assert "border-radius: 14px" not in style and "border-radius: 15px" not in style
