@@ -9,7 +9,7 @@ this package does not load Qt and does not touch the network or the disk.
 
 from __future__ import annotations
 
-__version__ = "0.4.1"
+__version__ = "0.4.2"
 API = 1
 
 __all__ = ["API", "__version__"]

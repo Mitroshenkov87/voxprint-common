@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.2 - 2026-10-25
 
 Buttons are rectangles with small corners: `ui/tokens.json` density `button_radius_px` (4) sets the radius of every push button, tool button, chip, segment, and the Expert toggle in `build_style` and `build_shell_style`; no button is pill-shaped.
 
