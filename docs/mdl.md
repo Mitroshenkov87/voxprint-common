@@ -231,6 +231,16 @@ Pause and Resume talk to the worker's `TransferSession`. Cancel asks for confirm
 
 Manage models lists installed files with size and status, and optional models this GPU tier can run. A model whose minimum VRAM is above the card is hidden. Add enqueues that model. Remove drops this app's ref and deletes the file only when no other app still uses it. Verify re-hashes the plan.
 
+`voxprint-mdl verify --gui` opens the check-and-repair window. The first phase hashes each model. The rows then read OK, missing, or corrupt. `verify --repair` still clears a dangerous manifest path and does not delete files; it then downloads only the missing or corrupt models and leaves the healthy ones in place. `run_verify_repair(model_ids, repair=True)` is the call an app makes. The same window is `run_window(start, mode="verify")`.
+
+![Check phase](renders/mdl-verify-en.png)
+
+![Repair phase](renders/mdl-repair-en.png)
+
+![Check phase in Russian](renders/mdl-verify-ru.png)
+
+![Repair phase in Russian](renders/mdl-repair-ru.png)
+
 The window reads the queue in `voxprint_common.mdl.queue`. It does not write a second queue file.
 
 ![Download queue in English](img/mdl-window/en-queue.png)
@@ -255,7 +265,7 @@ The window reads the queue in `voxprint_common.mdl.queue`. It does not write a s
 
 `ready(app)` plans the detected tier and checks each required file. A missing file is `needs download`. A short file is `needs repair`. Runtime components such as `runtime-py314-torch2.11-cu130` use the size list stored on the component. The status file is not enough: a half-wiped store is not ready, and `download --app` fetches the missing files.
 
-A component path that is the suite home, the models root, the shared runtime, voices, cache, projects, or state — or that contains one of those, or overlaps another component — is rejected. `release_component` deletes a directory only when it is a single model folder directly under the models root and neither the shared manifest nor `models/.users.json` still names a user. `verify --repair` clears a dangerous path in the manifest and does not delete the files. Writes to the manifest and to `.users.json` re-read under the lock and keep unknown keys.
+A component path that is the suite home, the models root, the shared runtime, voices, cache, projects, or state — or that contains one of those, or overlaps another component — is rejected. `release_component` deletes a directory only when it is a single model folder directly under the models root and neither the shared manifest nor `models/.users.json` still names a user. `verify --repair` clears a dangerous path in the manifest and does not delete the files. It then downloads models that are missing or corrupt. Writes to the manifest and to `.users.json` re-read under the lock and keep unknown keys.
 
 ## Languages
 

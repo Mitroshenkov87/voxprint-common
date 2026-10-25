@@ -42,7 +42,19 @@ Pageable copies, including on `ram32`, go through `StagingRing`: two 256 MiB pin
 
 Unreferenced entries are evicted least-recently used. A pinned entry becomes pageable. A pageable entry is dropped. When available RAM is under 6 GiB, the park repeats that until available RAM is above 8 GiB, or nothing unreferenced is left.
 
-`prefetch(keys)` loads keys on a background thread for `ram64` and `ram96`. `ram32` does not prefetch. `stats()` returns pinned, pageable, and disk bytes, plus how many pin attempts fell back and how many `get` calls reused a parked model.
+`prefetch(keys)` loads keys on a background thread for `ram64` and `ram96`. `ram32` does not prefetch. `stats()` returns pinned, pageable, and disk bytes, plus how many pin attempts fell back and how many `get` calls reused a parked model. It also returns resident RAM and VRAM bytes, disk reads per model, reload attempts, and the copy timings.
+
+## Hot tier
+
+The park is the shared RAM cache for a pipeline. Each model is read from SSD once. A second `get` of a model that is already parked does not call the loader. That attempt is counted and logged.
+
+`ram_budget()` is 0 on `ram32` (load from SSD when a stage asks, then drop), the pin budget on `ram64` (main models stay), and installed RAM minus 12 GiB on `ram96` (every model stays).
+
+`with park.stage(name, models=[...])` copies those models to the GPU and moves every other GPU resident back to RAM. The default VRAM budget is 16 GiB, and the usable limit is 15 GiB. A smaller budget leaves a tenth free. When the requested set does not fit, the least-recently-used GPU resident that the stage did not ask for moves back to RAM. Weights are not dropped to disk while the RAM budget still keeps them. On exit the stage's models move back to RAM.
+
+Copies prefer a pinned host buffer and fall back to pageable memory when pinning fails. The destination keeps the source dtype. FP8 stays FP8.
+
+Each copy is logged as `park stage=... model=... direction=... bytes=... ms=...`. `direction` is `disk_to_ram`, `ram_to_vram`, or `vram_to_ram`. `stats().timings` keeps the same records.
 
 `<home>/state/ram-park.json` lists `{pid, app, pinned_bytes}` for each live process, under the suite file lock. A pid that is no longer running is removed. This process may pin the global budget minus what the other rows hold.
 

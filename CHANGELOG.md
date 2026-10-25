@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0 - 2026-10-25
+
+`ModelPark` is the shared RAM hot tier. A model is read from SSD once and kept in RAM while the tier budget allows. `ram32` loads on demand and does not keep the weights. `ram64` parks main models. `ram96` keeps every model. `stage(name, models=[...])` moves the requested models to the GPU and the others back to RAM. The VRAM budget defaults to 16 GiB and leaves 1 GiB free. Least-recently-used GPU residents return to RAM, not to disk, while the RAM budget still holds them. Host copies are pinned when that succeeds and stay pageable when it does not. Transfers keep the source dtype, so FP8 stays FP8. A second `get` of a parked model does not read the disk; the attempt is counted and logged. `stats()` reports resident RAM and VRAM bytes, disk reads per model, and the copy timings.
+
+A reader of `suite.json` treats a new inode as a new file. Writers also remember the object they just published, so a second update in the same timestamp tick is visible in this process.
+
+`run_verify_repair(model_ids, repair=True)` and `run_window(start, mode="verify")` open the check-and-repair window. Phase 1 hashes each model. The rows then show OK, missing, or corrupt. Phase 2 downloads only the missing or corrupt models. A summary follows. `voxprint-mdl verify --gui` opens that window. `voxprint-mdl verify --repair` still clears a dangerous manifest path and does not delete files, and it now also downloads only the models that are missing or corrupt. Strings are in the catalogs, including English and Russian. Buttons use `button_radius_px`.
+
 ## 0.4.2 - 2026-10-25
 
 Buttons are rectangles with small corners: `ui/tokens.json` density `button_radius_px` (4) sets the radius of every push button, tool button, chip, segment, and the Expert toggle in `build_style` and `build_shell_style`; no button is pill-shaped.

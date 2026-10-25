@@ -8,6 +8,7 @@ Importing this package does not load Qt, download anything, or create directorie
 Apps enqueue work with :func:`enqueue` or :func:`ensure_ready`. They do not
 download. A window subscribes to :class:`TransferSession` and reads
 :class:`ProgressEvent`, which includes every queued job grouped by app.
+:func:`run_verify_repair` opens the check-and-repair window.
 """
 
 from __future__ import annotations
@@ -30,8 +31,9 @@ from voxprint_common.mdl.events import (
     ProgressEvent,
     TransferSession,
 )
-from voxprint_common.mdl.job import Outcome, download, plan, progress_event, verify
+from voxprint_common.mdl.job import Outcome, download, plan, progress_event, verify, verify_repair
 from voxprint_common.mdl.names import CLI_NAME, DISPLAY_NAME
+from voxprint_common.mdl.progress_ui import run_verify_repair
 from voxprint_common.mdl.queue import Failed, Ready, enqueue, ensure_ready, run_or_attach
 from voxprint_common.mdl.readiness import disk_ready
 from voxprint_common.mdl.status import Status, load_status
@@ -64,8 +66,10 @@ __all__ = [
     "progress_event",
     "ready",
     "run_or_attach",
+    "run_verify_repair",
     "suite_root",
     "verify",
+    "verify_repair",
 ]
 
 

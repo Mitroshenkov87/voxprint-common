@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "voxprint-common"
-version = "0.4.2"
+version = "0.5.0"
 description = "Shared Python library for the Voxprint AI Media Suite."
 readme = "README.md"
 requires-python = ">=3.14"
@@ -98,6 +98,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 "tests/test_expert.py" = ["RUF001", "RUF002", "RUF003"]
 "tests/test_i18n_check.py" = ["RUF001", "RUF002", "RUF003"]
 "tests/test_mdl_window.py" = ["RUF001", "RUF002", "RUF003"]
+"tests/test_verify_repair.py" = ["RUF001", "RUF002", "RUF003"]
 
 [tool.interrogate]
 ignore-init-method = false

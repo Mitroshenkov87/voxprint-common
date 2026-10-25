@@ -12,7 +12,9 @@ already running. ``status --wait`` attaches until the queue is idle.
 ``--json`` writes UTF-8 progress lines and one result line on stdout. Human
 text goes to stderr. ``--dry-run`` builds the plan and checks free disk space
 without downloading or enqueueing. Both flags are accepted before or after
-the subcommand. ``--gui`` belongs on ``download``.
+the subcommand. ``--gui`` belongs on ``download`` and on ``verify``. ``verify --repair`` neutralises
+unsafe manifest paths and downloads only the missing or corrupt models.
+``verify --gui`` opens the check-and-repair window.
 
 Exit codes, shared with :mod:`voxprint_common.cli_protocol`:
 
@@ -56,9 +58,10 @@ from voxprint_common.mdl.index import (
     verify_index_file,
     write_index_signature,
 )
-from voxprint_common.mdl.job import Outcome, detect_tier, download, plan, verify
+from voxprint_common.mdl.job import Outcome, detect_tier, download, plan, verify, verify_repair
 from voxprint_common.mdl.names import CLI_NAME, DISPLAY_NAME
 from voxprint_common.mdl.onnx_prebuilt import stale_rows
+from voxprint_common.mdl.progress_ui import run_verify_repair
 from voxprint_common.mdl.queue import enqueue, load_queue, run_or_attach
 from voxprint_common.mdl.readiness import publish_presence
 from voxprint_common.mdl.status import JobState, StatusError, load_status
@@ -181,7 +184,9 @@ def _parser() -> _Parser:
             command.add_argument(
                 "--repair",
                 action="store_true",
-                help="clear manifest paths that could delete a shared root; never deletes files",
+                help=(
+                    "neutralise unsafe manifest paths, then download only missing or corrupt models"
+                ),
             )
     index = commands.add_parser("index", help="sign or verify the model index")
     index_commands = index.add_subparsers(dest="index_command", required=True)
@@ -207,9 +212,9 @@ def _run(args: argparse.Namespace, session: Session | None) -> tuple[int, str, d
         return _index_command(args)
     if args.command == "worker":
         return serve(), "", {}
-    if args.gui and args.command != "download":
-        return EXIT_USAGE, "--gui is only valid with download", {}
-    if args.gui:
+    if args.gui and args.command not in {"download", "verify"}:
+        return EXIT_USAGE, "--gui is only valid with download or verify", {}
+    if args.gui and args.command == "download":
         return _gui(args, session)
     if args.command == "status":
         if args.wait:
@@ -228,7 +233,12 @@ def _run(args: argparse.Namespace, session: Session | None) -> tuple[int, str, d
             if args.dry_run:
                 text = "\n".join(notes) if notes else "nothing to neutralise"
                 return EXIT_OK, text, {"ready": False}
-        outcome = verify(manifests, only=models)
+        if args.gui:
+            return _verify_gui(args)
+        if args.repair:
+            outcome = verify_repair(models, repair=True, manifests=manifests)
+        else:
+            outcome = verify(manifests, only=models)
     elif args.command == "download":
         if args.dry_run:
             if manifests is None and args.app:
@@ -401,6 +411,22 @@ def _window_code(outcome: WindowResult) -> int:
             return EXIT_FAILED
         case _ as unreachable:
             raise AssertionError(unreachable)
+
+
+def _verify_gui(args: argparse.Namespace) -> tuple[int, str, dict[str, object]]:
+    """Open the check-and-repair window for ``voxprint-mdl verify --gui``."""
+    models = tuple(args.model) if args.model else None
+    manifests = [Path(item) for item in args.manifest] if args.manifest else None
+    try:
+        outcome = run_verify_repair(
+            models,
+            repair=bool(args.repair),
+            manifests=manifests,
+            show=True,
+        )
+    except ImportError as exc:
+        return EXIT_FAILED, f"{DISPLAY_NAME} needs the ui extra for --gui ({exc})", {}
+    return outcome.code, outcome.message, _payload(outcome.status)
 
 
 def _gui(args: argparse.Namespace, session: Session | None) -> tuple[int, str, dict[str, object]]:
