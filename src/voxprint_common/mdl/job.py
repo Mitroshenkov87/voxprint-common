@@ -434,7 +434,7 @@ def verify_repair(
             status.extra["phase"] = "summary"
             status.recompute()
             return _publish(status, EXIT_FAILED, outcome.message, on_status)
-    elif not bad:
+    if not bad or repair:
         try:
             apply_hooks(files, deep=True)
         except HookError as exc:

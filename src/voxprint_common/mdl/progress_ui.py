@@ -505,7 +505,11 @@ def _run_verify_window(start: Starter) -> int:
         QTimer.singleShot(400, lambda: app.exit(EXIT_CANCELLED))
 
     initial = Status(JobState.DOWNLOADING, extra={"phase": "verify"})
-    window, _app = _verify_shell(initial, lang=get_language())
+    window, _app = _verify_shell(
+        initial,
+        lang=get_language(),
+        size=(_VERIFY_WIDTH, _VERIFY_HEIGHT),
+    )
     shell["window"] = window
     shell["lang"] = get_language()
     shell["close_handler"] = on_close
@@ -539,7 +543,7 @@ def _verify_shell(status: Status, *, lang: str, size: tuple[int, int]) -> tuple[
 
     class _VerifyWindow(QWidget):
         def closeEvent(self, event: object) -> None:
-            """Cancel a running check when the window is closed."""
+            """Close the window. A running check is cancelled; a finished one returns its code."""
             closer = getattr(self, "_closer", None)
             if callable(closer):
                 closer()
@@ -637,6 +641,9 @@ def _wire_verify(
     shell["cancel_button"] = cancel
 
     def closer() -> None:
+        if isinstance(shell.get("outcome"), Outcome):
+            on_close()
+            return
         on_cancel()
 
     window._closer = closer

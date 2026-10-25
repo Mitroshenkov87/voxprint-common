@@ -6,6 +6,8 @@ import logging
 import subprocess
 import sys
 
+import pytest
+
 from voxprint_common.model_park import Direction, ModelPark
 from voxprint_common.ram_probe import GIB, RamTier
 
@@ -100,6 +102,31 @@ def test_stage_swaps_vram_without_rereading_disk(caplog) -> None:
     assert small.stats().disk_reads["m"] == 2
     assert small.stats().vram_bytes == 0
     assert small.stats().ram_bytes == 0
+
+
+def test_stage_drops_gpu_residents_when_a_later_seat_fails() -> None:
+    park = ModelPark(RamTier.RAM32, app="canvas", total=32, windows=False, vram_budget=5000)
+
+    class _Boom(_Tensor):
+        def to(self, device: object, non_blocking: bool = False, **kwargs: object) -> _Tensor:
+            del device, non_blocking, kwargs
+            raise RuntimeError("seat failed")
+
+    held = [
+        park.get("a", lambda: {"w": _Tensor(100)}, size_bytes=100, role="main"),
+        park.get("b", lambda: {"w": _Boom(100)}, size_bytes=100, role="main"),
+    ]
+    try:
+        with (
+            pytest.raises(RuntimeError, match="seat failed"),
+            park.stage("cook", models=["a", "b"], device="cuda"),
+        ):
+            raise AssertionError("the stage should not yield")
+    finally:
+        for item in held:
+            item.release()
+    assert park.stats().vram_bytes == 0
+    assert park.stats().disk == 0
 
 
 def test_transfers_keep_fp8_dtype_and_do_not_import_torch() -> None:

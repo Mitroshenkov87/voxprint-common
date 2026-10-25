@@ -8,15 +8,16 @@ from pathlib import Path
 
 import pytest
 
+from voxprint_common.cli_protocol import EXIT_OK
 from voxprint_common.gpu_probe import GpuDevice, VramTier
 from voxprint_common.hashing import sha256_bytes
 from voxprint_common.i18n import tr_lang
 from voxprint_common.mdl.catalog import load_manifest, plan_files
 from voxprint_common.mdl.cli import main
 from voxprint_common.mdl.fetch import FetchProgress
-from voxprint_common.mdl.job import verify_repair, verify_summary
+from voxprint_common.mdl.job import Outcome, verify_repair, verify_summary
 from voxprint_common.mdl.present import format_size
-from voxprint_common.mdl.progress_ui import build_verify_window
+from voxprint_common.mdl.progress_ui import build_verify_window, run_window
 from voxprint_common.mdl.status import JobState, Status, Step
 from voxprint_common.suite_settings import set_keep_awake_during_jobs
 from voxprint_common.ui.tokens import load
@@ -159,6 +160,98 @@ def _snapshot(phase: str, rows: list[tuple[str, int, int, str]]) -> Status:
         for name, size, received, state in rows
     ]
     return status
+
+
+def test_repair_runs_deep_hooks_for_models_that_were_already_ok(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    set_keep_awake_during_jobs(False)
+    manifest = _manifest(tmp_path)
+    _write_store(manifest)
+    calls: list[tuple[bool, set[str]]] = []
+
+    def spy(files: list[object], *, deep: bool = False) -> None:
+        calls.append((deep, {getattr(item, "model_id", "") for item in files}))
+
+    def fake_fetch(
+        destination: Path,
+        urls: list[str],
+        *,
+        sha256: str,
+        size: int,
+        progress=None,
+        **kwargs: object,
+    ) -> None:
+        del urls, kwargs
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        blob = next(body for key, body in PAYLOADS.items() if DIGESTS[key] == sha256)
+        destination.write_bytes(blob)
+        if progress is not None:
+            progress(FetchProgress("huggingface", size, size, 1.0))
+
+    monkeypatch.setattr("voxprint_common.mdl.job.apply_hooks", spy)
+    monkeypatch.setattr("voxprint_common.mdl.job.fetch_file", fake_fetch)
+    outcome = verify_repair(
+        ("voice", "broken", "gone"),
+        repair=True,
+        manifests=[manifest],
+        devices=[GPU],
+    )
+    assert outcome.code == 0
+    assert any(deep and calls_ids == {"voice", "broken", "gone"} for deep, calls_ids in calls)
+
+
+def test_verify_window_opens_and_title_close_returns_the_job_code() -> None:
+    pytest.importorskip("PySide6")
+    from PySide6.QtCore import QMetaObject, QObject, Qt, QTimer, Slot
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    prior = {id(widget) for widget in app.topLevelWidgets()}
+
+    class _TitleBar(QObject):
+        def __init__(self) -> None:
+            super().__init__()
+            self.window: object | None = None
+
+        @Slot()
+        def shut(self) -> None:
+            window = self.window
+            assert window is not None
+            button = window._verify_close
+            attempts = 0
+
+            def try_close() -> None:
+                nonlocal attempts
+                attempts += 1
+                if button.isEnabled():
+                    assert window.isVisible()
+                    assert window.width() == 1280
+                    window.close()
+                    return
+                if attempts > 50:
+                    app.exit(99)
+                    return
+                QTimer.singleShot(20, try_close)
+
+            QTimer.singleShot(0, try_close)
+
+    bar = _TitleBar()
+
+    def start(cancel: object, on_status: object) -> Outcome:
+        del cancel
+        status = Status(JobState.READY, extra={"phase": "summary", "mode": "verify"})
+        on_status(status)
+        window = next(
+            widget
+            for widget in app.topLevelWidgets()
+            if widget.objectName() == "root" and id(widget) not in prior
+        )
+        bar.window = window
+        assert QMetaObject.invokeMethod(bar, "shut", Qt.ConnectionType.QueuedConnection)
+        return Outcome(EXIT_OK, "", status)
+
+    assert run_window(start, mode="verify") == EXIT_OK
 
 
 def test_summary_uses_plural_forms() -> None:

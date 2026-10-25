@@ -382,8 +382,9 @@ class ModelPark:
         still keeps that model. Each copy is logged with its stage, model,
         direction, byte count, and milliseconds.
 
-        The yielded dict is valid inside the block. On exit the stage's models
-        move back to RAM.
+        The yielded dict is valid inside the block. On exit, and when entering
+        the stage fails partway, the stage's models move back to RAM and the
+        borrowed references are dropped.
 
         Args:
             name: Pipeline step, recorded on each timing.
@@ -391,9 +392,10 @@ class ModelPark:
             device: Torch device passed to ``tensor.to``. Tests may pass a
                 stand-in; the default is ``cuda``.
         """
-        with self._lock:
-            placed, borrowed = self._enter_stage(name, models, device)
+        borrowed: list[_Entry] = []
         try:
+            with self._lock:
+                placed = self._enter_stage(name, models, device, borrowed)
             yield placed
         finally:
             with self._lock:
@@ -525,14 +527,14 @@ class ModelPark:
         name: str,
         models: Sequence[str],
         device: object,
-    ) -> tuple[dict[str, dict[str, object]], list[_Entry]]:
+        borrowed: list[_Entry],
+    ) -> dict[str, dict[str, object]]:
         wanted = list(dict.fromkeys(models))
         protect = set(wanted)
         for entry in list(self._entries.values()):
             if entry.device_weights and entry.key not in protect:
                 self._offload(name, entry)
         placed: dict[str, dict[str, object]] = {}
-        borrowed: list[_Entry] = []
         for key in wanted:
             existed = key in self._entries
             entry = self._resident_or_load(key)
@@ -544,7 +546,7 @@ class ModelPark:
             borrowed.append(entry)
             if self._seat(name, entry, device, protect):
                 placed[key] = dict(entry.device_weights or {})
-        return placed, borrowed
+        return placed
 
     def _leave_stage(self, name: str, borrowed: list[_Entry]) -> None:
         changed = False
