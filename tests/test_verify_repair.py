@@ -14,7 +14,7 @@ from voxprint_common.i18n import tr_lang
 from voxprint_common.mdl.catalog import load_manifest, plan_files
 from voxprint_common.mdl.cli import main
 from voxprint_common.mdl.fetch import FetchProgress
-from voxprint_common.mdl.job import verify_repair
+from voxprint_common.mdl.job import verify_repair, verify_summary
 from voxprint_common.mdl.present import format_size
 from voxprint_common.mdl.progress_ui import build_verify_window
 from voxprint_common.mdl.status import JobState, Status, Step
@@ -161,9 +161,22 @@ def _snapshot(phase: str, rows: list[tuple[str, int, int, str]]) -> Status:
     return status
 
 
+def test_summary_uses_plural_forms() -> None:
+    ru = verify_summary({"ok": 0, "missing": 0, "corrupt": 2, "repaired": 5}, "ru")
+    assert ru == "0 в порядке, 0 отсутствует, 2 повреждены, 5 восстановлено"
+    uk = verify_summary({"ok": 1, "missing": 0, "corrupt": 2, "repaired": 5}, "uk")
+    assert "0 відсутньо" in uk and "2 пошкоджені" in uk
+    lv = verify_summary({"ok": 0, "missing": 0, "corrupt": 1, "repaired": 2}, "lv")
+    assert "0 nav atrasts" in lv and "2 salaboti" in lv
+    assert verify_summary({"ok": 1, "missing": 2, "corrupt": 0, "repaired": 0}, "de") == (
+        "1 in Ordnung, 2 fehlen, 0 beschädigt, 0 repariert"
+    )
+
+
 def test_verify_window_fits_at_1280_in_english_and_russian() -> None:
     pytest.importorskip("PySide6")
-    from PySide6.QtWidgets import QApplication, QLabel, QTableWidget
+    from PySide6.QtCore import QPoint
+    from PySide6.QtWidgets import QApplication, QLabel, QProgressBar, QPushButton, QTableWidget
 
     names = {
         "en": (
@@ -232,6 +245,31 @@ def test_verify_window_fits_at_1280_in_english_and_russian() -> None:
                 lang,
             )
             assert table.item(1, 1).text() == format_size(1_200_000_000, lang=lang)
+            bars = table.viewport().findChildren(QProgressBar)
+            assert len(bars) == table.rowCount()
+            row_height = table.rowHeight(0)
+            model_right = header.sectionSize(0)
+            for bar in bars:
+                origin = bar.mapTo(table.viewport(), QPoint(0, 0))
+                assert origin.x() >= model_right
+                host = bar.parentWidget()
+                inside = bar.mapTo(host, QPoint(0, 0))
+                pad_top = inside.y()
+                pad_bottom = host.height() - (inside.y() + bar.height())
+                assert pad_top == pad_bottom
+                assert pad_top >= 6
+                assert origin.y() + bar.height() < ((origin.y() // row_height) + 1) * row_height
+            buttons = window.findChildren(QPushButton)
+            assert len(buttons) == 2
+            assert buttons[0].size() == buttons[1].size()
+            close = window._verify_close
+            assert close.objectName() == "close"
+            assert close.isEnabled() is False
+            if lang == "ru" and phase == "verify":
+                summary = window.findChild(QLabel, "summary")
+                assert summary is not None
+                assert "0 отсутствует" in summary.text()
+                assert "нет" not in summary.text()
             widths[(lang, phase)] = section
             window.hide()
         assert widths[(lang, "verify")] == widths[(lang, "repair")]

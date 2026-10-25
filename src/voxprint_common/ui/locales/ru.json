@@ -91,7 +91,31 @@
   "mdl.verify.status.pending": "Ожидание",
   "mdl.verify.status.repaired": "Восстановлен",
   "mdl.verify.status.repairing": "Загрузка",
-  "mdl.verify.summary": "{ok} в порядке, {missing} нет, {corrupt} повреждено, {repaired} восстановлено",
+  "mdl.verify.summary": "{ok}, {missing}, {corrupt}, {repaired}",
+  "mdl.verify.summary.corrupt": {
+    "few": "{count} повреждены",
+    "many": "{count} повреждено",
+    "one": "{count} повреждена",
+    "other": "{count} повреждено"
+  },
+  "mdl.verify.summary.missing": {
+    "few": "{count} отсутствуют",
+    "many": "{count} отсутствует",
+    "one": "{count} отсутствует",
+    "other": "{count} отсутствует"
+  },
+  "mdl.verify.summary.ok": {
+    "few": "{count} в порядке",
+    "many": "{count} в порядке",
+    "one": "{count} в порядке",
+    "other": "{count} в порядке"
+  },
+  "mdl.verify.summary.repaired": {
+    "few": "{count} восстановлены",
+    "many": "{count} восстановлено",
+    "one": "{count} восстановлена",
+    "other": "{count} восстановлено"
+  },
   "mdl.open": "Открыть {app}",
   "mdl.open_folder": "Открыть папку",
   "mdl.open_short": "Открыть",

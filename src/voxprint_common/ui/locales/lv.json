@@ -90,7 +90,27 @@
   "mdl.verify.status.pending": "Gaida",
   "mdl.verify.status.repaired": "Salabots",
   "mdl.verify.status.repairing": "Labošana",
-  "mdl.verify.summary": "{ok} kārtībā, {missing} trūkst, {corrupt} bojāti, {repaired} salaboti",
+  "mdl.verify.summary": "{ok}, {missing}, {corrupt}, {repaired}",
+  "mdl.verify.summary.corrupt": {
+    "one": "{count} bojāts",
+    "other": "{count} bojāti",
+    "zero": "{count} bojāts"
+  },
+  "mdl.verify.summary.missing": {
+    "one": "{count} nav atrasts",
+    "other": "{count} nav atrasti",
+    "zero": "{count} nav atrasts"
+  },
+  "mdl.verify.summary.ok": {
+    "one": "{count} kārtībā",
+    "other": "{count} kārtībā",
+    "zero": "{count} kārtībā"
+  },
+  "mdl.verify.summary.repaired": {
+    "one": "{count} salabots",
+    "other": "{count} salaboti",
+    "zero": "{count} salabots"
+  },
   "mdl.open": "Atvērt {app}",
   "mdl.open_folder": "Atvērt mapi",
   "mdl.open_short": "Atvērt",

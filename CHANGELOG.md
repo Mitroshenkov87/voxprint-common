@@ -6,7 +6,7 @@
 
 A reader of `suite.json` treats a new inode as a new file. Writers also remember the object they just published, so a second update in the same timestamp tick is visible in this process.
 
-`run_verify_repair(model_ids, repair=True)` and `run_window(start, mode="verify")` open the check-and-repair window. Phase 1 hashes each model. The rows then show OK, missing, or corrupt. Phase 2 downloads only the missing or corrupt models. A summary follows. `voxprint-mdl verify --gui` opens that window. `voxprint-mdl verify --repair` still clears a dangerous manifest path and does not delete files, and it now also downloads only the models that are missing or corrupt. Strings are in the catalogs, including English and Russian. Buttons use `button_radius_px`.
+`run_verify_repair(model_ids, repair=True)` and `run_window(start, mode="verify")` open the check-and-repair window. Phase 1 hashes each model. The rows then show OK, missing, or corrupt. Phase 2 downloads only the missing or corrupt models. A summary follows. `voxprint-mdl verify --gui` opens that window. `voxprint-mdl verify --repair` still clears a dangerous manifest path and does not delete files, and it now also downloads only the models that are missing or corrupt. Strings are in the catalogs, including English and Russian, and the summary uses the plural forms so a zero count reads as a word that agrees with the number. Buttons use `button_radius_px`. Close stays a secondary button until the summary, then it becomes the primary button, at the same size as Cancel.
 
 ## 0.4.2 - 2026-10-25
 

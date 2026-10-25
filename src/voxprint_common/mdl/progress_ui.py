@@ -18,7 +18,7 @@ from typing import assert_never
 from voxprint_common.cli_protocol import EXIT_CANCELLED, EXIT_FAILED, EXIT_OK
 from voxprint_common.gpu_probe import GpuDevice
 from voxprint_common.i18n import get_language, tr_lang
-from voxprint_common.mdl.job import Outcome, verify_repair
+from voxprint_common.mdl.job import Outcome, verify_repair, verify_summary
 from voxprint_common.mdl.names import DISPLAY_NAME
 from voxprint_common.mdl.present import format_size as localized_size
 from voxprint_common.mdl.status import JobState, Status, Step
@@ -46,6 +46,9 @@ __all__ = [
 _VERIFY_WIDTH = 1280
 _VERIFY_HEIGHT = 720
 _COLUMN_PAD = 28
+_ROW_HEIGHT = 36
+_ROW_BAR_HEIGHT = 17
+_CELL_PAD_LEFT = 8
 
 RETRY_TEXT = "Повторить"
 CANCEL_TEXT = "Отмена"
@@ -572,7 +575,15 @@ def _verify_shell(status: Status, *, lang: str, size: tuple[int, int]) -> tuple[
     table.setWordWrap(False)
     table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
     table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
-    table.verticalHeader().setDefaultSectionSize(36)
+    table.verticalHeader().setDefaultSectionSize(_ROW_HEIGHT)
+    table.setStyleSheet(
+        "QTableWidget::item {"
+        f" padding-left: {_CELL_PAD_LEFT}px; padding-right: 6px;"
+        "}"
+        "QHeaderView::section {"
+        f" padding-left: {_CELL_PAD_LEFT}px; padding-right: 6px;"
+        "}"
+    )
     header = table.horizontalHeader()
     header.setStretchLastSection(False)
     header.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
@@ -589,8 +600,8 @@ def _verify_shell(status: Status, *, lang: str, size: tuple[int, int]) -> tuple[
     cancel = QPushButton(tr_lang("mdl.cancel", lang))
     cancel.setObjectName("cancel")
     close = QPushButton(tr_lang("mdl.close", lang))
-    close.setObjectName("primary")
-    close.setEnabled(_phase_of(status) == "summary")
+    close.setObjectName("close")
+    close.setEnabled(False)
     buttons.addStretch(1)
     buttons.addWidget(cancel)
     buttons.addWidget(close)
@@ -634,14 +645,16 @@ def _wire_verify(
 def _fill_verify(window: object, status: Status, lang: str) -> None:
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QColor
-    from PySide6.QtWidgets import QProgressBar, QTableWidgetItem
+    from PySide6.QtWidgets import QTableWidgetItem
 
     from voxprint_common.ui.theme import AMBER, GREEN, RED
 
     phase = window._verify_phase
     phase.setText(_phase_label(_phase_of(status), lang))
     table = window._verify_table
-    table.setRowCount(len(status.steps))
+    _drop_stray_bars(table)
+    if table.rowCount() != len(status.steps):
+        table.setRowCount(len(status.steps))
     done = 0
     total = 0
     for row, step in enumerate(status.steps):
@@ -657,7 +670,12 @@ def _fill_verify(window: object, status: Status, lang: str) -> None:
         for column, text in enumerate(values):
             if column == 2:
                 continue
-            item = QTableWidgetItem(text)
+            item = table.item(row, column)
+            if item is None:
+                item = QTableWidgetItem(text)
+                table.setItem(row, column, item)
+            else:
+                item.setText(text)
             if column == 1:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             else:
@@ -666,14 +684,9 @@ def _fill_verify(window: object, status: Status, lang: str) -> None:
                 color = _status_color(step.state, GREEN, AMBER, RED)
                 if color:
                     item.setForeground(QColor(color))
-            table.setItem(row, column, item)
-        bar = QProgressBar()
-        bar.setRange(0, 1000)
         fraction = 0.0 if step.size <= 0 else min(1.0, step.received / step.size)
+        bar = _row_bar(table, row)
         bar.setValue(int(fraction * 1000))
-        bar.setFormat("%p%")
-        bar.setTextVisible(True)
-        table.setCellWidget(row, 2, bar)
     _size_verify_columns(table, lang)
     overall = window._verify_overall
     if total:
@@ -683,20 +696,84 @@ def _fill_verify(window: object, status: Status, lang: str) -> None:
         overall.setRange(0, 1)
         overall.setValue(0)
     counts = _count_states(status)
-    summary = window._verify_summary
-    summary.setText(
-        tr_lang(
-            "mdl.verify.summary",
-            lang,
-            ok=counts["ok"],
-            missing=counts["missing"],
-            corrupt=counts["corrupt"],
-            repaired=counts["repaired"],
-        )
-    )
-    if _phase_of(status) == "summary":
-        window._verify_close.setEnabled(True)
-        window._verify_cancel.setEnabled(False)
+    window._verify_summary.setText(verify_summary(counts, lang))
+    done_phase = _phase_of(status) == "summary"
+    window._verify_close.setEnabled(done_phase)
+    window._verify_cancel.setEnabled(not done_phase)
+    _style_verify_buttons(window._verify_cancel, window._verify_close, done=done_phase)
+
+
+def _drop_stray_bars(table: object) -> None:
+    """Hide progress bars that a refill left behind in the model column."""
+    from PySide6.QtWidgets import QProgressBar
+
+    live: set[int] = set()
+    for row in range(table.rowCount()):
+        for column in range(table.columnCount()):
+            widget = table.cellWidget(row, column)
+            if widget is not None:
+                live.add(id(widget))
+    viewport = table.viewport()
+    for child in list(viewport.children()):
+        if id(child) in live:
+            continue
+        bars = child.findChildren(QProgressBar) if hasattr(child, "findChildren") else []
+        if isinstance(child, QProgressBar) or bars:
+            child.hide()
+            child.setParent(None)
+            child.deleteLater()
+
+
+def _row_bar(table: object, row: int) -> object:
+    """Return the progress bar for ``row``, creating a centred one of fixed height."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QHBoxLayout, QProgressBar, QWidget
+
+    host = table.cellWidget(row, 2)
+    bar = host.findChild(QProgressBar) if host is not None else None
+    if bar is not None:
+        return bar
+    host = QWidget()
+    host.setStyleSheet("background: transparent;")
+    layout = QHBoxLayout(host)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(0)
+    bar = QProgressBar()
+    bar.setObjectName("rowProgress")
+    bar.setRange(0, 1000)
+    bar.setFixedHeight(_ROW_BAR_HEIGHT)
+    bar.setFormat("%p%")
+    bar.setTextVisible(True)
+    layout.addWidget(bar, 0, Qt.AlignmentFlag.AlignVCenter)
+    table.setCellWidget(row, 2, host)
+    return bar
+
+
+def _style_verify_buttons(cancel: object, close: object, *, done: bool) -> None:
+    """Keep Cancel and Close the same size.
+
+    Close uses the secondary style while the check is still running, and the
+    primary style only after the summary is ready.
+    """
+    width = 0
+    height = 0
+    for name in ("close", "primary"):
+        close.setObjectName(name)
+        close.style().unpolish(close)
+        close.style().polish(close)
+        hint = close.sizeHint()
+        width = max(width, hint.width())
+        height = max(height, hint.height())
+    cancel.style().unpolish(cancel)
+    cancel.style().polish(cancel)
+    hint = cancel.sizeHint()
+    width = max(width, hint.width())
+    height = max(height, hint.height())
+    close.setObjectName("primary" if done else "close")
+    close.style().unpolish(close)
+    close.style().polish(close)
+    cancel.setFixedSize(width, height)
+    close.setFixedSize(width, height)
 
 
 def _size_verify_columns(table: object, lang: str) -> None:

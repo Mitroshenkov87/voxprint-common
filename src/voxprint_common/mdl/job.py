@@ -23,6 +23,7 @@ from voxprint_common.cli_protocol import EXIT_CANCELLED, EXIT_FAILED, EXIT_OK
 from voxprint_common.gpu_probe import GpuDevice, VramTier, query_gpus
 from voxprint_common.hashing import HashMismatch
 from voxprint_common.hashing import verify as verify_hash
+from voxprint_common.i18n import get_language, tr_lang
 from voxprint_common.mdl.catalog import (
     MODEL_PREFIX,
     AppManifest,
@@ -583,11 +584,33 @@ def _health_counts(status: Status) -> dict[str, int]:
     return counts
 
 
-def _health_message(counts: Mapping[str, int]) -> str:
-    return (
-        f"{counts.get('ok', 0)} ok, {counts.get('missing', 0)} missing, "
-        f"{counts.get('corrupt', 0)} corrupt, {counts.get('repaired', 0)} repaired"
+def verify_summary(counts: Mapping[str, int], lang: str | None = None) -> str:
+    """Return the check-and-repair summary in ``lang``.
+
+    Each count selects a plural form, so Russian, Ukrainian, and Latvian
+    change the word with the number.
+
+    Args:
+        counts: ``ok``, ``missing``, ``corrupt``, and ``repaired``.
+        lang: Catalog language. The active language is used when omitted.
+    """
+    code = lang or get_language()
+    ok = tr_lang("mdl.verify.summary.ok", code, count=int(counts.get("ok", 0)))
+    missing = tr_lang("mdl.verify.summary.missing", code, count=int(counts.get("missing", 0)))
+    corrupt = tr_lang("mdl.verify.summary.corrupt", code, count=int(counts.get("corrupt", 0)))
+    repaired = tr_lang("mdl.verify.summary.repaired", code, count=int(counts.get("repaired", 0)))
+    return tr_lang(
+        "mdl.verify.summary",
+        code,
+        ok=ok,
+        missing=missing,
+        corrupt=corrupt,
+        repaired=repaired,
     )
+
+
+def _health_message(counts: Mapping[str, int]) -> str:
+    return verify_summary(counts)
 
 
 def _stop(cancel: threading.Event | None) -> bool:

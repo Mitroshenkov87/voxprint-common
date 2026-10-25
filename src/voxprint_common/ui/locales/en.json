@@ -89,7 +89,23 @@
   "mdl.verify.status.pending": "Waiting",
   "mdl.verify.status.repaired": "Repaired",
   "mdl.verify.status.repairing": "Repairing",
-  "mdl.verify.summary": "{ok} OK, {missing} missing, {corrupt} corrupt, {repaired} repaired",
+  "mdl.verify.summary": "{ok}, {missing}, {corrupt}, {repaired}",
+  "mdl.verify.summary.corrupt": {
+    "one": "{count} corrupt",
+    "other": "{count} corrupt"
+  },
+  "mdl.verify.summary.missing": {
+    "one": "{count} missing",
+    "other": "{count} missing"
+  },
+  "mdl.verify.summary.ok": {
+    "one": "{count} OK",
+    "other": "{count} OK"
+  },
+  "mdl.verify.summary.repaired": {
+    "one": "{count} repaired",
+    "other": "{count} repaired"
+  },
   "mdl.open": "Open {app}",
   "mdl.open_folder": "Open folder",
   "mdl.open_short": "Open",
