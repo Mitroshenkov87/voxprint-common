@@ -8,6 +8,7 @@ manifest with one ref per app.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import threading
 import time
@@ -22,6 +23,7 @@ from voxprint_common.cli_protocol import EXIT_CANCELLED, EXIT_FAILED, EXIT_OK
 from voxprint_common.gpu_probe import GpuDevice, VramTier, query_gpus
 from voxprint_common.hashing import HashMismatch
 from voxprint_common.hashing import verify as verify_hash
+from voxprint_common.i18n import get_language, tr_lang
 from voxprint_common.mdl.catalog import (
     MODEL_PREFIX,
     AppManifest,
@@ -51,7 +53,7 @@ from voxprint_common.power import keep_awake
 from voxprint_common.runtime_manifest import ManifestError, add_ref, load
 from voxprint_common.suite_settings import mdl_parallel_files
 
-__all__ = ["Outcome", "detect_tier", "download", "plan", "verify"]
+__all__ = ["Outcome", "detect_tier", "download", "plan", "verify", "verify_repair"]
 
 ProgressFn = Callable[[float | None, str], None]
 StatusFn = Callable[[Status], None]
@@ -320,6 +322,308 @@ def verify(
         return _publish(status, EXIT_FAILED, str(exc), on_status)
     status.error = ""
     return _publish(status, EXIT_OK, _ready_message(status), on_status)
+
+
+def verify_repair(
+    model_ids: Sequence[str] | None = None,
+    *,
+    repair: bool = True,
+    manifests: Sequence[Path] | None = None,
+    devices: Sequence[GpuDevice] | None = None,
+    on_status: StatusFn | None = None,
+    cancel: threading.Event | None = None,
+    opener: object | None = None,
+    guard: UrlGuard | None = None,
+) -> Outcome:
+    """Check models, then download only the missing or corrupt ones.
+
+    Phase ``verify`` hashes each model and reports ``ok``, ``missing``, or
+    ``corrupt``. Phase ``repair`` runs when ``repair`` is true and a model is
+    missing or corrupt. It downloads those models and leaves the healthy ones
+    untouched. Phase ``summary`` records the counts on the status file.
+
+    Args:
+        model_ids: Models to check. ``None`` checks the planned tier.
+        repair: Download models that are missing or corrupt.
+        manifests: ``mdl.json`` paths. When omitted, installed apps are discovered.
+        devices: GPUs to plan for. When omitted, nvidia-smi is queried.
+        on_status: Called with the published snapshot.
+        cancel: Set to stop the check or the repair.
+        opener: Passed through when an app manifest still needs descriptors.
+        guard: URL rules for that fetch and for the repair download.
+    """
+    only = None if model_ids is None else tuple(model_ids)
+    try:
+        parsed, tier, cards = _inputs(manifests, devices)
+        memory_gib, compute = _card(cards)
+        files = plan_files(
+            parsed,
+            tier,
+            memory_gib=memory_gib,
+            compute=compute,
+            only=only,
+            opener=opener,
+            guard=guard,
+        )
+    except (CatalogError, OSError) as exc:
+        return _fail(str(exc), on_status)
+    groups = _model_groups(files)
+    status = Status(state=JobState.DOWNLOADING, tier=tier.value)
+    status.extra = {"mode": "verify", "phase": "verify", "repair": repair}
+    status.steps = [_model_step(model_id, items) for model_id, items in groups]
+    status.recompute()
+    publisher = _Publisher(status, on_status, None, None)
+    publisher.push(force=True)
+    if _stop(cancel):
+        return _stopped(status, publisher)
+    original: dict[str, str] = {}
+    for (model_id, items), step in zip(groups, status.steps, strict=True):
+        if _stop(cancel):
+            return _stopped(status, publisher)
+        kind = _hash_model(items, step, status, publisher, cancel)
+        if kind is None:
+            return _stopped(status, publisher)
+        original[model_id] = kind
+        step.state = kind
+        if kind == "ok":
+            step.received = step.size
+        status.recompute()
+        publisher.push(force=True)
+    bad = [model_id for model_id, kind in original.items() if kind in {"missing", "corrupt"}]
+    if repair and bad:
+        status.extra["phase"] = "repair"
+        for step in status.steps:
+            if step.item_id in bad:
+                step.state = "repairing"
+                step.received = 0
+        status.recompute()
+        publisher.push(force=True)
+        if _stop(cancel):
+            return _stopped(status, publisher)
+
+        def relay(snap: Status) -> None:
+            _apply_repair_progress(status, snap)
+            publisher.push()
+
+        outcome = download(
+            manifests,
+            devices=cards,
+            on_status=relay,
+            cancel=cancel,
+            priority=False,
+            display=False,
+            workers=1,
+            only=tuple(bad),
+            opener=opener,
+            guard=guard,
+        )
+        if outcome.code == EXIT_CANCELLED or _stop(cancel):
+            return _stopped(status, publisher)
+        _apply_repair_progress(status, outcome.status)
+        if outcome.code == EXIT_OK:
+            for step in status.steps:
+                if step.item_id in bad and step.state != "failed":
+                    step.state = "repaired"
+                    step.received = step.size
+        if outcome.code != EXIT_OK:
+            for step in status.steps:
+                if step.state == "repairing":
+                    step.state = "failed"
+            status.state = JobState.FAILED
+            status.error = outcome.message
+            status.extra["phase"] = "summary"
+            status.recompute()
+            return _publish(status, EXIT_FAILED, outcome.message, on_status)
+    if not bad or repair:
+        try:
+            apply_hooks(files, deep=True)
+        except HookError as exc:
+            _mark_hook(status, exc)
+            status.extra["phase"] = "summary"
+            return _publish(status, EXIT_FAILED, str(exc), on_status)
+    status.extra["phase"] = "summary"
+    counts = _health_counts(status)
+    status.extra["counts"] = counts
+    failed = counts["missing"] + counts["corrupt"] + counts["failed"]
+    status.state = JobState.READY if failed == 0 else JobState.FAILED
+    status.error = "" if failed == 0 else _health_message(counts)
+    status.recompute()
+    code = EXIT_OK if failed == 0 else EXIT_FAILED
+    return _publish(status, code, _health_message(counts), on_status)
+
+
+def _model_groups(files: Sequence[PlannedFile]) -> list[tuple[str, list[PlannedFile]]]:
+    order: list[str] = []
+    groups: dict[str, list[PlannedFile]] = {}
+    for item in files:
+        model_id = item.model_id or (item.model_ids[0] if item.model_ids else item.label)
+        if model_id not in groups:
+            order.append(model_id)
+            groups[model_id] = []
+        groups[model_id].append(item)
+    return [(model_id, groups[model_id]) for model_id in order]
+
+
+def _model_step(model_id: str, items: Sequence[PlannedFile]) -> Step:
+    display = next((item.display_name for item in items if item.display_name), model_id)
+    apps: list[str] = []
+    for item in items:
+        for app in item.apps:
+            if app not in apps:
+                apps.append(app)
+    return Step(
+        model=display,
+        size=sum(item.size for item in items),
+        source="",
+        speed_bps=0.0,
+        eta_s=None,
+        state="pending",
+        received=0,
+        sha256=items[0].sha256 if len(items) == 1 else "",
+        apps=apps,
+        item_id=model_id,
+        display_name=display,
+    )
+
+
+def _hash_model(
+    items: Sequence[PlannedFile],
+    step: Step,
+    status: Status,
+    publisher: _Publisher,
+    cancel: threading.Event | None,
+) -> str | None:
+    """Hash one model's files.
+
+    Returns ``ok``, ``missing``, or ``corrupt``. ``None`` means the job was cancelled.
+    """
+    step.state = "checking"
+    step.received = 0
+    status.recompute()
+    publisher.push(force=True)
+    hashed = 0
+    for item in items:
+        if _stop(cancel):
+            return None
+        if not item.destination.is_file():
+            step.received = hashed
+            return "missing"
+
+        def tick(done: int, base: int = hashed) -> None:
+            _hash_tick(step, status, publisher, base + done)
+
+        try:
+            found, amount = _hash_file(item.destination, cancel, tick)
+        except OSError:
+            logger.warning("could not hash %s", item.destination)
+            return "corrupt"
+        if found is None:
+            return None
+        hashed += amount
+        step.received = min(step.size, hashed)
+        status.recompute()
+        publisher.push(force=True)
+        if found != item.sha256.strip().lower():
+            return "corrupt"
+    return "ok"
+
+
+def _hash_tick(step: Step, status: Status, publisher: _Publisher, done: int) -> None:
+    step.received = min(step.size, done)
+    status.recompute()
+    publisher.push()
+
+
+def _hash_file(
+    path: Path,
+    cancel: threading.Event | None,
+    on_chunk: Callable[[int], None],
+) -> tuple[str | None, int]:
+    digest = hashlib.sha256()
+    read = 0
+    with path.open("rb") as handle:
+        while True:
+            if _stop(cancel):
+                return None, read
+            block = handle.read(1024 * 1024)
+            if not block:
+                break
+            digest.update(block)
+            read += len(block)
+            on_chunk(read)
+    return digest.hexdigest(), read
+
+
+def _apply_repair_progress(status: Status, snap: Status) -> None:
+    by_model: dict[str, list[Step]] = {}
+    for row in snap.steps:
+        by_model.setdefault(row.item_id, []).append(row)
+    for step in status.steps:
+        if step.state == "ok":
+            continue
+        rows = by_model.get(step.item_id)
+        if not rows:
+            continue
+        step.received = sum(min(row.received, row.size) for row in rows)
+        if rows and all(row.state == "verified" for row in rows):
+            step.state = "repaired"
+            step.received = step.size
+        elif any(row.state == "failed" for row in rows):
+            step.state = "failed"
+        else:
+            step.state = "repairing"
+    status.extra["phase"] = "repair"
+    status.recompute()
+
+
+def _health_counts(status: Status) -> dict[str, int]:
+    counts = {"ok": 0, "missing": 0, "corrupt": 0, "repaired": 0, "failed": 0}
+    for step in status.steps:
+        if step.state in counts:
+            counts[step.state] += 1
+    return counts
+
+
+def verify_summary(counts: Mapping[str, int], lang: str | None = None) -> str:
+    """Return the check-and-repair summary in ``lang``.
+
+    Each count selects a plural form, so Russian, Ukrainian, and Latvian
+    change the word with the number.
+
+    Args:
+        counts: ``ok``, ``missing``, ``corrupt``, and ``repaired``.
+        lang: Catalog language. The active language is used when omitted.
+    """
+    code = lang or get_language()
+    ok = tr_lang("mdl.verify.summary.ok", code, count=int(counts.get("ok", 0)))
+    missing = tr_lang("mdl.verify.summary.missing", code, count=int(counts.get("missing", 0)))
+    corrupt = tr_lang("mdl.verify.summary.corrupt", code, count=int(counts.get("corrupt", 0)))
+    repaired = tr_lang("mdl.verify.summary.repaired", code, count=int(counts.get("repaired", 0)))
+    return tr_lang(
+        "mdl.verify.summary",
+        code,
+        ok=ok,
+        missing=missing,
+        corrupt=corrupt,
+        repaired=repaired,
+    )
+
+
+def _health_message(counts: Mapping[str, int]) -> str:
+    return verify_summary(counts)
+
+
+def _stop(cancel: threading.Event | None) -> bool:
+    return cancel is not None and cancel.is_set()
+
+
+def _stopped(status: Status, publisher: _Publisher) -> Outcome:
+    status.state = JobState.CANCELLED
+    status.error = "cancelled"
+    status.extra["phase"] = "summary"
+    status.recompute()
+    publisher.push(force=True)
+    return Outcome(EXIT_CANCELLED, "cancelled", status)
 
 
 def _use_fallback(files: Sequence[PlannedFile], status: Status) -> list[PlannedFile] | None:

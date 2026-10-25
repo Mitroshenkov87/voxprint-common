@@ -107,7 +107,7 @@ _LOCK_TIMEOUT = 30.0
 _WINDOW_KEYS = ("width", "height", "x", "y")
 _GEOMETRY_INTS = ("x", "y", "w", "h")
 _good_path: str | None = None
-_good_token: tuple[str, int, int] | None = None
+_good_token: tuple[str, int, int, int] | None = None
 _good: dict[str, Any] = {}
 
 
@@ -120,9 +120,11 @@ def read() -> dict[str, Any]:
     """Return the suite file as a dict.
 
     A missing file yields an empty dict. A leading BOM is accepted. When the
-    file's size or modification time changes, it is read again. Unreadable
-    text, a partial document, or a value that is not an object is ignored, and
-    the last good object for this path is returned instead.
+    file's inode, size, or modification time changes, it is read again. An
+    atomic replace can keep the previous timestamp and size, so the inode is
+    part of that check. Unreadable text, a partial document, or a value that
+    is not an object is ignored, and the last good object for this path is
+    returned instead.
 
     Returns:
         The raw object. Keys this package does not interpret are included.
@@ -134,7 +136,7 @@ def read() -> dict[str, Any]:
         stat = path.stat()
     except OSError:
         return {}
-    token = (key, stat.st_mtime_ns, stat.st_size)
+    token = (key, stat.st_ino, stat.st_mtime_ns, stat.st_size)
     if token == _good_token:
         return dict(_good)
     try:
@@ -505,7 +507,9 @@ def set_keymap(document: Mapping[str, Any]) -> None:
     with exclusive_lock(target.with_name(f"{target.name}.lock"), timeout=_LOCK_TIMEOUT):
         data = read()
         data["keymap"] = dict(document)
-        write_text(target, json.dumps(_ordered(data), indent=2, ensure_ascii=False) + "\n")
+        payload = _ordered(data)
+        write_text(target, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+        _remember(target, payload)
 
 
 def set_value(key: str, value: object) -> object:
@@ -530,7 +534,9 @@ def set_value(key: str, value: object) -> object:
         data[key] = stored
         if key == "ui.geometry":
             data.pop("ui.window", None)
-        write_text(target, json.dumps(_ordered(data), indent=2, ensure_ascii=False) + "\n")
+        payload = _ordered(data)
+        write_text(target, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+        _remember(target, payload)
     return stored
 
 
@@ -725,7 +731,30 @@ def _store_geometry(stored: dict[str, int | bool]) -> None:
         data = read()
         data["ui.geometry"] = stored
         data.pop("ui.window", None)
-        write_text(target, json.dumps(_ordered(data), indent=2, ensure_ascii=False) + "\n")
+        payload = _ordered(data)
+        write_text(target, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+        _remember(target, payload)
+
+
+def _remember(path: Path, data: dict[str, Any]) -> None:
+    """Keep ``data`` as the last good object after this process publishes it.
+
+    The publish is an atomic replace. On a clock that does not advance, the
+    new file can share the previous size and timestamp. Recording the object
+    that was just written keeps the next read in this process aligned with
+    the file. The token still includes the inode, so another process reloads
+    when the replace lands on a new inode.
+    """
+    global _good, _good_path, _good_token
+    key = str(path)
+    _good_path = key
+    _good = dict(data)
+    try:
+        stat = path.stat()
+    except OSError:
+        _good_token = None
+        return
+    _good_token = (key, stat.st_ino, stat.st_mtime_ns, stat.st_size)
 
 
 def _ordered(data: dict[str, Any]) -> dict[str, Any]:

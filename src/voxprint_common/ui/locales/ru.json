@@ -75,6 +75,47 @@
   "mdl.manage.status.missing": "Не установлено",
   "mdl.manage.status.ok": "Установлено",
   "mdl.manage.verify": "Проверить файлы",
+  "mdl.verify.column.model": "Модель",
+  "mdl.verify.column.progress": "Прогресс",
+  "mdl.verify.column.size": "Размер",
+  "mdl.verify.column.status": "Статус",
+  "mdl.verify.heading": "Проверка и восстановление моделей",
+  "mdl.verify.phase.repair": "Восстановление файлов, которые не прошли проверку",
+  "mdl.verify.phase.summary": "Итог",
+  "mdl.verify.phase.verify": "Проверка каждого файла",
+  "mdl.verify.status.checking": "Проверка",
+  "mdl.verify.status.corrupt": "Повреждён",
+  "mdl.verify.status.failed": "Ошибка",
+  "mdl.verify.status.missing": "Нет файла",
+  "mdl.verify.status.ok": "В порядке",
+  "mdl.verify.status.pending": "Ожидание",
+  "mdl.verify.status.repaired": "Восстановлен",
+  "mdl.verify.status.repairing": "Загрузка",
+  "mdl.verify.summary": "{ok}, {missing}, {corrupt}, {repaired}",
+  "mdl.verify.summary.corrupt": {
+    "few": "{count} повреждены",
+    "many": "{count} повреждено",
+    "one": "{count} повреждена",
+    "other": "{count} повреждено"
+  },
+  "mdl.verify.summary.missing": {
+    "few": "{count} отсутствуют",
+    "many": "{count} отсутствует",
+    "one": "{count} отсутствует",
+    "other": "{count} отсутствует"
+  },
+  "mdl.verify.summary.ok": {
+    "few": "{count} в порядке",
+    "many": "{count} в порядке",
+    "one": "{count} в порядке",
+    "other": "{count} в порядке"
+  },
+  "mdl.verify.summary.repaired": {
+    "few": "{count} восстановлены",
+    "many": "{count} восстановлено",
+    "one": "{count} восстановлена",
+    "other": "{count} восстановлено"
+  },
   "mdl.open": "Открыть {app}",
   "mdl.open_folder": "Открыть папку",
   "mdl.open_short": "Открыть",

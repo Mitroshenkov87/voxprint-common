@@ -3,6 +3,10 @@
 The file is ``<home>/state/mdl-status.json``. Top-level keys other than the
 ones this module writes are preserved. ``ready`` is true only when ``state``
 is ``ready``.
+
+A check-and-repair job sets ``extra["phase"]`` to ``verify``, ``repair``, or
+``summary``. Each step ``state`` is ``checking``, ``ok``, ``missing``,
+``corrupt``, ``repairing``, ``repaired``, or ``failed``.
 """
 
 from __future__ import annotations

@@ -75,6 +75,47 @@
   "mdl.manage.status.missing": "Не встановлено",
   "mdl.manage.status.ok": "Встановлено",
   "mdl.manage.verify": "Перевірити файли",
+  "mdl.verify.column.model": "Модель",
+  "mdl.verify.column.progress": "Прогрес",
+  "mdl.verify.column.size": "Розмір",
+  "mdl.verify.column.status": "Статус",
+  "mdl.verify.heading": "Перевірка й відновлення моделей",
+  "mdl.verify.phase.repair": "Відновлення файлів, які не пройшли перевірку",
+  "mdl.verify.phase.summary": "Підсумок",
+  "mdl.verify.phase.verify": "Перевірка кожного файлу",
+  "mdl.verify.status.checking": "Перевірка",
+  "mdl.verify.status.corrupt": "Пошкоджено",
+  "mdl.verify.status.failed": "Помилка",
+  "mdl.verify.status.missing": "Немає файлу",
+  "mdl.verify.status.ok": "Гаразд",
+  "mdl.verify.status.pending": "Очікування",
+  "mdl.verify.status.repaired": "Відновлено",
+  "mdl.verify.status.repairing": "Відновлення",
+  "mdl.verify.summary": "{ok}, {missing}, {corrupt}, {repaired}",
+  "mdl.verify.summary.corrupt": {
+    "few": "{count} пошкоджені",
+    "many": "{count} пошкоджено",
+    "one": "{count} пошкоджена",
+    "other": "{count} пошкоджено"
+  },
+  "mdl.verify.summary.missing": {
+    "few": "{count} відсутні",
+    "many": "{count} відсутньо",
+    "one": "{count} відсутня",
+    "other": "{count} відсутньо"
+  },
+  "mdl.verify.summary.ok": {
+    "few": "{count} гаразд",
+    "many": "{count} гаразд",
+    "one": "{count} гаразд",
+    "other": "{count} гаразд"
+  },
+  "mdl.verify.summary.repaired": {
+    "few": "{count} відновлені",
+    "many": "{count} відновлено",
+    "one": "{count} відновлена",
+    "other": "{count} відновлено"
+  },
   "mdl.open": "Відкрити {app}",
   "mdl.open_folder": "Відкрити папку",
   "mdl.open_short": "Відкрити",
