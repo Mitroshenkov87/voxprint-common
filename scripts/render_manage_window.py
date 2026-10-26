@@ -17,7 +17,14 @@ if os.environ.get("MDL_RENDER_SCALE") == "150":
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from voxprint_common.i18n import set_language, tr_lang
-from voxprint_common.mdl.present import ManageRow, ManageView, Snapshot, format_size, view_for
+from voxprint_common.mdl.present import (
+    ManageRow,
+    ManageView,
+    Snapshot,
+    display_path,
+    format_size,
+    view_for,
+)
 from voxprint_common.ui.mdl_window import grab_view
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -74,7 +81,7 @@ def _page(lang: str) -> ManageView:
             used=format_size(8_400_000_000, lang=lang),
             free=format_size(51_750_000_000, lang=lang),
             app=app,
-            path="C:/Program Files/VOXPrint AI Suite/Model Forge",
+            path=display_path("C:/Program Files/VOXPrint AI Suite/Model Forge"),
         ),
         empty_installed=tr_lang("mdl.manage.empty_installed", lang, app=app),
         empty_available=tr_lang("mdl.manage.empty_available", lang),

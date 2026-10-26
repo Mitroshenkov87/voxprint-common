@@ -8,9 +8,11 @@ log. The sentences a person reads come from :mod:`voxprint_common.i18n`.
 from __future__ import annotations
 
 import math
+import os
 import urllib.parse
 from dataclasses import dataclass, field
 from enum import StrEnum
+from pathlib import Path, PureWindowsPath
 
 from voxprint_common.branding import identity_colour
 from voxprint_common.i18n import get_language, tr, tr_lang
@@ -35,6 +37,7 @@ __all__ = [
     "SmoothedProgress",
     "Snapshot",
     "WindowView",
+    "display_path",
     "explain",
     "format_eta",
     "format_size",
@@ -408,6 +411,22 @@ def _format_number(value: float, *, decimals: int, lang: str | None) -> str:
     if not fraction:
         return sign + whole
     return f"{sign}{whole}{',' if comma else '.'}{fraction}"
+
+
+def display_path(path: Path | str) -> str:
+    """Return ``path`` with the separators of the system it names.
+
+    A Windows drive path such as ``C:/Program Files/...`` is shown with
+    backslashes, including when the manage window is painted off Windows.
+    A POSIX path keeps its forward slashes.
+
+    Args:
+        path: Directory the disk line names.
+    """
+    text = str(path)
+    if os.name == "nt" or (len(text) >= 2 and text[0].isalpha() and text[1] == ":"):
+        return str(PureWindowsPath(text))
+    return text
 
 
 def format_size(amount: int, *, lang: str | None = None) -> str:

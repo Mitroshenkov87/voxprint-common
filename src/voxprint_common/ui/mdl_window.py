@@ -17,6 +17,7 @@ import subprocess
 import sys
 import threading
 import time
+from dataclasses import replace
 from enum import StrEnum
 from pathlib import Path
 from typing import assert_never
@@ -113,6 +114,29 @@ def _taskbar_id(app_id: str) -> None:
         if spec.id == app_id:
             set_app_user_model_id(install_identity(spec.windows_name).app_user_model_id)
             return
+
+
+def _scan_failure_view(focus: str, technical: str) -> WindowView:
+    """Manage page shown when the background scan could not be built."""
+    manage = ManageView(
+        (),
+        (),
+        "",
+        tr("mdl.manage.scan_failed"),
+        tr("mdl.manage.empty_available"),
+    )
+    base = view_for(Snapshot(), mode="manage", focus_app=focus, manage=manage)
+    return replace(
+        base,
+        show_error=True,
+        show_retry=True,
+        error_what_title=tr("mdl.error.what"),
+        error_what=tr("mdl.manage.scan_failed"),
+        error_do_title=tr("mdl.error.do"),
+        error_do=tr("mdl.manage.scan_retry"),
+        technical=technical,
+        retry_label=tr("mdl.retry"),
+    )
 
 
 def _compose_manage_view(controller: object, app_id: str, manifest: Path) -> WindowView:
@@ -369,6 +393,68 @@ def _builder(kind: str) -> object:
             return False
         return False
 
+    def _mix(colour: str, toward: float) -> QColor:
+        """Shift ``colour`` toward white when ``toward`` is positive, else black."""
+        base = QColor(colour)
+        if toward >= 0:
+            amount = min(1.0, toward)
+            red = int(base.red() + (255 - base.red()) * amount)
+            green = int(base.green() + (255 - base.green()) * amount)
+            blue = int(base.blue() + (255 - base.blue()) * amount)
+        else:
+            amount = min(1.0, -toward)
+            red = int(base.red() * (1.0 - amount))
+            green = int(base.green() * (1.0 - amount))
+            blue = int(base.blue() * (1.0 - amount))
+        return QColor(red, green, blue)
+
+    def _paint_cube(painter: QPainter, tile: QRectF, colour: str) -> None:
+        """Isometric cube, the Model Forge glyph, about 60% of the tile."""
+        cx = tile.center().x()
+        cy = tile.center().y()
+        half = tile.width() * 0.31
+        top = (cx, cy - 0.55 * half)
+        upper_left = (cx - half, cy - 0.22 * half)
+        upper_right = (cx + half, cy - 0.22 * half)
+        centre = (cx, cy + 0.05 * half)
+        lower_left = (cx - half, cy + 0.28 * half)
+        lower_right = (cx + half, cy + 0.28 * half)
+        bottom = (cx, cy + 0.62 * half)
+        faces = (
+            (0.35, (top, upper_right, centre, upper_left)),
+            (0.0, (upper_left, centre, bottom, lower_left)),
+            (-0.42, (upper_right, lower_right, bottom, centre)),
+        )
+        painter.setPen(Qt.PenStyle.NoPen)
+        for toward, corners in faces:
+            path = QPainterPath()
+            start, *rest = corners
+            path.moveTo(start[0], start[1])
+            for point_x, point_y in rest:
+                path.lineTo(point_x, point_y)
+            path.closeSubpath()
+            painter.setBrush(_mix(colour, toward))
+            painter.drawPath(path)
+
+    def _paint_vox_mark(painter: QPainter, tile: QRectF, colour: str) -> None:
+        """VOXPrint V, used when an app has no icon file and no glyph."""
+        pen = QPen(QColor(colour))
+        pen.setWidthF(max(2.0, tile.width() * 0.15))
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        margin = tile.width() * 0.26
+        left = tile.left() + margin
+        right = tile.right() - margin
+        top = tile.top() + margin * 0.7
+        bottom = tile.bottom() - margin * 0.5
+        path = QPainterPath()
+        path.moveTo(left, top)
+        path.lineTo((left + right) / 2, bottom)
+        path.lineTo(right, top)
+        painter.drawPath(path)
+
     def paint_motif(painter: QPainter, rect: object, shape: str, colour: str) -> None:
         box = rect
         painter.setPen(Qt.PenStyle.NoPen)
@@ -378,6 +464,9 @@ def _builder(kind: str) -> object:
         painter.setBrush(gradient)
         radius = max(4.0, float(box.width()) * 0.18)
         painter.drawRoundedRect(box, radius, radius)
+        if shape not in Motif._value2member_map_:
+            _paint_vox_mark(painter, box, colour)
+            return
         pen = QPen(QColor(colour))
         pen.setWidth(3)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
@@ -387,7 +476,7 @@ def _builder(kind: str) -> object:
         top = int(box.top()) + 12
         width = max(8, int(box.width()) - 24)
         height = max(8, int(box.height()) - 24)
-        motif = Motif(shape) if shape in Motif._value2member_map_ else Motif.DOT
+        motif = Motif(shape)
         match motif:
             case Motif.LENS:
                 painter.drawEllipse(left, top, width, height)
@@ -418,7 +507,7 @@ def _builder(kind: str) -> object:
                         2,
                     )
             case Motif.FORGE:
-                painter.drawRoundedRect(left + 4, top + 4, width - 8, height - 8, 4, 4)
+                _paint_cube(painter, box, colour)
             case Motif.DOT:
                 side = min(width, height) // 2
                 painter.drawEllipse(left + width // 4, top + height // 4, side, side)
@@ -628,6 +717,8 @@ def _builder(kind: str) -> object:
             self._scan_running = False
             self._scan_again = False
             self._scan_generation = 0
+            self._scan_failures = 0
+            self._check_busy = False
             self._pending_view: tuple[int, WindowView] | None = None
             self._height_cap = 900
             self.setStyleSheet(_stylesheet(False))
@@ -840,6 +931,11 @@ def _builder(kind: str) -> object:
             super().keyPressEvent(event)
 
         def closeEvent(self, event: object) -> None:
+            if self._check_busy:
+                ignore = getattr(event, "ignore", None)
+                if callable(ignore):
+                    ignore()
+                return
             view = self._view
             busy = bool(view and (view.show_pause or view.show_cancel) and not view.all_set)
             if busy and not self._quitting:
@@ -982,6 +1078,11 @@ def _builder(kind: str) -> object:
                     self._quitting = True
                     self.close()
                 return
+            if view.mode == "manage" and view.show_retry:
+                with self._scan_lock:
+                    self._scan_failures = 0
+                self._request_scan()
+                return
             if view.show_retry and self._controller is not None:
                 self._controller.retry()
                 self._controller.start(display=True)
@@ -1033,19 +1134,36 @@ def _builder(kind: str) -> object:
 
             def work() -> None:
                 view = None
+                technical = ""
                 try:
                     view = _compose_manage_view(controller, focus, manifest)
-                except Exception:
+                except Exception as exc:
                     logger.exception("manage scan failed")
-                self._finish_scan(token, view)
+                    technical = str(exc) or exc.__class__.__name__
+                self._finish_scan(token, view, technical, focus)
 
             threading.Thread(target=work, name="mdl-manage-scan", daemon=True).start()
 
-        def _finish_scan(self, token: int, view: WindowView | None) -> None:
+        def _finish_scan(
+            self,
+            token: int,
+            view: WindowView | None,
+            technical: str = "",
+            focus: str = "",
+        ) -> None:
             again = False
             with self._scan_lock:
-                if view is not None:
-                    self._pending_view = (token, view)
+                if view is None and technical:
+                    if self._scan_failures < 1:
+                        self._scan_failures += 1
+                        self._scan_again = True
+                    else:
+                        self._scan_failures = 0
+                        self._pending_view = (token, _scan_failure_view(focus, technical))
+                else:
+                    self._scan_failures = 0
+                    if view is not None:
+                        self._pending_view = (token, view)
                 self._scan_running = False
                 again = self._scan_again
                 self._scan_again = False
@@ -1336,10 +1454,27 @@ def _builder(kind: str) -> object:
         window._refresh()
 
     def _verify(window: DownloadWindow) -> None:
-        if window._manifest is None:
+        if window._manifest is None or window._check_busy:
             return
-        run_verify_repair(None, repair=True, manifests=[window._manifest], show=True)
-        window._request_scan()
+        window._check_busy = True
+        window.setEnabled(False)
+
+        def done(_outcome: object) -> None:
+            window._check_busy = False
+            window.setEnabled(True)
+            window._request_scan()
+
+        try:
+            run_verify_repair(
+                None,
+                repair=True,
+                manifests=[window._manifest],
+                show=True,
+                on_done=done,
+            )
+        except Exception:
+            logger.exception("check and repair failed to open")
+            done(None)
 
     def _signature(view: WindowView) -> str:
         parts = [view.mode, view.focus_app, str(view.show_error), str(view.all_set)]
