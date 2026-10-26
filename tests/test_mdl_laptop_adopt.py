@@ -72,17 +72,13 @@ def _manifest(folder: Path, models: list[dict[str, object]]) -> Path:
     return path
 
 
-def _truncate(path: Path, size: int) -> None:
+def _touch(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o644)
-    try:
-        os.ftruncate(fd, size)
-    finally:
-        os.close(fd)
+    path.write_bytes(b"")
 
 
-def _layout(root: Path, models: list[dict[str, object]], *, full_size: bool) -> Path:
-    """Rebuild the legacy folders. ``full_size`` is a sparse file of the recorded size."""
+def _layout(root: Path, models: list[dict[str, object]]) -> Path:
+    """Rebuild the legacy folders as zero-byte files, the same shape as rebuild.py."""
     for model in models:
         legacy = root / str(model["legacy"])
         files = model["files"]
@@ -90,19 +86,19 @@ def _layout(root: Path, models: list[dict[str, object]], *, full_size: bool) -> 
         for item in files:
             if not item["in_legacy"]:
                 continue
-            _truncate(legacy / str(item["path"]), int(item["size"]) if full_size else 0)
+            _touch(legacy / str(item["path"]))
     sentinel = root / "model-forge" / "keep.txt"
     sentinel.parent.mkdir(parents=True, exist_ok=True)
     sentinel.write_bytes(b"stay")
     return sentinel
 
 
-def _stamp(root: Path) -> dict[str, tuple[int, int, int]]:
+def _stamp(root: Path, stat: object = os.stat) -> dict[str, tuple[int, int, int]]:
     found: dict[str, tuple[int, int, int]] = {}
     for path in root.rglob("*"):
-        if not path.is_file() or path.is_symlink():
+        if path.is_symlink() or not path.is_file():
             continue
-        info = path.stat()
+        info = stat(path)  # type: ignore[operator]
         found[path.as_posix()] = (info.st_ino, info.st_mtime_ns, info.st_size)
     return found
 
@@ -120,9 +116,25 @@ def _seed_blobs(models: list[dict[str, object]]) -> dict[str, int]:
             digest = str(item["sha256"])
             path = folder / digest
             if not path.exists():
-                _truncate(path, int(item["size"]))
+                _touch(path)
             inodes[digest] = path.stat().st_ino
     return inodes
+
+
+def _sizes(root: Path, models: list[dict[str, object]]) -> dict[Path, int]:
+    """Recorded byte sizes. The files on disk stay empty so CI does not allocate them."""
+    found: dict[Path, int] = {}
+    for model in models:
+        legacy = root / str(model["legacy"])
+        files = model["files"]
+        assert isinstance(files, list)
+        for item in files:
+            size = int(item["size"])
+            digest = str(item["sha256"])
+            found[(models_dir() / "blobs" / digest).resolve()] = size
+            if item["in_legacy"]:
+                found[(legacy / str(item["path"])).resolve()] = size
+    return found
 
 
 def _digests(root: Path, models: list[dict[str, object]]) -> dict[Path, str]:
@@ -144,11 +156,22 @@ def test_laptop_layout_reuses_z_image_adopts_writer_and_second_run_is_a_noop(
 ) -> None:
     models = _pins()
     root = tmp_path / "models"
-    sentinel = _layout(root, models, full_size=True)
+    sentinel = _layout(root, models)
     manifest = _manifest(tmp_path / "canvas", models)
     seeded = _seed_blobs(models)
     recorded = _digests(root, models)
-    before = _stamp(root)
+    reported = _sizes(root, models)
+    original_stat = os.stat
+    before = _stamp(root, original_stat)
+
+    def sized_stat(path: object, *args: object, **kwargs: object) -> os.stat_result:
+        info = original_stat(path, *args, **kwargs)  # type: ignore[arg-type]
+        size = reported.get(Path(path).resolve())  # type: ignore[arg-type]
+        if size is None:
+            return info
+        fields = list(info)
+        fields[6] = size
+        return os.stat_result(tuple(fields))
 
     def hash_file(path: Path, on_chunk: object) -> tuple[str, int]:
         digest = recorded[path.resolve()]
@@ -164,6 +187,7 @@ def test_laptop_layout_reuses_z_image_adopts_writer_and_second_run_is_a_noop(
         return found
 
     module = sys.modules["voxprint_common.mdl.adopt"]
+    monkeypatch.setattr(os, "stat", sized_stat)
     monkeypatch.setattr(module, "_hash_file", hash_file)
     monkeypatch.setattr("voxprint_common.mdl.job.verify_hash", verify)
     sources = [root / str(model["legacy"]) for model in models]
@@ -199,7 +223,7 @@ def test_laptop_layout_reuses_z_image_adopts_writer_and_second_run_is_a_noop(
             else:
                 assert key in adopted
                 assert os.path.samefile(source, blob)
-    assert _stamp(root) == before
+    assert _stamp(root, original_stat) == before
     assert sentinel.read_bytes() == b"stay"
     marker_paths = list((models_dir() / "views" / "canvas").glob("*/.voxprint-view.json"))
     marks = {path: path.stat().st_mtime_ns for path in marker_paths}
@@ -210,7 +234,7 @@ def test_laptop_layout_reuses_z_image_adopts_writer_and_second_run_is_a_noop(
     assert again.status.extra["adopted"] == []
     assert again.status.extra["skipped"] == []
     assert {(row["model"], row["file"]) for row in again.status.extra["reused"]} == reused | adopted
-    assert _stamp(root) == before
+    assert _stamp(root, original_stat) == before
     assert {path: path.stat().st_mtime_ns for path in marker_paths} == marks
     afterwards = {path.name: path.stat().st_ino for path in blobs.iterdir() if path.is_file()}
     assert afterwards == blob_inodes
@@ -219,13 +243,12 @@ def test_laptop_layout_reuses_z_image_adopts_writer_and_second_run_is_a_noop(
 def test_laptop_layout_without_hash_stub_skips_mismatches(tmp_path: Path) -> None:
     models = _pins()
     root = tmp_path / "models"
-    sentinel = _layout(root, models, full_size=False)
+    sentinel = _layout(root, models)
     writer = next(model for model in models if model["id"] == _WRITER)
     files = writer["files"]
     assert isinstance(files, list)
     sample = next(item for item in files if item["path"] == "config.json")
     sample_path = root / str(writer["legacy"]) / "config.json"
-    _truncate(sample_path, int(sample["size"]))
     sample_path.write_bytes(b"\x00" * int(sample["size"]))
     sample_stat = (sample_path.stat().st_ino, sample_path.stat().st_mtime_ns)
     weight = next(item for item in files if str(item["path"]).endswith(".safetensors"))
