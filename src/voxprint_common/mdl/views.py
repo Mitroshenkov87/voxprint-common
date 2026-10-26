@@ -4,7 +4,8 @@ Canvas rc.28 opens a model at ``models_dir()/views/canvas/<id>-<digest12>/``.
 The 12 hex digits are the leading bytes of the SHA-256 of the sorted
 ``path<TAB>sha256`` lines. Each entry is a hard link to ``blobs/<sha256>``.
 ``.voxprint-view.json`` records schema 1. Blobs are never deleted here, and
-nothing outside ``views/canvas`` is removed.
+nothing outside ``views/canvas`` is removed. A Windows drive prefix, or any
+name that would leave the view folder, is refused.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ import os
 import shutil
 import sys
 from collections.abc import Mapping, Sequence
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from voxprint_common.paths import models_dir
 
@@ -98,7 +99,7 @@ def _ensure(root: Path, key: str, files: Mapping[str, str]) -> Path | None:
     staging.mkdir(parents=True)
     try:
         for name, digest in sorted(files.items()):
-            target = staging / _safe_name(name)
+            target = _entry(staging, name)
             target.parent.mkdir(parents=True, exist_ok=True)
             _link_blob(root / "blobs" / digest, target)
         marker = {
@@ -134,7 +135,7 @@ def _valid(root: Path, folder: Path, files: Mapping[str, str]) -> bool:
     if marker.get("files") != expected:
         return False
     for name, digest in files.items():
-        entry = folder / _safe_name(name)
+        entry = _entry(folder, name)
         blob = root / "blobs" / digest.lower()
         try:
             if entry.is_symlink():
@@ -173,11 +174,45 @@ def _small_copy(entry: Path, blob: Path) -> bool:
     )
 
 
+def _entry(folder: Path, name: str) -> Path:
+    """Return ``folder / name`` when that path stays inside ``folder``."""
+    relative = _safe_name(name)
+    target = folder.joinpath(*relative.parts)
+    windows_folder = PureWindowsPath(folder)
+    windows_target = windows_folder.joinpath(*relative.parts)
+    if windows_target.drive != windows_folder.drive or windows_target.root != windows_folder.root:
+        raise OSError(f"view path {name} leaves the model folder")
+    base = os.path.abspath(folder)
+    landed = os.path.abspath(target)
+    try:
+        inside = os.path.commonpath([base, landed]) == base
+    except ValueError:
+        inside = False
+    if not inside:
+        raise OSError(f"view path {name} leaves the model folder")
+    return target
+
+
 def _safe_name(name: str) -> Path:
-    parts = Path(name.replace("\\", "/")).parts
-    if not parts or Path(name).is_absolute() or any(part in {"", ".", ".."} for part in parts):
+    text = name.replace("\\", "/")
+    posix = PurePosixPath(text)
+    windows = PureWindowsPath(text)
+    parts = posix.parts
+    if (
+        not parts
+        or posix.is_absolute()
+        or windows.drive
+        or windows.root
+        or windows.is_absolute()
+        or any(part in {"", ".", ".."} or _drive_part(part) for part in parts)
+    ):
         raise OSError(f"view path {name} leaves the model folder")
     return Path(*parts)
+
+
+def _drive_part(part: str) -> bool:
+    windows = PureWindowsPath(part)
+    return bool(windows.drive or windows.root or windows.is_absolute())
 
 
 def _drop(root: Path, key: str, keep: Path | None = None) -> None:

@@ -185,6 +185,78 @@ def test_adopt_dry_run_json_does_not_write(
     assert main(["adopt", "--manifest", str(manifest)]) == 1
 
 
+def test_download_writes_verified_marker_for_a_fetched_blob(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = _manifest(tmp_path / "canvas")
+    fetches = 0
+    hashes = 0
+
+    def fetched(dest: Path, *_args: object, **_kwargs: object) -> None:
+        nonlocal fetches
+        fetches += 1
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(GOOD)
+
+    def hashed(*_args: object, **_kwargs: object) -> str:
+        nonlocal hashes
+        hashes += 1
+        raise AssertionError("hashed")
+
+    monkeypatch.setattr("voxprint_common.mdl.job.fetch_file", fetched)
+    monkeypatch.setattr("voxprint_common.mdl.job.verify_hash", hashed)
+    outcome = download([manifest], devices=[_gpu(8192)], priority=False, only=["weights"])
+    assert outcome.code == 0
+    assert outcome.status.ready
+    planned = plan_files([load_manifest(manifest)], VramTier.GB8, memory_gib=8, only=["weights"])
+    blob = planned[0].destination
+    marker = blob.with_name(blob.name + ".verified")
+    assert marker.read_text(encoding="utf-8").strip() == sha256_bytes(GOOD)
+    assert fetches == 1
+    cache = state_dir() / "mdl-hash-cache.json"
+    if cache.exists():
+        cache.unlink()
+    os.utime(blob, (1, 1))
+    again = download([manifest], devices=[_gpu(8192)], priority=False, only=["weights"])
+    assert again.code == 0
+    assert again.status.ready
+    assert fetches == 1
+    assert hashes == 0
+    assert blob.read_bytes() == GOOD
+
+
+def test_adopt_replaces_a_leftover_blob(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path / "canvas")
+    good, _nested, _wrong = _drop(tmp_path)
+    planned = plan_files([load_manifest(manifest)], VramTier.GB8, memory_gib=8, only=["weights"])
+    blob = planned[0].destination
+    blob.parent.mkdir(parents=True, exist_ok=True)
+    blob.write_bytes(BAD)
+    source = (good.stat().st_ino, good.stat().st_mtime_ns, good.read_bytes())
+    devices = [_gpu(8192)]
+    preview = adopt(
+        [manifest],
+        [tmp_path / "drop"],
+        devices=devices,
+        only=["weights"],
+        dry_run=True,
+    )
+    assert preview.code == 0
+    assert [row["file"] for row in preview.status.extra["would_adopt"]] == ["weights.bin"]
+    assert blob.read_bytes() == BAD
+    outcome = adopt([manifest], [tmp_path / "drop"], devices=devices, only=["weights"])
+    assert outcome.code == 0
+    assert outcome.status.ready
+    assert outcome.status.extra["skipped"] == []
+    assert [row["file"] for row in outcome.status.extra["adopted"]] == ["weights.bin"]
+    assert blob.read_bytes() == GOOD
+    assert os.path.samefile(good, blob)
+    assert (good.stat().st_ino, good.stat().st_mtime_ns, good.read_bytes()) == source
+    marker = blob.with_name(blob.name + ".verified")
+    assert marker.read_text(encoding="utf-8").strip() == sha256_bytes(GOOD)
+    assert not blob.with_name(blob.name + ".adopting").exists()
+
+
 def test_download_reuses_an_existing_blob(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     manifest = _manifest(tmp_path / "canvas")
     planned = plan_files([load_manifest(manifest)], VramTier.GB8, memory_gib=8, only=["weights"])

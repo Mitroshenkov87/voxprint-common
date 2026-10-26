@@ -4,9 +4,10 @@
 matched to one candidate under the ``--from`` directories, by relative path
 or by filename, and only when the size matches. The candidate is hashed on
 the calling thread, one file at a time. A matching digest reuses
-``blobs/<sha256>`` when that file is already present. Otherwise the bytes
-are hardlinked, or copied when a hardlink is impossible. The source file is
-never deleted or moved. A mismatch is reported and left for ``download``.
+``blobs/<sha256>`` when that blob is already the right bytes. A leftover
+file at the destination is replaced. Otherwise the bytes are hardlinked, or
+copied when a hardlink is impossible. The source file is never deleted or
+moved. A mismatch is reported and left for ``download``.
 
 A second run of the same files is a no-op: the verified blob is reused and
 the source is not read again. Hooks run only when every planned file was
@@ -216,10 +217,6 @@ def _take(
         step.state = "skipped"
         step.received = 0
         return "skipped", "sha256 mismatch"
-    if item.destination.exists():
-        step.state = "skipped"
-        step.received = 0
-        return "skipped", "blob differs"
     how = _place(candidate, item.destination)
     _mark_verified(item)
     remember_digest(item.destination, digest)
@@ -334,22 +331,32 @@ def _place(source: Path, dest: Path) -> str:
     """Hardlink ``source`` onto ``dest``, or copy when the link is impossible.
 
     The source path is not removed. A symlink is linked or copied from its
-    target so the blob is a regular file.
+    target so the blob is a regular file. A leftover file already at
+    ``dest`` is replaced. The same inode is left untouched.
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
     target = Path(os.path.realpath(source))
-    if target == dest:
-        return "reused"
     try:
-        os.link(target, dest)
-    except FileExistsError:
-        return "reused"
+        if dest.exists() and os.path.samefile(target, dest):
+            return "reused"
     except OSError:
-        temporary = dest.with_name(dest.name + ".adopting")
-        shutil.copyfile(target, temporary)
+        pass
+    temporary = dest.with_name(dest.name + ".adopting")
+    linked = False
+    try:
+        if temporary.exists() or temporary.is_symlink():
+            temporary.unlink()
+        try:
+            os.link(target, temporary)
+            linked = True
+        except OSError:
+            shutil.copyfile(target, temporary)
         os.replace(temporary, dest)
-        return "copied"
-    return "linked"
+    except OSError:
+        if temporary.exists() or temporary.is_symlink():
+            temporary.unlink()
+        raise
+    return "linked" if linked else "copied"
 
 
 def _note(

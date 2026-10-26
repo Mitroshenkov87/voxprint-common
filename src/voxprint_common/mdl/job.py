@@ -769,6 +769,8 @@ def _fetch_all(
                 publisher.push(force=True)
             errors.append(exc)
             return
+        _mark_verified(item)
+        remember_digest(item.destination, item.sha256)
         _remember(item)
         with lock:
             step.state = "verified"
