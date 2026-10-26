@@ -129,9 +129,14 @@ def test_adopt_copies_when_a_hardlink_is_impossible(
 ) -> None:
     manifest = _manifest(tmp_path / "canvas")
     good, _nested, _wrong = _drop(tmp_path)
+    real_link = os.link
 
-    def refuse(*_args: object, **_kwargs: object) -> None:
-        raise OSError("cross-device link")
+    def refuse(src: object, dst: object, *args: object, **kwargs: object) -> None:
+        # A file on another volume cannot be linked into blobs. The view is on
+        # the same volume as the blob, so that link still works.
+        if Path(str(dst)).parent.name == "blobs":
+            raise OSError("cross-device link")
+        real_link(src, dst, *args, **kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr(os, "link", refuse)
     outcome = adopt(
