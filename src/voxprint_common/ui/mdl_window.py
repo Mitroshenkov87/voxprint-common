@@ -44,7 +44,7 @@ from voxprint_common.mdl.present import (
     WindowView,
     view_for,
 )
-from voxprint_common.mdl.progress_ui import run_verify_repair
+from voxprint_common.mdl.progress_ui import run_verify_repair, verify_job_running
 from voxprint_common.ui.splash import Motif
 from voxprint_common.ui.splash import identity as splash_identity
 from voxprint_common.ui.theme import (
@@ -1454,7 +1454,7 @@ def _builder(kind: str) -> object:
         window._refresh()
 
     def _verify(window: DownloadWindow) -> None:
-        if window._manifest is None or window._check_busy:
+        if window._manifest is None or window._check_busy or verify_job_running():
             return
         window._check_busy = True
         window.setEnabled(False)

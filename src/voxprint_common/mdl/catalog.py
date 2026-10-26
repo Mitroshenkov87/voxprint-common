@@ -264,6 +264,7 @@ class PlannedFile:
     tier: str = ""
     display_name: str = ""
     model_id: str = ""
+    layouts: tuple[tuple[str, str], ...] = ()
     hooks: tuple[HookPlan, ...] = ()
     mirror_policy: str = "race"
     fallback_key: str = ""
@@ -511,6 +512,7 @@ def plan_files(
                         tier=model.tier.value,
                         display_name=label,
                         model_id=model.id,
+                        layouts=((model.id, item.path),),
                         hooks=model_hooks,
                         mirror_policy=item.mirror_policy,
                     )
@@ -528,6 +530,9 @@ def plan_files(
                     current.apps.append(prepared.app)
                 if model.id not in current.model_ids:
                     current.model_ids.append(model.id)
+                pair = (model.id, item.path)
+                if pair not in current.layouts:
+                    current.layouts = (*current.layouts, pair)
                 if not current.display_name:
                     current.display_name = label
                 if not current.model_id:
@@ -569,6 +574,7 @@ def _planned(
         tier=model.tier.value,
         display_name=label,
         model_id=model.id,
+        layouts=((model.id, item.path),),
         hooks=hooks,
         mirror_policy=item.mirror_policy,
     )

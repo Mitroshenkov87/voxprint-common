@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from voxprint_common.cli_protocol import EXIT_OK
+from voxprint_common.cli_protocol import EXIT_CANCELLED, EXIT_OK
 from voxprint_common.gpu_probe import GpuDevice, VramTier
 from voxprint_common.hashing import sha256_bytes
 from voxprint_common.i18n import tr_lang
@@ -751,4 +751,76 @@ def test_manage_open_does_not_hash(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     finally:
         window.hide()
         window.deleteLater()
+        app.processEvents()
+
+
+def test_closing_the_check_reenables_manage_immediately() -> None:
+    pytest.importorskip("PySide6")
+    import threading
+
+    from PySide6.QtWidgets import QApplication, QWidget
+
+    from voxprint_common.mdl.progress_ui import _run_verify_window, verify_job_running
+
+    app = QApplication.instance() or QApplication([])
+    manage = QWidget()
+    manage.setEnabled(False)
+    hold = threading.Event()
+    started = threading.Event()
+    seen: dict[str, int] = {}
+
+    def start(cancel: threading.Event, on_status: object) -> Outcome:
+        started.set()
+        on_status(Status(JobState.DOWNLOADING, extra={"phase": "verify"}))
+        hold.wait(2)
+        code = EXIT_CANCELLED if cancel.is_set() else EXIT_OK
+        state = JobState.CANCELLED if cancel.is_set() else JobState.READY
+        return Outcome(code, "", Status(state, extra={"phase": "summary"}))
+
+    def on_done(outcome: Outcome) -> None:
+        manage.setEnabled(True)
+        seen["code"] = outcome.code
+
+    try:
+        before = {id(widget) for widget in app.topLevelWidgets()}
+        assert _run_verify_window(start, on_done=on_done) == 0
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline and not started.is_set():
+            app.processEvents()
+            time.sleep(0.01)
+        assert started.is_set()
+        assert verify_job_running()
+        created = [widget for widget in app.topLevelWidgets() if id(widget) not in before]
+        window = created[-1]
+        window._verify_cancel.click()
+        assert manage.isEnabled()
+        assert seen["code"] == EXIT_CANCELLED
+        assert verify_job_running()
+        hold.set()
+        deadline = time.monotonic() + 2
+        while verify_job_running() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert not verify_job_running()
+
+        manage.setEnabled(False)
+        seen.clear()
+        started.clear()
+        hold.clear()
+        before = {id(widget) for widget in app.topLevelWidgets()}
+        assert _run_verify_window(start, on_done=on_done) == 0
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline and not started.is_set():
+            app.processEvents()
+            time.sleep(0.01)
+        created = [widget for widget in app.topLevelWidgets() if id(widget) not in before]
+        window = created[-1]
+        window.close()
+        assert manage.isEnabled()
+        assert seen["code"] == EXIT_CANCELLED
+    finally:
+        hold.set()
+        deadline = time.monotonic() + 2
+        while verify_job_running() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        manage.deleteLater()
         app.processEvents()

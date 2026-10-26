@@ -61,6 +61,31 @@ OVERALL = "Общий прогресс"
 COLUMNS = ("Модель", "Размер", "Источник", "Скорость", "Осталось")
 
 Starter = Callable[[threading.Event, Callable[[Status], None]], Outcome]
+_VERIFY_JOBS = 0
+_VERIFY_JOBS_LOCK = threading.Lock()
+
+
+def verify_job_running() -> bool:
+    """Return whether a check is still hashing or repairing.
+
+    Closing the check window re-enables Manage immediately. This stays true
+    until the current file has finished, so a second check does not write the
+    same blobs.
+    """
+    with _VERIFY_JOBS_LOCK:
+        return _VERIFY_JOBS > 0
+
+
+def _enter_verify_job() -> None:
+    global _VERIFY_JOBS
+    with _VERIFY_JOBS_LOCK:
+        _VERIFY_JOBS += 1
+
+
+def _leave_verify_job() -> None:
+    global _VERIFY_JOBS
+    with _VERIFY_JOBS_LOCK:
+        _VERIFY_JOBS = max(0, _VERIFY_JOBS - 1)
 
 
 class WindowMode(StrEnum):
@@ -482,21 +507,31 @@ def _run_verify_window(
         event = threading.Event()
         shell["cancel"] = event
 
-        def run() -> None:
-            def on_status(status: Status) -> None:
-                with lock:
-                    holder["status"] = _copy(status)
-
-            try:
-                outcome = start(event, on_status)
-            except Exception as exc:
-                outcome = Outcome(EXIT_FAILED, str(exc), Status(JobState.FAILED, error=str(exc)))
+        def on_status(status: Status) -> None:
             with lock:
-                holder["status"] = _copy(outcome.status)
-                shell["outcome"] = outcome
+                holder["status"] = _copy(status)
 
+        def run() -> None:
+            try:
+                try:
+                    outcome = start(event, on_status)
+                except Exception as exc:
+                    outcome = Outcome(
+                        EXIT_FAILED, str(exc), Status(JobState.FAILED, error=str(exc))
+                    )
+                with lock:
+                    holder["status"] = _copy(outcome.status)
+                    shell["outcome"] = outcome
+            finally:
+                _leave_verify_job()
+
+        _enter_verify_job()
         thread = threading.Thread(target=run, name="voxprint-mdl-verify", daemon=True)
-        thread.start()
+        try:
+            thread.start()
+        except Exception:
+            _leave_verify_job()
+            raise
 
     def refresh() -> None:
         with lock:
@@ -554,7 +589,7 @@ def _run_verify_window(
         if closing["value"]:
             return
         closing["value"] = True
-        QTimer.singleShot(400, lambda: finish(EXIT_CANCELLED))
+        finish(EXIT_CANCELLED)
 
     initial = Status(JobState.DOWNLOADING, extra={"phase": "verify"})
     window, _app = _verify_shell(

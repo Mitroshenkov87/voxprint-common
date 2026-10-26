@@ -49,6 +49,7 @@ from voxprint_common.mdl.safety import UrlGuard
 from voxprint_common.mdl.segments import ConnectionBudget, segment_count
 from voxprint_common.mdl.status import JobState, Status, Step, load_status, save_status
 from voxprint_common.mdl.variants import choose_variant
+from voxprint_common.mdl.views import materialize_views
 from voxprint_common.paths import models_dir
 from voxprint_common.power import keep_awake
 from voxprint_common.runtime_manifest import ManifestError, add_ref, load
@@ -249,6 +250,7 @@ def download(
                 publisher = _Publisher(status, on_status, on_progress, session)
                 publisher.push(force=True)
                 _fetch_all(files, status, publisher, options, cancel, session, workers)
+            materialize_views(files)
             apply_hooks(files)
     except HookError as exc:
         _mark_hook(status, exc)
@@ -711,7 +713,7 @@ def _fetch_all(
             return
         step = status.steps[index]
         with lock:
-            if step.state == "verified" and _hash_ok(item):
+            if _reusable(item):
                 present = True
             else:
                 present = False
@@ -720,6 +722,7 @@ def _fetch_all(
                 step.state = "paused" if session is not None and session.paused else "downloading"
                 publisher.push(force=True)
         if present:
+            _mark_verified(item)
             _remember(item)
             return
 
@@ -848,6 +851,46 @@ def _note_local(status: Status, files: Sequence[PlannedFile]) -> None:
         step.received = item.size
         step.source = "local"
     status.recompute()
+
+
+def _reusable(item: PlannedFile) -> bool:
+    """Return whether ``blobs/<sha>`` can be kept without fetching it again.
+
+    A partial file with no finished blob is resumed. A finished file of the
+    right size is kept when its ``.verified`` marker matches, or when a hash
+    matches. The caller writes the marker.
+    """
+    path = item.destination
+    partial = path.with_name(path.name + ".partial")
+    if partial.is_file() and not path.is_file():
+        return False
+    if not path.is_file() or path.stat().st_size != item.size:
+        return False
+    if _verified_marker(item):
+        return True
+    return _hash_ok(item)
+
+
+def _verified_marker(item: PlannedFile) -> bool:
+    marker = item.destination.with_name(item.destination.name + ".verified")
+    try:
+        recorded = marker.read_text(encoding="utf-8").strip()
+    except OSError:
+        return False
+    return recorded == item.sha256.strip().lower()
+
+
+def _mark_verified(item: PlannedFile) -> None:
+    """Write the ``.verified`` marker download and adopt share."""
+    marker = item.destination.with_name(item.destination.name + ".verified")
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    text = item.sha256.strip().lower() + "\n"
+    try:
+        if marker.is_file() and marker.read_text(encoding="utf-8") == text:
+            return
+    except OSError:
+        pass
+    marker.write_text(text, encoding="utf-8")
 
 
 def _hash_ok(item: PlannedFile) -> bool:

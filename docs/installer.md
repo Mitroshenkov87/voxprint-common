@@ -180,6 +180,25 @@ voxprint-mdl-gui --app canvas
 
 The queue process is started with `CREATE_NO_WINDOW` on Windows. A GUI launch also calls `voxprint_common.branding.detach_console()`, which drops a console inherited from `python.exe`. Pass `--manifest <path>` when the app's `mdl.json` is not in the install folder.
 
+## Models that are already on disk
+
+A smoke install, or any install that already has the weight files, should adopt them before `download`. Adopt never deletes or moves the source files. A match is hardlinked into `blobs\<sha256>` (or copied when the source is on another volume), marked verified, and recorded for the app the same way a finished download is. Canvas then finds the model at `views\canvas\<model-id>-<12 hex>`. Anything that does not match is reported and left for `download`, which reuses a blob that adopt already stored.
+
+On a machine that already has the legacy Hugging Face folders next to `blobs`:
+
+```bat
+voxprint-mdl adopt --app canvas --manifest "C:\Program Files\VOXPrint AI Suite\Canvas\mdl.json" --model z-image-turbo-bf16-16gb --model qwen3-4b-writer --from "%LOCALAPPDATA%\VOXPrint AI Suite\models\Tongyi-MAI--Z-Image-Turbo" --from "%LOCALAPPDATA%\VOXPrint AI Suite\models\huihui-ai--Huihui-Qwen3-4B-Instruct-2507-abliterated"
+```
+
+`qwen3-4b-writer` is optional in that manifest, so it is planned only when `--model` names it. The Z-Image-Turbo files that are already `blobs\<sha256>` are reused. The writer files that are not yet blobs are hardlinked in. Both legacy folders stay.
+
+```bash
+voxprint-mdl adopt --app canvas --manifest "{app}\mdl.json" --from D:\canvas-models
+voxprint-mdl download --app canvas --manifest "{app}\mdl.json"
+```
+
+`--json` prints the adopted, reused, and skipped files. `--dry-run` only matches path and size. `--gui` shows progress while the files are hashed, one at a time. Repeat `--from` for more than one directory, and `--model` to limit the plan. The full contract is in [mdl.md](mdl.md).
+
 ## Release check
 
 Before an RC, on a clean Windows 11 machine:
