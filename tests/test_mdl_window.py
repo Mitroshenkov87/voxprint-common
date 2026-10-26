@@ -27,6 +27,7 @@ from voxprint_common.mdl.present import (
     QueueItem,
     SmoothedProgress,
     Snapshot,
+    display_path,
     explain,
     format_size,
     view_for,
@@ -336,6 +337,13 @@ def test_status_names_the_download_ahead_of_a_check() -> None:
     mirror = Snapshot(items=[waiting], apps=[AppSlot("clarity", "")], note_code="mirror")
     mirror.recompute()
     assert view_for(mirror, lang="en").status == "A faster source is being used"
+
+
+def test_display_path_uses_windows_separators() -> None:
+    shown = display_path("C:/Program Files/VOXPrint AI Suite/Model Forge")
+    assert shown == "C:\\Program Files\\VOXPrint AI Suite\\Model Forge"
+    assert display_path("C:\\Program Files\\VOXPrint") == "C:\\Program Files\\VOXPrint"
+    assert display_path("/home/user/models") == "/home/user/models"
 
 
 def test_sizes_and_disk_copy_follow_the_locale() -> None:

@@ -70,6 +70,8 @@
   "mdl.manage.remove": "Noņemt",
   "mdl.manage.repair": "Labot",
   "mdl.manage.shared": "Lieto arī {apps}",
+  "mdl.manage.scan_failed": "Modeļu sarakstu neizdevās nolasīt.",
+  "mdl.manage.scan_retry": "Spiediet Mēģināt vēlreiz.",
   "mdl.manage.status.bad": "Jālabo",
   "mdl.manage.status.missing": "Nav instalēts",
   "mdl.manage.status.ok": "Instalēts",

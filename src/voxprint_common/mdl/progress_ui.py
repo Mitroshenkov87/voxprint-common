@@ -154,6 +154,7 @@ def run_verify_repair(
     manifests: Sequence[Path] | None = None,
     show: bool = True,
     devices: Sequence[GpuDevice] | None = None,
+    on_done: Callable[[Outcome], None] | None = None,
 ) -> Outcome:
     """Check ``model_ids`` and, when ``repair`` is set, download the bad ones.
 
@@ -169,10 +170,16 @@ def run_verify_repair(
         manifests: ``mdl.json`` paths. Discovered when omitted.
         show: Open the window. False runs the job on this thread.
         devices: GPUs to plan for.
+        on_done: Called on the UI thread when the window closes. When set, the
+            check stays on the event loop that is already running. It does not
+            call ``QApplication.exec``, and the window is application-modal so
+            the manage window cannot start another check while this one runs.
 
     Returns:
         The job outcome. With ``show`` false, the outcome is the job's own.
-        With the window, it is the outcome the worker stored.
+        With the window and no ``on_done``, it is the outcome the worker stored.
+        With ``on_done``, the return value is only a stand-in; the callback
+        receives the outcome when the window closes.
     """
     holder: dict[str, Outcome] = {}
 
@@ -189,7 +196,13 @@ def run_verify_repair(
         return outcome
 
     if not show:
-        return start(threading.Event(), lambda _status: None)
+        outcome = start(threading.Event(), lambda _status: None)
+        if on_done is not None:
+            on_done(outcome)
+        return outcome
+    if on_done is not None:
+        _run_verify_window(start, on_done=on_done)
+        return Outcome(EXIT_OK, "", Status(JobState.DOWNLOADING, extra={"phase": "verify"}))
     code = run_window(start, mode=WindowMode.VERIFY.value)
     found = holder.get("outcome")
     if found is not None:
@@ -437,9 +450,18 @@ def _run_download_window(start: Starter) -> int:
     return code
 
 
-def _run_verify_window(start: Starter) -> int:
-    """Show the check-and-repair window until the summary is closed."""
-    from PySide6.QtCore import QTimer
+def _run_verify_window(
+    start: Starter,
+    *,
+    on_done: Callable[[Outcome], None] | None = None,
+) -> int:
+    """Show the check-and-repair window until the summary is closed.
+
+    ``on_done`` means a window is already running. This function shows a modal
+    check and returns without starting another event loop. The callback runs
+    when that check closes.
+    """
+    from PySide6.QtCore import Qt, QTimer
     from PySide6.QtWidgets import QApplication
 
     app = QApplication.instance()
@@ -491,13 +513,39 @@ def _run_verify_window(start: Starter) -> int:
         if callable(getattr(cancel, "setEnabled", None)):
             cancel.setEnabled(False)
 
+    timer_box: dict[str, QTimer | None] = {"timer": None}
+
+    def finish(code: int) -> None:
+        if shell.get("done"):
+            return
+        shell["done"] = True
+        timer = timer_box["timer"]
+        if timer is not None:
+            timer.stop()
+        found = shell.get("outcome")
+        if not isinstance(found, Outcome):
+            state = JobState.CANCELLED if code == EXIT_CANCELLED else JobState.FAILED
+            found = Outcome(code, "", Status(state))
+        callback = shell.get("on_done")
+        if callable(callback):
+            callback(found)
+            verify_window = shell.get("window")
+            hide = getattr(verify_window, "hide", None)
+            if callable(hide):
+                hide()
+            later = getattr(verify_window, "deleteLater", None)
+            if callable(later):
+                later()
+            return
+        app.exit(code)
+
     def on_close() -> None:
         if closing["value"]:
             return
         closing["value"] = True
         outcome = shell.get("outcome")
         code = outcome.code if isinstance(outcome, Outcome) else EXIT_CANCELLED
-        app.exit(code)
+        finish(code)
 
     def on_cancel() -> None:
         event = shell.get("cancel")
@@ -506,7 +554,7 @@ def _run_verify_window(start: Starter) -> int:
         if closing["value"]:
             return
         closing["value"] = True
-        QTimer.singleShot(400, lambda: app.exit(EXIT_CANCELLED))
+        QTimer.singleShot(400, lambda: finish(EXIT_CANCELLED))
 
     initial = Status(JobState.DOWNLOADING, extra={"phase": "verify"})
     window, _app = _verify_shell(
@@ -518,12 +566,17 @@ def _run_verify_window(start: Starter) -> int:
     shell["lang"] = get_language()
     shell["close_handler"] = on_close
     shell["cancel_handler"] = on_cancel
+    shell["on_done"] = on_done
     _wire_verify(window, on_close, on_cancel, shell)
     timer = QTimer(window)
+    timer_box["timer"] = timer
     timer.timeout.connect(refresh)
     timer.start(100)
     launch()
+    window.setWindowModality(Qt.WindowModality.ApplicationModal)
     window.show()
+    if on_done is not None:
+        return 0
     code = int(app.exec())
     timer.stop()
     return code

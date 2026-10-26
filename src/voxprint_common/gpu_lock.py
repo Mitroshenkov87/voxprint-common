@@ -107,8 +107,9 @@ def pid_exists(pid: int) -> bool:
     """Return whether ``pid`` is a live process.
 
     On POSIX this sends signal 0. On Windows it opens the process with
-    ``PROCESS_QUERY_LIMITED_INFORMATION`` and treats access-denied as alive.
-    It does not signal or terminate the process.
+    ``PROCESS_QUERY_LIMITED_INFORMATION``. A process that has already exited
+    is not alive, even while Windows still keeps its process object. Access
+    denied counts as alive. It does not signal or terminate the process.
 
     Args:
         pid: Process id. Non-positive values are not alive.
@@ -444,12 +445,17 @@ def _windows_pid_exists(pid: int) -> bool:
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
     kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.GetExitCodeProcess.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
+    kernel.GetExitCodeProcess.restype = wintypes.BOOL
     kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
     kernel.CloseHandle.restype = wintypes.BOOL
     query = 0x1000
     handle = kernel.OpenProcess(query, False, pid)
-    if handle:
-        kernel.CloseHandle(handle)
+    if not handle:
+        return ctypes.get_last_error() == 5
+    code = wintypes.DWORD()
+    ok = bool(kernel.GetExitCodeProcess(handle, ctypes.byref(code)))
+    kernel.CloseHandle(handle)
+    if not ok:
         return True
-    error = ctypes.get_last_error()
-    return error == 5
+    return code.value == 259

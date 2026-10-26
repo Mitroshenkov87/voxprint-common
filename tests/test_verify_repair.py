@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -522,6 +523,137 @@ def test_gui_entry_point_implies_the_gui_flag(monkeypatch: pytest.MonkeyPatch) -
     assert seen["argv"][:2] == ["--gui", "--app"]
 
 
+def test_multi_file_model_matches_each_file(tmp_path: Path) -> None:
+    from voxprint_common.mdl.control import Controller
+    from voxprint_common.paths import models_dir
+
+    first = b"alpha-weights"
+    second = b"beta-weights-extra"
+    digests = (sha256_bytes(first), sha256_bytes(second))
+    blobs = models_dir() / "blobs"
+    blobs.mkdir(parents=True)
+    (blobs / digests[0]).write_bytes(first)
+    (blobs / digests[1]).write_bytes(second)
+    manifest = tmp_path / "mdl.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "app": "model-forge",
+                "models": [
+                    {
+                        "id": "pack",
+                        "version": "1",
+                        "vram_tier": "8gb",
+                        "name": {"en": "Pack"},
+                        "files": [
+                            {
+                                "path": "a.bin",
+                                "size": len(first),
+                                "sha256": digests[0],
+                                "mirrors": [
+                                    {"source": "url", "url": "https://huggingface.co/org/a.bin"}
+                                ],
+                            },
+                            {
+                                "path": "b.bin",
+                                "size": len(second),
+                                "sha256": digests[1],
+                                "mirrors": [
+                                    {"source": "url", "url": "https://huggingface.co/org/b.bin"}
+                                ],
+                            },
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    page = Controller().manage_page("model-forge", manifest, devices=[GPU], lang="en")
+    assert [row.state for row in page.installed] == ["ready"]
+    assert page.available == ()
+    again = Controller().manage_page("model-forge", manifest, devices=[GPU], lang="en")
+    assert again.installed[0].state == "ready"
+    (blobs / digests[1]).unlink()
+    partial = Controller().manage_page("model-forge", manifest, devices=[GPU], lang="en")
+    assert partial.installed[0].state == "error"
+
+
+def test_failed_manage_scan_retries_then_shows_an_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("PySide6")
+    from voxprint_common.mdl.control import Controller
+    from voxprint_common.ui.mdl_window import _probe_manage
+
+    calls = {"n": 0}
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        calls["n"] += 1
+        raise RuntimeError("scan broke")
+
+    monkeypatch.setattr("voxprint_common.ui.mdl_window._compose_manage_view", boom)
+    manifest = tmp_path / "mdl.json"
+    manifest.write_text("{}", encoding="utf-8")
+    window, app = _probe_manage()(Controller(), "model-forge", "", manifest)
+    try:
+        for _ in range(40):
+            window._apply_pending()
+            app.processEvents()
+            view = window._view
+            if view is not None and view.show_error:
+                break
+            time.sleep(0.05)
+        assert calls["n"] >= 2
+        view = window._view
+        assert view is not None and view.manage is not None
+        assert view.show_error
+        assert "no models" not in view.manage.empty_installed.lower()
+        assert window._error.isVisible()
+        assert window._primary.isVisible()
+        assert window._primary.text() == "Retry"
+    finally:
+        window._check_busy = False
+        window.hide()
+        window.deleteLater()
+        app.processEvents()
+
+
+def test_manage_check_does_not_start_another_event_loop() -> None:
+    pytest.importorskip("PySide6")
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication
+
+    from voxprint_common.mdl.progress_ui import _run_verify_window
+
+    app = QApplication.instance() or QApplication([])
+    seen: dict[str, object] = {}
+
+    def start(cancel: object, on_status: object) -> Outcome:
+        del cancel
+        on_status(Status(JobState.READY, extra={"phase": "summary"}))
+        return Outcome(EXIT_OK, "ok", Status(JobState.READY, extra={"phase": "summary"}))
+
+    def on_done(outcome: Outcome) -> None:
+        seen["code"] = outcome.code
+
+    before = {id(widget) for widget in app.topLevelWidgets()}
+    assert _run_verify_window(start, on_done=on_done) == 0
+    app.processEvents()
+    created = [widget for widget in app.topLevelWidgets() if id(widget) not in before]
+    assert created
+    window = created[-1]
+    assert window.windowModality() == Qt.WindowModality.ApplicationModal
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline and not window._verify_close.isEnabled():
+        app.processEvents()
+        time.sleep(0.02)
+    window.close()
+    app.processEvents()
+    assert seen.get("code") == EXIT_OK
+
+
 def test_manage_open_does_not_hash(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     pytest.importorskip("PySide6")
     from voxprint_common.gpu_probe import VramTier
@@ -590,6 +722,32 @@ def test_manage_open_does_not_hash(tmp_path: Path, monkeypatch: pytest.MonkeyPat
         assert window._status.isVisible() is False
         assert "Model Forge" in window._subtitle.text()
         assert window._badge._colour == "#f58a3c"
+        badge = window._badge.grab().toImage()
+
+        def colour_at(image: object, across: float, down: float) -> object:
+            x = min(image.width() - 1, max(0, int(across * image.width())))
+            y = min(image.height() - 1, max(0, int(down * image.height())))
+            return image.pixelColor(x, y)
+
+        top = colour_at(badge, 0.50, 0.43)
+        left = colour_at(badge, 0.35, 0.55)
+        right = colour_at(badge, 0.65, 0.55)
+        edge = colour_at(badge, 0.12, 0.50)
+        assert edge.red() < 80
+        assert top.red() > 180
+        assert top.red() > right.red() + 20
+        assert left.red() > right.red() + 20
+        window._check_busy = True
+        window.close()
+        assert window.isVisible()
+        window._check_busy = False
+        window._badge.set_mark("#60a5fa", "no-such-glyph", "VOXPrint")
+        mark = window._badge.grab().toImage()
+        arm = colour_at(mark, 0.40, 0.56)
+        gap = colour_at(mark, 0.50, 0.36)
+        assert arm.blue() > 140
+        assert gap.red() < 80
+        assert gap.blue() < 90
     finally:
         window.hide()
         window.deleteLater()

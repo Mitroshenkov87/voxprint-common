@@ -33,6 +33,7 @@ from voxprint_common.mdl.present import (
     ManageView,
     QueueItem,
     Snapshot,
+    display_path,
     format_size,
     localized_name,
 )
@@ -332,7 +333,7 @@ class Controller:
                 app=name,
                 used=format_size(used, lang=code),
                 free=format_size(free, lang=code),
-                path=str(folder),
+                path=display_path(folder),
             ),
             _say("mdl.manage.empty_installed", code, app=name),
             _say("mdl.manage.empty_available", code),
@@ -374,12 +375,8 @@ def _visible(manifest: AppManifest, devices: list[GpuDevice] | None) -> list[Man
         component_id = f"model-{digest[:MODEL_PREFIX]}" if digest else ""
         component = document.components.get(component_id)
         refs = tuple(component.refs) if component is not None else ()
-        blob = models_dir() / "blobs" / digest if digest else None
         expected = sum(item.size for item in model.files)
-        kind = classify_file(blob, expected, stored_stat(blob, component) if blob else None)
-        if kind == "adopt" and blob is not None:
-            remember_stat(blob, component_id)
-            kind = "ok"
+        kind = _model_kind(model, component_id, component)
         names = dict(model.names)
         if model.display_name and "en" not in names:
             names["en"] = model.display_name
@@ -399,6 +396,34 @@ def _visible(manifest: AppManifest, devices: list[GpuDevice] | None) -> list[Man
             )
         )
     return found
+
+
+def _model_kind(model: Model, component_id: str, component: object | None) -> str:
+    """Return ``ok``, ``missing``, or ``damaged`` for every file of ``model``.
+
+    Each blob is compared with its own size. A single stored size on the
+    component is used only when the model has one file, so a second file is
+    not judged against the first. A complete install with no stored stat is
+    adopted. One missing file beside a present file is damaged.
+    """
+    if not model.files:
+        return "missing"
+    single = len(model.files) == 1
+    kinds: list[str] = []
+    for item in model.files:
+        blob = models_dir() / "blobs" / item.sha256 if item.sha256 else None
+        record = component if single else None
+        stored = stored_stat(blob, record) if blob is not None else None
+        kind = classify_file(blob, item.size, stored)
+        if kind == "adopt" and blob is not None:
+            remember_stat(blob, component_id if single else "")
+            kind = "ok"
+        kinds.append(kind)
+    if all(kind == "missing" for kind in kinds):
+        return "missing"
+    if any(kind in {"missing", "damaged"} for kind in kinds):
+        return "damaged"
+    return "ok"
 
 
 def _tier_gb(model: Model) -> int:

@@ -69,6 +69,8 @@
   "mdl.manage.remove": "Remove",
   "mdl.manage.repair": "Repair",
   "mdl.manage.shared": "Also used by {apps}",
+  "mdl.manage.scan_failed": "The model list could not be read.",
+  "mdl.manage.scan_retry": "Press Retry.",
   "mdl.manage.status.bad": "Needs repair",
   "mdl.manage.status.missing": "Not installed",
   "mdl.manage.status.ok": "Installed",

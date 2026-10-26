@@ -71,6 +71,8 @@
   "mdl.manage.remove": "Убрать",
   "mdl.manage.repair": "Восстановить",
   "mdl.manage.shared": "Также используется: {apps}",
+  "mdl.manage.scan_failed": "Не удалось прочитать список моделей.",
+  "mdl.manage.scan_retry": "Нажмите «Повторить».",
   "mdl.manage.status.bad": "Нужно восстановить",
   "mdl.manage.status.missing": "Не установлено",
   "mdl.manage.status.ok": "Установлено",

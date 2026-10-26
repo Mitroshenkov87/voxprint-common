@@ -69,6 +69,8 @@
   "mdl.manage.remove": "Entfernen",
   "mdl.manage.repair": "Reparieren",
   "mdl.manage.shared": "Auch verwendet von {apps}",
+  "mdl.manage.scan_failed": "Die Modellliste konnte nicht gelesen werden.",
+  "mdl.manage.scan_retry": "Wählen Sie «Erneut versuchen».",
   "mdl.manage.status.bad": "Muss repariert werden",
   "mdl.manage.status.missing": "Nicht installiert",
   "mdl.manage.status.ok": "Installiert",
