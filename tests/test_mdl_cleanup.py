@@ -13,7 +13,7 @@ from voxprint_common.hashing import sha256_bytes, sha256_file
 from voxprint_common.mdl.cleanup import cleanup
 from voxprint_common.mdl.cli import main
 from voxprint_common.mdl.presence import cached_digest, remember_digest
-from voxprint_common.paths import manifest_file, models_dir, state_dir
+from voxprint_common.paths import manifest_file, models_dir, shared_dir, state_dir
 from voxprint_common.runtime_manifest import add_ref, load, registered_paths_match
 
 _PINS = Path(__file__).parent / "fixtures" / "laptop-2026-10-26" / "pins.json"
@@ -26,6 +26,36 @@ def test_registered_paths_match_windows_separators_and_reject_drive_relative() -
     assert registered_paths_match("C:/Models/Config.json", r"c:\models\config.json")
     assert not registered_paths_match(r"C:models\config.json", r"C:\models\config.json")
     assert not registered_paths_match("", r"C:\models\config.json")
+
+
+def test_relative_manifest_path_matches_the_absolute_file_and_delete_retargets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = shared_dir() / "legacy"
+    legacy = folder / "weights.bin"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_bytes(_SAME)
+    digest = sha256_bytes(_SAME)
+    blob = models_dir() / "blobs" / digest
+    blob.parent.mkdir(parents=True)
+    blob.write_bytes(_SAME)
+    monkeypatch.chdir(tmp_path)
+    assert registered_paths_match("legacy/weights.bin", str(legacy))
+    assert not registered_paths_match("weights.bin", str(legacy))
+    add_ref(
+        "relative-weights",
+        "canvas",
+        kind="model",
+        version="1",
+        path="legacy/weights.bin",
+        sha256=digest,
+    )
+    outcome = cleanup([folder], mode="delete", apply=True)
+    assert outcome.code == 0
+    assert not legacy.exists()
+    component = load().components["relative-weights"]
+    assert registered_paths_match(component.path, str(blob))
+    assert component.extra["retargeted_from"] == "legacy/weights.bin"
 
 
 def test_link_keeps_the_bytes_shares_the_inode_and_a_second_run_is_a_noop(tmp_path: Path) -> None:

@@ -451,8 +451,9 @@ def registered_paths_match(recorded: str, candidate: str) -> bool:
     """Return whether two manifest paths name the same file.
 
     Separators and drive-letter case follow Windows rules, including when
-    this process is not running on Windows. A drive-relative path does not
-    match a rooted path.
+    this process is not running on Windows. A relative path matches an
+    absolute path when both name the same file. A drive-relative path does
+    not match a rooted path.
 
     Args:
         recorded: Path stored in ``shared/manifest.json``.
@@ -464,18 +465,23 @@ def registered_paths_match(recorded: str, candidate: str) -> bool:
         return False
     if PureWindowsPath(left).as_posix().casefold() == PureWindowsPath(right).as_posix().casefold():
         return True
-    if _windows_anchor(left) != _windows_anchor(right):
+    if _drive_relative(left) != _drive_relative(right):
         return False
     try:
-        return Path(left).resolve() == Path(right).resolve()
+        if Path(left).resolve() == Path(right).resolve():
+            return True
+    except OSError:
+        return False
+    try:
+        return _resolve_registered_path(left) == _resolve_registered_path(right)
     except OSError:
         return False
 
 
-def _windows_anchor(text: str) -> tuple[str, str]:
-    """Return the drive and a rooted flag, so ``C:name`` is not ``C:\\name``."""
+def _drive_relative(text: str) -> bool:
+    """Return whether ``text`` is ``C:name`` rather than ``C:\\name`` or a relative name."""
     path = PureWindowsPath(text)
-    return path.drive.casefold(), "\\" if path.root else ""
+    return bool(path.drive) and not path.root
 
 
 def retarget_model_paths(
