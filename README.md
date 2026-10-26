@@ -1,3 +1,8 @@
+> [!WARNING]
+> **⚠️ Deep alpha.** This software is experimental; nothing is guaranteed to work. Use at your own risk.
+>
+> **⚠️ Глубокая альфа.** Программа экспериментальная, работа не гарантируется.
+
 <p align="center">
   <a href="LICENSE"><img alt="Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
   <a href="https://www.python.org/"><img alt="Python 3.14" src="https://img.shields.io/badge/python-3.14-blue"></a>
