@@ -26,7 +26,12 @@ from voxprint_common.mdl.job import (
     verify_summary,
 )
 from voxprint_common.mdl.present import format_size
-from voxprint_common.mdl.progress_ui import build_verify_window, clamp_window_size, run_window
+from voxprint_common.mdl.progress_ui import (
+    _size_verify_columns,
+    build_verify_window,
+    clamp_window_size,
+    run_window,
+)
 from voxprint_common.mdl.status import JobState, Status, Step
 from voxprint_common.suite_settings import set_keep_awake_during_jobs
 from voxprint_common.ui.tokens import load
@@ -381,6 +386,11 @@ def test_verify_window_fits_at_1280_in_english_and_russian() -> None:
             assert f"border-radius: {radius}px" in window.styleSheet()
             table = window.findChild(QTableWidget, "verifyTable")
             assert table is not None
+            if window.width() < 1280:
+                window.resize(1280, 720)
+                app.processEvents()
+                _size_verify_columns(table, lang)
+                app.processEvents()
             header = table.horizontalHeader()
             metrics = table.fontMetrics()
             section = [header.sectionSize(index) for index in range(table.columnCount())]
