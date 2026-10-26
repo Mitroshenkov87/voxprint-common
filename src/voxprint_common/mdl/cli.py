@@ -3,7 +3,9 @@
 Subcommands: ``plan``, ``enqueue``, ``download``, ``status``, ``verify``, ``worker``,
 ``index``. ``--check`` prints which model index is in use.
 
-``voxprint-mdl --gui --app <id>`` opens Manage models with no subcommand.
+``voxprint-mdl-gui --app <id>`` opens Manage models with no console. The console
+script ``voxprint-mdl --gui --app <id>`` still opens that page and keeps a
+console attached.
 
 ``enqueue`` appends a job and exits. ``download`` enqueues when ``--app`` or
 ``--manifest`` is set, then runs the single worker or attaches to the one
@@ -34,6 +36,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from voxprint_common import __version__
+from voxprint_common.branding import detach_console
 from voxprint_common.cli_protocol import (
     EXIT_CANCELLED,
     EXIT_FAILED,
@@ -95,12 +98,16 @@ class _Parser(argparse.ArgumentParser):
 def main(argv: Sequence[str] | None = None) -> int:
     """Run one subcommand and return the process exit code.
 
-    ``voxprint-mdl --gui --app <id>`` opens Manage models without a subcommand.
+    ``voxprint-mdl-gui --app <id>`` opens Manage models. ``--gui`` is implied
+    for that entry point. ``voxprint-mdl --gui --app <id>`` does the same from
+    the console script.
 
     Args:
         argv: Arguments without the program name. Defaults to ``sys.argv[1:]``.
     """
     args_list = list(sys.argv[1:] if argv is None else argv)
+    if argv is None and _launched_as_gui() and "--gui" not in args_list:
+        args_list = ["--gui", *args_list]
     if _bare_gui(args_list):
         return _open_named_window(args_list)
     want_json = "--json" in args_list
@@ -374,12 +381,19 @@ def _wait(session: Session | None) -> tuple[int, str, dict[str, object]]:
     return outcome.code, outcome.message, _payload(outcome.status)
 
 
+def _launched_as_gui() -> bool:
+    """True when this process is the windowed ``voxprint-mdl-gui`` entry point."""
+    stem = Path(sys.argv[0]).name.lower().removesuffix(".exe")
+    return stem == "voxprint-mdl-gui"
+
+
 def _bare_gui(argv: Sequence[str]) -> bool:
     commands = {"plan", "enqueue", "download", "status", "verify", "worker"}
     return "--gui" in argv and not any(token in commands for token in argv)
 
 
 def _open_named_window(argv: Sequence[str]) -> int:
+    detach_console()
     tokens = list(argv)
     app = _flag_value(tokens, "--app")
     manifest = _flag_value(tokens, "--manifest")
@@ -415,6 +429,7 @@ def _window_code(outcome: WindowResult) -> int:
 
 def _verify_gui(args: argparse.Namespace) -> tuple[int, str, dict[str, object]]:
     """Open the check-and-repair window for ``voxprint-mdl verify --gui``."""
+    detach_console()
     models = tuple(args.model) if args.model else None
     manifests = [Path(item) for item in args.manifest] if args.manifest else None
     try:
@@ -431,6 +446,7 @@ def _verify_gui(args: argparse.Namespace) -> tuple[int, str, dict[str, object]]:
 
 def _gui(args: argparse.Namespace, session: Session | None) -> tuple[int, str, dict[str, object]]:
     del session
+    detach_console()
     app = args.app or "suite"
     manifests = [Path(item) for item in args.manifest]
     try:

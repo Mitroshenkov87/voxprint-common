@@ -22,6 +22,11 @@ def _png(size: int) -> bytes:
     )
 
 
+def test_model_forge_identity_colour_comes_from_tokens():
+    assert branding.identity_colour("model-forge") == "#f58a3c"
+    assert branding.detach_console() is False
+
+
 def test_identity_and_ico_round_trip(tmp_path):
     ident = branding.install_identity("Model Forge")
     assert ident.display_name == "VOXPrint AI Model Forge"

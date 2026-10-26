@@ -111,7 +111,7 @@ Size is grouped, with no orientation switch: Landscape is 16:9, 21:9, 3:2, and 4
 
 `cancel()` returns the screen to a clean idle state. `block(reason)` and `unavailable(reason)` show a localized plain sentence in the picture area.
 
-The history strip keeps the last 50 pictures in the app's State directory (`image-history.json`). The menu offers Open, Show in folder, Copy, Use prompt again (the words and the seed), Use as input picture, and Delete. Delete asks in that same menu before it removes the picture. The overflow menu is Open folder, Manage models, Settings, and Expert mode. Manage models calls the app. Canvas runs `voxprint-mdl --gui --app canvas`. The reference shell records that choice and does not start the program.
+The history strip keeps the last 50 pictures in the app's State directory (`image-history.json`). The menu offers Open, Show in folder, Copy, Use prompt again (the words and the seed), Use as input picture, and Delete. Delete asks in that same menu before it removes the picture. The overflow menu is Open folder, Manage models, Settings, and Expert mode. Manage models calls the app. Canvas runs `voxprint-mdl-gui --app canvas`. The reference shell records that choice and does not start the program.
 
 A long job uses one progress block: a stage label, a percent, an estimate of the time left, and Cancel. `progress(step, total, stage_label, eta_seconds=...)` fills it. `stage_label` is already translated. Omit `eta_seconds` to leave the estimate off. `generate` calls the app hook with the live settings, including the expert values, and then the screen becomes busy. A second Generate while that job is running is ignored, and the button stays disabled.
 

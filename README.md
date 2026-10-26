@@ -113,7 +113,7 @@ voxprint-mdl download --app enlarge --manifest "/opt/voxprint-ai-suite/enlarge/m
 voxprint-mdl status --json --wait
 ```
 
-`download` enqueues and runs the single worker, or attaches when another process already holds the queue. `--gui` needs the `ui` extra and opens the shared download window. `voxprint-mdl --gui --app clarity` opens Manage models for that app. Without `--gui` the job is headless. Exit 0 means the status file is ready when the plan had nothing left to fetch, or the download finished. Exit 2 means the job failed, including a disk check that refused to start and a post-install hook that failed. The app opens its own window only after `voxprint_common.mdl.ready()` is true. A missing status file is not ready.
+`download` enqueues and runs the single worker, or attaches when another process already holds the queue. `--gui` needs the `ui` extra and opens the shared download window. `voxprint-mdl-gui --app clarity` opens Manage models for that app without a console. `voxprint-mdl --gui` is the console script. Without `--gui` the job is headless. Exit 0 means the status file is ready when the plan had nothing left to fetch, or the download finished. Exit 2 means the job failed, including a disk check that refused to start and a post-install hook that failed. The app opens its own window only after `voxprint_common.mdl.ready()` is true. A missing status file is not ready.
 
 The full contract, including `mdl.json` and the status file, is in the docs under Model downloader.
 

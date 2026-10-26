@@ -15,6 +15,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import assert_never
 
+from voxprint_common.branding import detach_console
 from voxprint_common.cli_protocol import EXIT_CANCELLED, EXIT_FAILED, EXIT_OK
 from voxprint_common.gpu_probe import GpuDevice
 from voxprint_common.i18n import get_language, tr_lang
@@ -135,6 +136,7 @@ def run_window(start: Starter, *, mode: str = "download") -> int:
         run stays open on the summary until Close. Failure of a download leaves
         the window open until Повторить or the window is closed.
     """
+    detach_console()
     chosen = WindowMode(mode)
     match chosen:
         case WindowMode.DOWNLOAD:
@@ -155,9 +157,11 @@ def run_verify_repair(
 ) -> Outcome:
     """Check ``model_ids`` and, when ``repair`` is set, download the bad ones.
 
-    This is the call Model Forge uses for Check and repair models. The window
-    opens on the verify phase, shows each model as OK, missing, or corrupt,
-    repairs only the missing and corrupt models, then shows a summary.
+    This is the call Model Forge uses for Check and repair. Phase verify hashes
+    one model at a time. Phase review then marks every row OK, missing, or
+    corrupt and publishes that summary. Phase repair starts only after review,
+    one marked model at a time. Phase summary is the final count. No repair
+    begins until every verification hash has finished.
 
     Args:
         model_ids: Models to check. ``None`` checks the planned tier.
@@ -704,6 +708,7 @@ def _fill_verify(window: object, status: Status, lang: str) -> None:
         overall.setValue(0)
     counts = _count_states(status)
     window._verify_summary.setText(verify_summary(counts, lang))
+    phase.setText(_phase_text(status, lang))
     done_phase = _phase_of(status) == "summary"
     window._verify_close.setEnabled(done_phase)
     window._verify_cancel.setEnabled(not done_phase)
@@ -841,7 +846,7 @@ def _column_labels(lang: str) -> list[str]:
 
 def _phase_of(status: Status) -> str:
     phase = status.extra.get("phase")
-    if phase in {"verify", "repair", "summary"}:
+    if phase in {"verify", "review", "repair", "summary"}:
         return str(phase)
     return "verify"
 
@@ -850,12 +855,24 @@ def _phase_label(phase: str, lang: str) -> str:
     match phase:
         case "verify":
             return tr_lang("mdl.verify.phase.verify", lang)
+        case "review":
+            return tr_lang("mdl.verify.phase.review", lang)
         case "repair":
             return tr_lang("mdl.verify.phase.repair", lang)
         case "summary":
             return tr_lang("mdl.verify.phase.summary", lang)
         case _:
             return tr_lang("mdl.verify.phase.verify", lang)
+
+
+def _phase_text(status: Status, lang: str) -> str:
+    label = _phase_label(_phase_of(status), lang)
+    done = status.extra.get("done")
+    total = status.extra.get("total")
+    if isinstance(done, int) and isinstance(total, int) and total > 0:
+        counter = tr_lang("mdl.verify.counter", lang, done=done, total=total)
+        return f"{label} · {counter}"
+    return label
 
 
 def _status_label(state: str, lang: str) -> str:

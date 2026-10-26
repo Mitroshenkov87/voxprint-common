@@ -20,10 +20,10 @@ voxprint-mdl download --app enlarge --manifest "/opt/voxprint-ai-suite/enlarge/m
 Apps keep a Manage models button and drop their own download screens. The button runs:
 
 ```bash
-voxprint-mdl --gui --app clarity
+voxprint-mdl-gui --app clarity
 ```
 
-That focuses the single window on the manage page for that app. `voxprint-mdl worker` keeps the queue and the window process running. A second launch, from another installer or from Manage models, focuses the window that is already open. New files appear in the same queue, grouped by app. Closing the window does not cancel the transfer. On Windows the process stays in the notification area when a tray icon is available. Otherwise the window says that downloads continue in the background.
+That focuses the single window on the manage page for that app. `voxprint-mdl-gui` is the windowed entry point and does not open a console. `voxprint-mdl --gui` is the console script and keeps one. `voxprint-mdl worker` keeps the queue and the window process running. A second launch, from another installer or from Manage models, focuses the window that is already open. New files appear in the same queue, grouped by app. Closing the window does not cancel the transfer. On Windows the process stays in the notification area when a tray icon is available. Otherwise the window says that downloads continue in the background.
 
 Omit `--manifest` to discover every installed app. Discovery reads `<home>/state/installed-apps.json` when that file exists (`{"schema": 1, "apps": [{"id": "enlarge", "path": "..."}]}`), then `mdl.json`, then `voxprint-app-models.json`. An empty registry means nothing is installed. When the registry is absent, the command looks under the suite root: `VOXPRINT_SUITE_ROOT`, otherwise `%PROGRAMFILES%\VOXPrint AI Suite\<App Name>` on Windows and `/opt/voxprint-ai-suite/<app>` on Linux.
 

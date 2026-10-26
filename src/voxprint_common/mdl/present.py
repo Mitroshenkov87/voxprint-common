@@ -12,6 +12,7 @@ import urllib.parse
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from voxprint_common.branding import identity_colour
 from voxprint_common.i18n import get_language, tr, tr_lang
 from voxprint_common.mdl.catalog import DiskShort
 from voxprint_common.mdl.fetch import Cancelled, FetchError
@@ -614,7 +615,7 @@ def view_for(
     return WindowView(
         mode=mode,
         focus_app=focus,
-        colour=mark.colour,
+        colour=identity_colour(focus) if focus else mark.colour,
         motif=mark.motif.value,
         heading=heading,
         subtitle=subtitle,
@@ -676,7 +677,7 @@ def _group(slot: AppSlot, snapshot: Snapshot, lang: str) -> GroupView:
     return GroupView(
         app_id=slot.app_id,
         title=mark.display_name,
-        colour=mark.colour,
+        colour=identity_colour(slot.app_id),
         motif=mark.motif.value,
         headline=headline,
         ready=ready,
@@ -730,10 +731,12 @@ def _headings(
 ) -> tuple[str, str, str]:
     if mode == "manage":
         name = identity(focus).display_name if focus else focus_name
+        detail = _t("mdl.subtitle.manage", lang)
+        subtitle = f"{name} · {detail}" if name else detail
         return (
             _t("mdl.heading.manage", lang),
-            _t("mdl.subtitle.manage", lang),
-            name,
+            subtitle,
+            "",
         )
     if all_set:
         name = identity(focus).display_name if focus else focus_name

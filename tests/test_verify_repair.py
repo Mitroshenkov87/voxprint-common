@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -366,3 +368,229 @@ def test_verify_window_fits_at_1280_in_english_and_russian() -> None:
             widths[(lang, phase)] = section
             window.hide()
         assert widths[(lang, "verify")] == widths[(lang, "repair")]
+
+
+def test_phase_label_appends_the_counter() -> None:
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication, QLabel
+
+    app = QApplication.instance() or QApplication([])
+    status = _snapshot("review", [("Voice", 10, 10, "ok")])
+    status.extra["done"] = 2
+    status.extra["total"] = 4
+    window = build_verify_window(status, lang="en", size=(1280, 720))
+    app.processEvents()
+    label = window.findChild(QLabel, "phase")
+    assert label is not None
+    assert label.text() == f"{tr_lang('mdl.verify.phase.review', 'en')} · 2/4"
+    window.hide()
+    window.deleteLater()
+    app.processEvents()
+
+
+def test_every_hash_finishes_before_repair_and_hashes_do_not_overlap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    set_keep_awake_during_jobs(False)
+    manifest = _manifest(tmp_path)
+    _write_store(manifest)
+    events: list[object] = []
+    live = {"n": 0, "peak": 0}
+    real = hashlib.sha256
+
+    class _Counting:
+        def __init__(self, data: bytes = b"") -> None:
+            live["n"] += 1
+            live["peak"] = max(live["peak"], live["n"])
+            events.append("hash")
+            self._inner = real(data)
+
+        def update(self, data: bytes) -> None:
+            self._inner.update(data)
+
+        def hexdigest(self) -> str:
+            try:
+                return self._inner.hexdigest()
+            finally:
+                live["n"] -= 1
+                events.append("hash-done")
+
+        def digest(self) -> bytes:
+            return self._inner.digest()
+
+        def copy(self) -> object:
+            return self._inner.copy()
+
+    def factory(data: bytes = b"", *, usedforsecurity: bool = True) -> _Counting:
+        del usedforsecurity
+        return _Counting(data)
+
+    def fake_fetch(
+        destination: Path,
+        urls: list[str],
+        *,
+        sha256: str,
+        size: int,
+        progress=None,
+        **kwargs: object,
+    ) -> None:
+        del urls, kwargs
+        events.append("fetch")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        blob = next(body for key, body in PAYLOADS.items() if DIGESTS[key] == sha256)
+        destination.write_bytes(blob)
+        if progress is not None:
+            progress(FetchProgress("huggingface", size, size, 1.0))
+
+    def on_status(status: Status) -> None:
+        events.append(
+            (
+                "phase",
+                status.extra.get("phase"),
+                tuple(step.state for step in status.steps),
+                status.extra.get("done"),
+                status.extra.get("total"),
+            )
+        )
+
+    monkeypatch.setattr(hashlib, "sha256", factory)
+    monkeypatch.setattr("voxprint_common.mdl.job.fetch_file", fake_fetch)
+    outcome = verify_repair(
+        ("voice", "broken", "gone"),
+        repair=True,
+        manifests=[manifest],
+        devices=[GPU],
+        on_status=on_status,
+    )
+    assert outcome.code == EXIT_OK
+    assert live["peak"] == 1
+    fetch_at = events.index("fetch")
+    hash_dones = [index for index, item in enumerate(events) if item == "hash-done"]
+    assert hash_dones
+    assert max(hash_dones) < fetch_at
+    review_at = next(
+        index
+        for index, item in enumerate(events)
+        if isinstance(item, tuple) and item[1] == "review"
+    )
+    assert review_at < fetch_at
+    review = events[review_at]
+    assert isinstance(review, tuple)
+    assert review[1:] == ("review", ("ok", "corrupt", "missing"), 3, 3)
+
+
+def test_cached_digest_skips_a_second_hash(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    set_keep_awake_during_jobs(False)
+    manifest = _manifest(tmp_path)
+    _write_store(manifest)
+    calls = {"n": 0}
+    real = hashlib.sha256
+
+    def spy(data: bytes = b"", *, usedforsecurity: bool = True) -> object:
+        calls["n"] += 1
+        return real(data, usedforsecurity=usedforsecurity)
+
+    monkeypatch.setattr(hashlib, "sha256", spy)
+    first = verify_repair(
+        ("voice", "broken", "gone"),
+        repair=False,
+        manifests=[manifest],
+        devices=[GPU],
+    )
+    assert first.status.steps[0].state == "ok"
+    hashed = calls["n"]
+    assert hashed > 0
+    verify_repair(
+        ("voice", "broken", "gone"),
+        repair=False,
+        manifests=[manifest],
+        devices=[GPU],
+    )
+    assert calls["n"] == hashed
+
+
+def test_gui_entry_point_implies_the_gui_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, list[str]] = {}
+
+    def fake(argv: list[str]) -> int:
+        seen["argv"] = list(argv)
+        return 0
+
+    monkeypatch.setattr(sys, "argv", ["voxprint-mdl-gui", "--app", "model-forge"])
+    monkeypatch.setattr("voxprint_common.mdl.cli._open_named_window", fake)
+    assert main() == 0
+    assert seen["argv"][:2] == ["--gui", "--app"]
+
+
+def test_manage_open_does_not_hash(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("PySide6")
+    from voxprint_common.gpu_probe import VramTier
+    from voxprint_common.mdl.control import Controller
+    from voxprint_common.ui.mdl_window import _compose_manage_view, _probe_manage
+
+    payload = b"manage-open-bytes"
+    digest = hashlib.sha256(payload).hexdigest()
+    manifest = tmp_path / "mdl.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "app": "model-forge",
+                "models": [
+                    {
+                        "id": "voice",
+                        "version": "1",
+                        "vram_tier": "8gb",
+                        "name": {"en": "Voice"},
+                        "files": [
+                            {
+                                "path": "voice.bin",
+                                "size": len(payload),
+                                "sha256": digest,
+                                "mirrors": [
+                                    {
+                                        "source": "url",
+                                        "url": "https://huggingface.co/org/voice.bin",
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    planned = plan_files([load_manifest(manifest)], VramTier.GB8, memory_gib=8)
+    planned[0].destination.parent.mkdir(parents=True, exist_ok=True)
+    planned[0].destination.write_bytes(payload)
+    calls = {"n": 0}
+    real = hashlib.sha256
+
+    def spy(data: bytes = b"", *, usedforsecurity: bool = True) -> object:
+        calls["n"] += 1
+        return real(data, usedforsecurity=usedforsecurity)
+
+    monkeypatch.setattr(hashlib, "sha256", spy)
+    controller = Controller()
+    painted = _compose_manage_view(controller, "model-forge", manifest)
+    assert painted.manage is not None
+    assert painted.manage.installed[0].state == "ready"
+    assert calls["n"] == 0
+    window, app = _probe_manage()(controller, "model-forge", "", manifest)
+    try:
+        assert calls["n"] == 0
+        view = window._view
+        assert view is not None and view.manage is not None
+        assert view.manage.installed[0].state == "ready"
+        assert window.width() == 1280
+        assert window._footer.isVisible() is False
+        assert window._rule.isVisible() is False
+        assert window._fade.isVisible() is False
+        assert window._status.isVisible() is False
+        assert "Model Forge" in window._subtitle.text()
+        assert window._badge._colour == "#f58a3c"
+    finally:
+        window.hide()
+        window.deleteLater()
+        app.processEvents()

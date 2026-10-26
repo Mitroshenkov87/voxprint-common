@@ -168,6 +168,18 @@ Name: "{group}\{#MyAppName}"; Filename: "{app}\voxprint-canvas.exe"; WorkingDir:
 
 No other `[Icons]` lines and no `[UninstallDelete]` entry for `{group}`.
 
+## Manage models
+
+A Manage models button starts the windowed entry point:
+
+```bash
+voxprint-mdl-gui --app canvas
+```
+
+`voxprint-mdl-gui` is a GUI script (`pythonw` on Windows), so the window opens without a console. `voxprint-mdl` is a console script. `voxprint-mdl --gui --app canvas` still opens the page, and it keeps the console that launched it. Do not put that command on a button.
+
+The queue process is started with `CREATE_NO_WINDOW` on Windows. A GUI launch also calls `voxprint_common.branding.detach_console()`, which drops a console inherited from `python.exe`. Pass `--manifest <path>` when the app's `mdl.json` is not in the install folder.
+
 ## Release check
 
 Before an RC, on a clean Windows 11 machine:

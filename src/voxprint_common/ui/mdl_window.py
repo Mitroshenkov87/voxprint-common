@@ -11,16 +11,24 @@ the app. The Open button does, and only after a person presses it.
 from __future__ import annotations
 
 import ctypes
+import logging
 import shlex
 import subprocess
 import sys
+import threading
 import time
 from enum import StrEnum
 from pathlib import Path
 from typing import assert_never
 
+from voxprint_common.branding import (
+    detach_console,
+    identity_colour,
+    install_identity,
+    set_app_user_model_id,
+)
 from voxprint_common.i18n import tr
-from voxprint_common.mdl.catalog import discover
+from voxprint_common.mdl.catalog import SUITE_APPS, discover, install_dir
 from voxprint_common.mdl.control import app_outcome, shared_controller
 from voxprint_common.mdl.instance import become_primary, send
 from voxprint_common.mdl.names import DISPLAY_NAME
@@ -28,12 +36,16 @@ from voxprint_common.mdl.present import (
     GroupView,
     ItemState,
     ManageRow,
+    ManageView,
     RowView,
     SmoothedProgress,
+    Snapshot,
     WindowView,
     view_for,
 )
+from voxprint_common.mdl.progress_ui import run_verify_repair
 from voxprint_common.ui.splash import Motif
+from voxprint_common.ui.splash import identity as splash_identity
 from voxprint_common.ui.theme import (
     ACCENT,
     AMBER,
@@ -44,9 +56,12 @@ from voxprint_common.ui.theme import (
     RED,
     ROOT_PLAIN,
     TEXT_MUTED,
+    apply_shell_palette,
     build_style,
 )
 from voxprint_common.ui.tokens import load
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "WindowResult",
@@ -59,7 +74,52 @@ __all__ = [
 
 _MIN_W = 720
 _MIN_H = 480
+_MANAGE_W = 1280
 _FONT = '"Noto Sans", "DejaVu Sans", "Segoe UI Variable Text", "Segoe UI", sans-serif'
+
+
+def _no_window_flag() -> int:
+    if sys.platform != "win32":
+        return 0
+    return int(getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
+
+
+def _hidden_popen(args: list[str]) -> None:
+    """Start ``args`` without a console window on Windows."""
+    subprocess.Popen(
+        args,
+        start_new_session=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=_no_window_flag(),
+    )
+
+
+def _icon_file(app_id: str) -> str:
+    """Return the installed ``.ico`` for ``app_id``, or an empty string."""
+    for spec in SUITE_APPS:
+        if spec.id != app_id:
+            continue
+        path = install_dir(spec) / "assets" / install_identity(spec.windows_name).icon_file
+        if path.is_file():
+            return str(path)
+    return ""
+
+
+def _taskbar_id(app_id: str) -> None:
+    """Set the Windows taskbar identity before the first window opens."""
+    for spec in SUITE_APPS:
+        if spec.id == app_id:
+            set_app_user_model_id(install_identity(spec.windows_name).app_user_model_id)
+            return
+
+
+def _compose_manage_view(controller: object, app_id: str, manifest: Path) -> WindowView:
+    """Build the manage page from stored size and mtime. This does not hash."""
+    page = controller.manage_page(app_id, manifest)  # type: ignore[attr-defined]
+    snap = controller.snapshot()  # type: ignore[attr-defined]
+    return view_for(snap, mode="manage", focus_app=app_id, manage=page)
 
 
 class WindowResult(StrEnum):
@@ -141,13 +201,7 @@ def ensure_worker() -> bool:
     """
     if send({"cmd": "ping"}):
         return True
-    subprocess.Popen(
-        [sys.executable, "-m", "voxprint_common.mdl", "worker"],
-        start_new_session=True,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    _hidden_popen([sys.executable, "-m", "voxprint_common.mdl", "worker"])
     for _ in range(200):
         if send({"cmd": "ping"}):
             return True
@@ -256,21 +310,28 @@ def _shot(view: WindowView, size: tuple[int, int]) -> tuple[object, object, obje
 
 
 def _load_shot() -> object:
-    return _builder(shot=True)
+    return _builder("shot")
 
 
 def _load_qt() -> object:
-    return _builder(shot=False)
+    return _builder("run")
 
 
-def _builder(shot: bool) -> object:
+def _probe_manage() -> object:
+    """Return a function that opens the manage window and waits for its scan."""
+    return _builder("probe")
+
+
+def _builder(kind: str) -> object:
     from PySide6.QtCore import QRectF, QSize, Qt, QTimer, QUrl
     from PySide6.QtGui import (
         QColor,
         QDesktopServices,
         QFont,
+        QIcon,
         QLinearGradient,
         QPainter,
+        QPainterPath,
         QPen,
         QPixmap,
     )
@@ -311,10 +372,12 @@ def _builder(shot: bool) -> object:
     def paint_motif(painter: QPainter, rect: object, shape: str, colour: str) -> None:
         box = rect
         painter.setPen(Qt.PenStyle.NoPen)
-        wash = QColor(colour)
-        wash.setAlpha(56)
-        painter.setBrush(wash)
-        painter.drawRoundedRect(box, 14, 14)
+        gradient = QLinearGradient(box.topLeft(), box.bottomLeft())
+        gradient.setColorAt(0.0, QColor("#2c2c38"))
+        gradient.setColorAt(1.0, QColor("#1b1b23"))
+        painter.setBrush(gradient)
+        radius = max(4.0, float(box.width()) * 0.18)
+        painter.drawRoundedRect(box, radius, radius)
         pen = QPen(QColor(colour))
         pen.setWidth(3)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
@@ -369,13 +432,16 @@ def _builder(shot: bool) -> object:
             super().__init__()
             self._colour = colour
             self._shape = shape
+            self._pixmap = QPixmap()
             self.setFixedSize(side, side)
             self.setAccessibleName(title)
 
-        def set_mark(self, colour: str, shape: str, title: str) -> None:
+        def set_mark(self, colour: str, shape: str, title: str, icon_path: str = "") -> None:
             """Repaint this tile. One widget stays in the header."""
             self._colour = colour
             self._shape = shape
+            loaded = QPixmap(icon_path) if icon_path else QPixmap()
+            self._pixmap = loaded if not loaded.isNull() else QPixmap()
             self.setAccessibleName(title)
             self.update()
 
@@ -383,14 +449,19 @@ def _builder(shot: bool) -> object:
             del event
             painter = QPainter(self)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-            painter.setClipRect(self.rect())
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
             inset = 1.0
-            paint_motif(
-                painter,
-                QRectF(inset, inset, self.width() - 2 * inset, self.height() - 2 * inset),
-                self._shape,
-                self._colour,
-            )
+            rect = QRectF(inset, inset, self.width() - 2 * inset, self.height() - 2 * inset)
+            if not self._pixmap.isNull():
+                clip = QPainterPath()
+                radius = max(4.0, rect.width() * 0.18)
+                clip.addRoundedRect(rect, radius, radius)
+                painter.setClipPath(clip)
+                painter.drawPixmap(rect, self._pixmap, QRectF(self._pixmap.rect()))
+                painter.end()
+                return
+            painter.setClipRect(self.rect())
+            paint_motif(painter, rect, self._shape, self._colour)
             painter.end()
 
     class SheenBar(QWidget):
@@ -553,6 +624,12 @@ def _builder(shot: bool) -> object:
             self._open_cmd = ""
             self._details = False
             self._sig = ""
+            self._scan_lock = threading.Lock()
+            self._scan_running = False
+            self._scan_again = False
+            self._scan_generation = 0
+            self._pending_view: tuple[int, WindowView] | None = None
+            self._height_cap = 900
             self.setStyleSheet(_stylesheet(False))
             root = QVBoxLayout(self)
             root.setContentsMargins(24, 16, 24, 16)
@@ -584,9 +661,11 @@ def _builder(shot: bool) -> object:
             self._body = QWidget()
             self._body.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
             self._rows = QVBoxLayout(self._body)
-            self._rows.setContentsMargins(0, 0, 8, 0)
+            self._rows.setContentsMargins(4, 8, 12, 8)
             self._rows.setSpacing(8)
             self._scroll.setWidget(self._body)
+            self._scroll.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+            self._scroll.viewport().setAutoFillBackground(False)
             self._fade = EdgeFade(self._scroll.viewport())
             bar = self._scroll.verticalScrollBar()
             bar.valueChanged.connect(self._place_fade)
@@ -659,7 +738,8 @@ def _builder(shot: bool) -> object:
             root.addLayout(secondary)
             root.addWidget(self._primary)
             root.addWidget(self._footer)
-            root.addStretch(1)
+            apply_shell_palette(self)
+            apply_shell_palette(self._scroll.viewport())
             self._details_button.clicked.connect(self._toggle_details)
             self._open_folder.clicked.connect(self._on_open_folder)
             self._manage.clicked.connect(self._on_manage)
@@ -676,15 +756,25 @@ def _builder(shot: bool) -> object:
             self._smooth.set_target(view.overall)
             self._heading.setText(view.heading)
             self._subtitle.setText(view.subtitle)
-            self._badge.set_mark(view.colour, view.motif, view.heading)
+            colour = identity_colour(view.focus_app) if view.focus_app else view.colour
+            icon_path = _icon_file(view.focus_app)
+            self._badge.set_mark(colour, view.motif, view.heading, icon_path)
+            if icon_path:
+                icon = QIcon(icon_path)
+                if not icon.isNull():
+                    self.setWindowIcon(icon)
             self._footer.setText(view.footer)
-            self._rule.setStyleSheet(
-                f"background: {view.colour}; border: none; border-radius: 2px;"
-            )
+            self._footer.setVisible(view.mode != "manage")
+            self._rule.setVisible(view.mode != "manage")
+            self._rule.setStyleSheet(f"background: {colour}; border: none; border-radius: 2px;")
+            if view.mode == "manage":
+                self.setMinimumSize(_MIN_W, 280)
             self._overall_caption.setText(view.overall_caption)
             self._overall_detail.setText(view.overall_detail)
             self._status.setText(view.status)
-            self._status.setVisible(bool(view.status) and not view.show_error)
+            self._status.setVisible(
+                bool(view.status) and not view.show_error and view.mode != "manage"
+            )
             self._overall_caption.setVisible(view.mode != "manage")
             self._bar.setVisible(view.mode != "manage")
             self._overall_detail.setVisible(view.mode != "manage")
@@ -786,11 +876,17 @@ def _builder(shot: bool) -> object:
 
         def _fit_scroll(self) -> None:
             needed = max(1, self._body.sizeHint().height())
-            room = max(96, self.height() - 300)
+            if self._mode == "manage":
+                room = max(140, self._height_cap - 260)
+            else:
+                room = max(96, self.height() - 300)
             self._scroll.setFixedHeight(min(needed, room))
             self._place_fade()
 
         def _place_fade(self, *_args: object) -> None:
+            if self._mode == "manage":
+                self._fade.setVisible(False)
+                return
             viewport = self._scroll.viewport()
             bar = self._scroll.verticalScrollBar()
             more = bar.maximum() > 0 and bar.value() < bar.maximum()
@@ -801,16 +897,21 @@ def _builder(shot: bool) -> object:
                 self._fade.raise_()
 
         def _fit_to_content(self, limit: tuple[int, int]) -> None:
-            """Shrink a short queue so the list is not a tall empty pane."""
-            self.resize(limit[0], limit[1])
-            for _ in range(2):
-                self._fit_scroll()
-                layout = self.layout()
-                if layout is not None:
-                    layout.activate()
-                bottom = self._footer.geometry().bottom()
-                height = max(_MIN_H, min(limit[1], bottom + 20))
-                self.resize(limit[0], height)
+            """Size the window to its rows, and keep a tall list inside the cap."""
+            manage = self._mode == "manage"
+            width = _MANAGE_W if manage else limit[0]
+            self._height_cap = limit[1]
+            self.resize(width, limit[1])
+            self._fit_width()
+            self._fit_scroll()
+            layout = self.layout()
+            if layout is not None:
+                layout.activate()
+            hint = max(self.minimumHeight(), self.sizeHint().height())
+            height = min(limit[1], hint)
+            if not manage:
+                height = max(_MIN_H, height)
+            self.resize(width, height)
             self._fit_width()
             self._fit_scroll()
 
@@ -833,10 +934,12 @@ def _builder(shot: bool) -> object:
 
         def _on_manage(self) -> None:
             if self._controller is None:
-                if self._view is not None and self._view.mode == "manage":
-                    return
                 return
             self._mode = "queue" if self._mode == "manage" else "manage"
+            if self._mode == "manage":
+                self.apply(self._placeholder_manage())
+                self._request_scan()
+                return
             self._refresh()
 
         def _on_pause(self) -> None:
@@ -885,19 +988,82 @@ def _builder(shot: bool) -> object:
                 self._refresh()
 
         def _refresh(self) -> None:
+            if self._mode == "manage":
+                self._apply_pending()
+                return
             controller = self._controller
             if controller is None:
                 return
-            manage = None
-            if self._mode == "manage" and self._manifest is not None:
-                manage = controller.manage_page(self._focus, self._manifest)
             view = view_for(
                 controller.snapshot(),
                 mode=self._mode,
                 focus_app=self._focus,
-                manage=manage,
+                manage=None,
             )
             self.apply(view)
+
+        def _placeholder_manage(self) -> WindowView:
+            """A manage page with no rows, shown before the scan finishes."""
+            controller = self._controller
+            snap = controller.snapshot() if controller is not None else Snapshot()
+            name = splash_identity(self._focus).display_name if self._focus else ""
+            empty = ManageView(
+                (),
+                (),
+                "",
+                tr("mdl.manage.empty_installed", app=name),
+                tr("mdl.manage.empty_available"),
+            )
+            return view_for(snap, mode="manage", focus_app=self._focus, manage=empty)
+
+        def _request_scan(self) -> None:
+            """Scan install state on a worker. The UI thread only paints the result."""
+            if self._mode != "manage" or self._controller is None or self._manifest is None:
+                return
+            with self._scan_lock:
+                if self._scan_running:
+                    self._scan_again = True
+                    return
+                self._scan_running = True
+                self._scan_generation += 1
+                token = self._scan_generation
+            controller = self._controller
+            focus = self._focus
+            manifest = self._manifest
+
+            def work() -> None:
+                view = None
+                try:
+                    view = _compose_manage_view(controller, focus, manifest)
+                except Exception:
+                    logger.exception("manage scan failed")
+                self._finish_scan(token, view)
+
+            threading.Thread(target=work, name="mdl-manage-scan", daemon=True).start()
+
+        def _finish_scan(self, token: int, view: WindowView | None) -> None:
+            again = False
+            with self._scan_lock:
+                if view is not None:
+                    self._pending_view = (token, view)
+                self._scan_running = False
+                again = self._scan_again
+                self._scan_again = False
+            if again:
+                self._request_scan()
+
+        def _apply_pending(self) -> None:
+            """Paint a scan that the worker already finished."""
+            with self._scan_lock:
+                pending = self._pending_view
+                self._pending_view = None
+            if pending is None:
+                return
+            token, view = pending
+            if token != self._scan_generation:
+                return
+            self.apply(view)
+            self._fit_to_content((_MANAGE_W, self._height_cap))
 
         def _ensure_tray(self) -> None:
             if self._tray is not None:
@@ -968,6 +1134,10 @@ def _builder(shot: bool) -> object:
             self._open_cmd = open_cmd
             self._mode = mode
             self._manifest = manifest
+            if mode == "manage":
+                self.apply(self._placeholder_manage())
+                self._request_scan()
+                return
             self._refresh()
 
     def _rebuild(window: DownloadWindow, view: WindowView) -> None:
@@ -977,9 +1147,8 @@ def _builder(shot: bool) -> object:
             if widget is not None:
                 widget.deleteLater()
         if view.mode == "manage" and view.manage is not None:
-            disk = QLabel(view.manage.disk)
+            disk = WrapLabel(view.manage.disk)
             disk.setObjectName("hint")
-            disk.setWordWrap(True)
             window._rows.addWidget(disk)
             _section(
                 window,
@@ -1088,12 +1257,14 @@ def _builder(shot: bool) -> object:
         layout = QHBoxLayout(card)
         layout.setContentsMargins(12, 10, 12, 10)
         text = QVBoxLayout()
-        title = QLabel(row.title)
-        title.setWordWrap(True)
-        meta = QLabel(row.meta)
+        title = WrapLabel(row.title)
+        meta = WrapLabel(row.meta)
         meta.setObjectName("hint")
-        meta.setWordWrap(True)
         text.addWidget(title)
+        if row.note:
+            note = WrapLabel(row.note)
+            note.setObjectName("hint")
+            text.addWidget(note)
         text.addWidget(meta)
         chip = QLabel(row.state_label)
         chip.setStyleSheet(chip_style(row.state))
@@ -1151,6 +1322,8 @@ def _builder(shot: bool) -> object:
                 if item.model_id == key:
                     component = item.component_id
             controller.remove_model(window._focus, component)
+            window._request_scan()
+            return
         elif action in {"add", "repair"}:
             controller.enqueue_app(
                 window._focus,
@@ -1163,11 +1336,10 @@ def _builder(shot: bool) -> object:
         window._refresh()
 
     def _verify(window: DownloadWindow) -> None:
-        if window._controller is None or window._manifest is None:
+        if window._manifest is None:
             return
-        window._controller.verify_app(window._focus, window._manifest)
-        window._controller.start(display=True)
-        window._refresh()
+        run_verify_repair(None, repair=True, manifests=[window._manifest], show=True)
+        window._request_scan()
 
     def _signature(view: WindowView) -> str:
         parts = [view.mode, view.focus_app, str(view.show_error), str(view.all_set)]
@@ -1214,7 +1386,10 @@ def _builder(shot: bool) -> object:
         QFrame#errorCard {{
             background: {NOTE_BG}; border: 1px solid {NOTE_BORDER}; border-radius: 16px;
         }}
-        QScrollArea, QScrollArea > QWidget > QWidget {{ background: transparent; border: none; }}
+        QScrollArea, QScrollArea > QWidget > QWidget,
+        QAbstractScrollArea, QAbstractScrollArea::viewport {{
+            background: transparent; border: none;
+        }}
         QScrollBar:vertical {{
             background: transparent; width: 8px; margin: 4px 0 4px 0;
         }}
@@ -1239,11 +1414,27 @@ def _builder(shot: bool) -> object:
         font.setPointSize(10)
         return font
 
-    if shot:
+    def _prepare_app() -> QApplication:
+        app = QApplication.instance() or QApplication([])
+        app.setFont(_font())
+        apply_shell_palette(app)
+        return app
+
+    def _shell(window: DownloadWindow) -> None:
+        manage = window._mode == "manage"
+        apply_shell_palette(window)
+        apply_shell_palette(window._scroll.viewport())
+        if manage:
+            return
+        if apply_backdrop(window):
+            window.setStyleSheet(_stylesheet(True))
+            if window._view is not None:
+                window.apply(window._view)
+
+    if kind == "shot":
 
         def build(view: WindowView, size: tuple[int, int]) -> tuple[QWidget, QApplication, object]:
-            app = QApplication.instance() or QApplication([])
-            app.setFont(_font())
+            app = _prepare_app()
             window = DownloadWindow()
             window.resize(size[0], size[1])
             window.apply(view)
@@ -1253,8 +1444,7 @@ def _builder(shot: bool) -> object:
             app.processEvents()
             window._fit_to_content(size)
             app.processEvents()
-            if apply_backdrop(window):
-                window.setStyleSheet(_stylesheet(True))
+            _shell(window)
             app.processEvents()
             window._fit_width()
             window._fit_scroll()
@@ -1267,6 +1457,34 @@ def _builder(shot: bool) -> object:
 
         return build
 
+    def probe(
+        controller: object,
+        app_id: str,
+        open_cmd: str,
+        manifest: Path,
+    ) -> tuple[DownloadWindow, QApplication]:
+        """Open the manage window and wait until the worker scan is painted."""
+        detach_console()
+        _taskbar_id(app_id)
+        app = _prepare_app()
+        window = DownloadWindow()
+        window.bind(controller, app_id, open_cmd, "manage", manifest)
+        window.resize(_MANAGE_W, 720)
+        window.show()
+        _shell(window)
+        app.processEvents()
+        for _ in range(100):
+            window._apply_pending()
+            app.processEvents()
+            view = window._view
+            ready = view is not None and view.manage is not None and bool(view.manage.disk)
+            if ready:
+                break
+            time.sleep(0.02)
+        window._fit_to_content((_MANAGE_W, 900))
+        app.processEvents()
+        return window, app
+
     def run(
         primary: object,
         controller: object,
@@ -1275,17 +1493,20 @@ def _builder(shot: bool) -> object:
         mode: str,
         manifest: Path | None,
     ) -> WindowResult:
-        app = QApplication.instance() or QApplication([])
-        app.setFont(_font())
+        detach_console()
+        _taskbar_id(app_id)
+        app = _prepare_app()
         window = DownloadWindow()
         window.bind(controller, app_id, open_cmd, mode, manifest)
+        if mode == "manage":
+            window.resize(_MANAGE_W, 720)
         window.show()
         app.processEvents()
-        window._fit_to_content((window.width(), 720))
+        cap = 900 if mode == "manage" else 720
+        width = _MANAGE_W if mode == "manage" else window.width()
+        window._fit_to_content((width, cap))
         app.processEvents()
-        if apply_backdrop(window):
-            window.setStyleSheet(_stylesheet(True))
-            window.apply(window._view) if window._view else None
+        _shell(window)
         timer = QTimer(window)
         polls = {"n": 0}
 
@@ -1293,7 +1514,10 @@ def _builder(shot: bool) -> object:
             window.tick()
             polls["n"] += 1
             if polls["n"] % 4 == 0:
-                window._refresh()
+                if window._mode == "manage":
+                    window._apply_pending()
+                else:
+                    window._refresh()
             _drain(primary, window, controller)
             if not window.isVisible():
                 snap = controller.snapshot()
@@ -1315,6 +1539,8 @@ def _builder(shot: bool) -> object:
             window._tray.hide()
         return window._result
 
+    if kind == "probe":
+        return probe
     return run
 
 
@@ -1330,7 +1556,10 @@ def _drain(primary: object, window: object, controller: object) -> None:
     if manifest is not None:
         window._manifest = manifest
     window._show_again()
-    window._refresh()
+    if window._mode == "manage":
+        window._request_scan()
+    else:
+        window._refresh()
 
 
 def _consume(
@@ -1412,7 +1641,7 @@ def _launch_app(command: str) -> None:
     args = shlex.split(text, posix=_shlex_posix())
     if not args:
         return
-    subprocess.Popen(args, start_new_session=True)
+    _hidden_popen(args)
 
 
 def _shlex_posix() -> bool:

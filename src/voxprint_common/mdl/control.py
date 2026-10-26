@@ -13,7 +13,7 @@ import shutil
 import threading
 from pathlib import Path
 
-from voxprint_common.gpu_probe import GpuDevice, VramTier
+from voxprint_common.gpu_probe import GpuDevice, VramTier, query_gpus
 from voxprint_common.i18n import tr, tr_lang
 from voxprint_common.mdl.catalog import (
     MODEL_PREFIX,
@@ -25,6 +25,7 @@ from voxprint_common.mdl.catalog import (
 from voxprint_common.mdl.events import ItemProgress, ProgressEvent, TransferSession
 from voxprint_common.mdl.hooks import remove_outputs
 from voxprint_common.mdl.job import detect_tier, verify
+from voxprint_common.mdl.presence import classify_file, remember_stat, stored_stat
 from voxprint_common.mdl.present import (
     AppSlot,
     ItemState,
@@ -153,6 +154,7 @@ class Controller:
         self._job_id: str | None = None
         self._worker: threading.Thread | None = None
         self._focus = ""
+        self._gpus_cache: list[GpuDevice] | None = None
 
     def enqueue_app(
         self,
@@ -255,7 +257,7 @@ class Controller:
     ) -> list[ManagedFile]:
         """Return models this card can run, including optional ones."""
         parsed = load_manifest(manifest)
-        return _visible(parsed, devices)
+        return _visible(parsed, self._gpus(devices))
 
     def manage_page(
         self,
@@ -348,6 +350,14 @@ class Controller:
         del app_id
         verify([manifest])
 
+    def _gpus(self, devices: list[GpuDevice] | None) -> list[GpuDevice]:
+        """Return ``devices``, or the process's GPUs probed once."""
+        if devices is not None:
+            return list(devices)
+        if self._gpus_cache is None:
+            self._gpus_cache = list(query_gpus())
+        return self._gpus_cache
+
     def _remember(self, event: ProgressEvent) -> None:
         self._event = event
 
@@ -365,7 +375,11 @@ def _visible(manifest: AppManifest, devices: list[GpuDevice] | None) -> list[Man
         component = document.components.get(component_id)
         refs = tuple(component.refs) if component is not None else ()
         blob = models_dir() / "blobs" / digest if digest else None
-        installed = blob is not None and blob.is_file()
+        expected = sum(item.size for item in model.files)
+        kind = classify_file(blob, expected, stored_stat(blob, component) if blob else None)
+        if kind == "adopt" and blob is not None:
+            remember_stat(blob, component_id)
+            kind = "ok"
         names = dict(model.names)
         if model.display_name and "en" not in names:
             names["en"] = model.display_name
@@ -374,27 +388,17 @@ def _visible(manifest: AppManifest, devices: list[GpuDevice] | None) -> list[Man
                 model.id,
                 names,
                 model.display_name or model.id,
-                sum(item.size for item in model.files),
+                expected,
                 _tier_gb(model),
                 model.optional or model.on_demand,
                 digest,
-                installed,
+                kind != "missing",
                 refs,
                 component_id,
-                _verified(blob, digest),
+                kind == "ok",
             )
         )
     return found
-
-
-def _verified(blob: Path | None, digest: str) -> bool:
-    if blob is None or not digest or not blob.is_file():
-        return False
-    marker = blob.with_name(blob.name + ".verified")
-    try:
-        return marker.read_text(encoding="utf-8").strip() == digest
-    except OSError:
-        return False
 
 
 def _tier_gb(model: Model) -> int:

@@ -78,7 +78,14 @@ _DENSITY = (
     "focus_ring_px",
     "chip_pad_px",
 )
-_IDENTITY = ("audiobook-builder", "movie-dubber", "enlarge", "clarity")
+_IDENTITY = (
+    "audiobook-builder",
+    "movie-dubber",
+    "enlarge",
+    "clarity",
+    "canvas",
+    "model-forge",
+)
 PALETTE_ROLES = (
     "Window",
     "WindowText",

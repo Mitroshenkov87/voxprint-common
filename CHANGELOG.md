@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.1 - 2026-10-26
+
+The manage-models window opens on the suite surface colours, at 1280 px wide, sized to its rows. The header tile uses the app identity colour from `tokens.json` (Model Forge `#f58a3c`) on the dark rounded icon tile, or the installed `.ico` when that file is present. The pink rule, the edge fade, and the empty band under the buttons are gone in manage mode. The app name sits in the header. Opening the window does not hash: a row is installed when the stored size and mtime match the file. The scan runs off the UI thread, and the window is on screen before that scan finishes.
+
+Check and repair (`Проверить и починить`) has three phases. Verify hashes one model at a time. Review then marks every row OK, damaged, or missing and shows that summary, with an N/M counter. Repair starts only after review, one marked model at a time. Cancel waits until the current file has finished. A digest is cached by path, size, and mtime, so an unchanged file is not hashed again.
+
+`voxprint-mdl-gui --app <id>` is the windowed entry point. Apps should call that instead of `voxprint-mdl --gui`. On Windows the queue process is started with `CREATE_NO_WINDOW`, and a GUI launch drops an inherited console.
+
 ## 0.5.0 - 2026-10-25
 
 `ModelPark` is the shared RAM hot tier. A model is read from SSD once and kept in RAM while the tier budget allows. `ram32` loads on demand and does not keep the weights. `ram64` parks main models. `ram96` keeps every model. `stage(name, models=[...])` moves the requested models to the GPU and the others back to RAM. The VRAM budget defaults to 16 GiB and leaves 1 GiB free. Least-recently-used GPU residents return to RAM, not to disk, while the RAM budget still holds them. Host copies are pinned when that succeeds and stay pageable when it does not. Transfers keep the source dtype, so FP8 stays FP8. A second `get` of a parked model does not read the disk; the attempt is counted and logged. `stats()` reports resident RAM and VRAM bytes, disk reads per model, and the copy timings.
