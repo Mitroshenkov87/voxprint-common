@@ -464,10 +464,18 @@ def registered_paths_match(recorded: str, candidate: str) -> bool:
         return False
     if PureWindowsPath(left).as_posix().casefold() == PureWindowsPath(right).as_posix().casefold():
         return True
+    if _windows_anchor(left) != _windows_anchor(right):
+        return False
     try:
         return Path(left).resolve() == Path(right).resolve()
     except OSError:
         return False
+
+
+def _windows_anchor(text: str) -> tuple[str, str]:
+    """Return the drive and a rooted flag, so ``C:name`` is not ``C:\\name``."""
+    path = PureWindowsPath(text)
+    return path.drive.casefold(), "\\" if path.root else ""
 
 
 def retarget_model_paths(
