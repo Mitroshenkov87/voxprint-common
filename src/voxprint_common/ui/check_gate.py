@@ -405,8 +405,8 @@ class CheckGate(QWidget):
         worker.finished_run.connect(self._on_finished)
         self._thread = worker
         self._arm_lifetime(worker, token)
-        self._set_state(GateState.RUNNING, finished=False)
         worker.start()
+        self._set_state(GateState.RUNNING, finished=False)
 
     def cancel(self) -> None:
         """Ask the worker to stop after the item it is checking now."""

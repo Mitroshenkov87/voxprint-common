@@ -319,6 +319,32 @@ def test_second_start_while_running_is_ignored() -> None:
     assert calls == ["a"]
 
 
+def test_cancel_is_enabled_as_soon_as_check_starts() -> None:
+    qt = _qt()
+    entered = threading.Event()
+    release = threading.Event()
+
+    def items():
+        entered.set()
+        release.wait(2)
+        return [qt.CheckItem("a", "A")]
+
+    def job(item, _token):
+        return qt.ItemResult(item.id, True)
+
+    gate = _gate(qt, job, items)
+    gate.start()
+    assert entered.wait(2)
+    assert gate.state is qt.GateState.RUNNING
+    assert gate._check.isEnabled() is False
+    assert gate._cancel.isEnabled() is True
+
+    def go() -> None:
+        release.set()
+
+    assert _wait(qt, gate, go) is qt.GateState.PASSED
+
+
 def test_edit_during_a_run_keeps_cancel() -> None:
     qt = _qt()
     entered = threading.Event()
