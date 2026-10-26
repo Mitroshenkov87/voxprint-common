@@ -7,10 +7,13 @@ the calling thread, one file at a time. A matching digest reuses
 ``blobs/<sha256>`` when that blob is already the right bytes. A leftover
 file at the destination is replaced. Otherwise the bytes are hardlinked, or
 copied when a hardlink is impossible. The source file is never deleted or
-moved. A mismatch is reported and left for ``download``.
+moved. A source whose hash matches that blob and whose inode does not is
+listed as ``duplicate``, with the bytes a later hardlink could reclaim. A
+mismatch is reported and left for ``download``.
 
-A second run of the same files is a no-op: the verified blob is reused and
-the source is not read again. Hooks run only when every planned file was
+A second run does not copy again. A source that is already the blob inode is
+not read. A separate copy is hashed so the duplicate list stays current.
+Hooks run only when every planned file was
 adopted or reused. Each Canvas model whose files are all in the blob store
 gets ``views/canvas/<id>-<digest12>/``, the folder Canvas rc.28 opens.
 """
@@ -55,6 +58,7 @@ __all__ = ["adopt"]
 ProgressFn = Callable[[float | None, str], None]
 StatusFn = Callable[[Status], None]
 _Row = dict[str, str]
+_Duplicate = dict[str, object]
 _Kind = Literal["adopted", "reused", "skipped", "pending"]
 
 
@@ -122,15 +126,18 @@ def adopt(
     reused: list[_Row] = []
     skipped: list[_Row] = []
     pending: list[_Row] = []
+    duplicates: list[_Duplicate] = []
     placed: list[PlannedFile] = []
     try:
         for item, step in zip(files, status.steps, strict=True):
             if _cancelled(cancel):
-                _note(status, adopted, reused, skipped, pending)
+                _note(status, adopted, reused, skipped, pending, duplicates)
                 status.state = JobState.CANCELLED
                 status.error = "cancelled"
                 return _publish(status, EXIT_CANCELLED, "cancelled", on_status, on_progress)
-            kind, detail = _take(item, chosen.get(id(item)), step, status, publisher, dry_run)
+            kind, detail, duplicate = _take(
+                item, chosen.get(id(item)), step, status, publisher, dry_run
+            )
             row = {"model": item.model_id, "file": item.name, "sha256": item.sha256}
             match kind:
                 case "skipped":
@@ -146,6 +153,8 @@ def adopt(
                     pending.append(row)
                 case _ as unreachable:
                     assert_never(unreachable)
+            if duplicate is not None:
+                duplicates.append(duplicate)
             step.source = detail
             status.recompute()
             publisher.push(force=True)
@@ -155,14 +164,14 @@ def adopt(
             apply_hooks(placed)
     except HookError as exc:
         _mark_hook(status, exc)
-        _note(status, adopted, reused, skipped, pending)
+        _note(status, adopted, reused, skipped, pending, duplicates)
         return _publish(status, EXIT_FAILED, str(exc), on_status, on_progress)
     except (CatalogError, OSError) as exc:
         status.state = JobState.FAILED
         status.error = str(exc)
-        _note(status, adopted, reused, skipped, pending)
+        _note(status, adopted, reused, skipped, pending, duplicates)
         return _publish(status, EXIT_FAILED, str(exc), on_status, on_progress)
-    _note(status, adopted, reused, skipped, pending)
+    _note(status, adopted, reused, skipped, pending, duplicates)
     if not skipped and not pending:
         status.state = JobState.READY
         status.error = ""
@@ -171,7 +180,7 @@ def adopt(
     else:
         status.state = JobState.PLANNED
         status.error = ""
-    message = _summary(adopted, reused, skipped, pending)
+    message = _summary(adopted, reused, skipped, pending, duplicates)
     status.extra["summary"] = message
     return _publish(status, EXIT_OK, message, on_status, on_progress)
 
@@ -183,19 +192,20 @@ def _take(
     status: Status,
     publisher: _Publisher,
     dry_run: bool,
-) -> tuple[_Kind, str]:
+) -> tuple[_Kind, str, _Duplicate | None]:
     if dry_run:
-        return _preview(item, candidate, step)
+        kind, detail = _preview(item, candidate, step)
+        return kind, detail, None
     if _reusable(item):
         _mark_verified(item)
         _remember(item)
         step.state = "verified"
         step.received = item.size
-        return "reused", "reused"
+        return "reused", "reused", _separate(item, candidate)
     if candidate is None:
         step.state = "skipped"
         step.received = 0
-        return "skipped", "no candidate"
+        return "skipped", "no candidate", None
     step.state = "checking"
     step.received = 0
     status.recompute()
@@ -211,21 +221,22 @@ def _take(
     except OSError:
         step.state = "skipped"
         step.received = 0
-        return "skipped", "could not read"
+        return "skipped", "could not read", None
     remember_digest(candidate, digest)
     if digest != item.sha256.strip().lower():
         step.state = "skipped"
         step.received = 0
-        return "skipped", "sha256 mismatch"
+        return "skipped", "sha256 mismatch", None
     how = _place(candidate, item.destination)
     _mark_verified(item)
     remember_digest(item.destination, digest)
     _remember(item)
     step.state = "verified"
     step.received = item.size
+    duplicate = _separate(item, candidate)
     if how == "reused":
-        return "reused", "reused"
-    return "adopted", how
+        return "reused", "reused", duplicate
+    return "adopted", how, duplicate
 
 
 def _preview(item: PlannedFile, candidate: Path | None, step: Step) -> tuple[_Kind, str]:
@@ -359,17 +370,59 @@ def _place(source: Path, dest: Path) -> str:
     return "linked" if linked else "copied"
 
 
+def _separate(item: PlannedFile, candidate: Path | None) -> _Duplicate | None:
+    """Return a duplicate row when ``candidate`` matches the blob on another inode."""
+    if candidate is None or not item.destination.is_file():
+        return None
+    try:
+        if not candidate.is_file() or candidate.is_symlink():
+            return None
+        if os.path.samefile(candidate, item.destination):
+            return None
+        digest, _amount = _hash_file(candidate, lambda _done: None)
+    except OSError:
+        return None
+    if digest != item.sha256.strip().lower():
+        return None
+    return {
+        "path": str(candidate),
+        "bytes": candidate.stat().st_size,
+        "blob": str(item.destination),
+    }
+
+
+def _reclaimable(rows: Sequence[_Duplicate]) -> int:
+    seen: set[tuple[int, int]] = set()
+    total = 0
+    for row in rows:
+        path = Path(str(row["path"]))
+        try:
+            info = path.stat()
+        except OSError:
+            total += int(row["bytes"])
+            continue
+        key = (info.st_dev, info.st_ino)
+        if key in seen:
+            continue
+        seen.add(key)
+        total += info.st_size
+    return total
+
+
 def _note(
     status: Status,
     adopted: list[_Row],
     reused: list[_Row],
     skipped: list[_Row],
     pending: list[_Row],
+    duplicates: list[_Duplicate],
 ) -> None:
     status.extra["adopted"] = list(adopted)
     status.extra["reused"] = list(reused)
     status.extra["skipped"] = list(skipped)
     status.extra["would_adopt"] = list(pending)
+    status.extra["duplicate"] = list(duplicates)
+    status.extra["reclaimable_bytes"] = _reclaimable(duplicates)
 
 
 def _summary(
@@ -377,12 +430,18 @@ def _summary(
     reused: Sequence[_Row],
     skipped: Sequence[_Row],
     pending: Sequence[_Row],
+    duplicates: Sequence[_Duplicate],
 ) -> str:
     message = (
         f"adopted {len(adopted)}, reused {len(reused)}, "
         f"skipped {len(skipped)}, would adopt {len(pending)}"
     )
+    lines = [message]
+    if duplicates:
+        lines[0] += f", duplicate {len(duplicates)}, reclaimable {_reclaimable(duplicates)} bytes"
+        lines.extend(f"duplicate {row['path']} {row['bytes']} {row['blob']}" for row in duplicates)
     if not skipped:
-        return message
+        return "\n".join(lines)
     reasons = ", ".join(f"{row['file']} ({row['reason']})" for row in skipped)
-    return f"{message}: {reasons}"
+    lines[0] = f"{lines[0]}: {reasons}"
+    return "\n".join(lines)

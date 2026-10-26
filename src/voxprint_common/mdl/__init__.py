@@ -26,6 +26,7 @@ from voxprint_common.mdl.catalog import (
     load_manifest,
     suite_root,
 )
+from voxprint_common.mdl.cleanup import cleanup
 from voxprint_common.mdl.events import (
     ItemProgress,
     JobProgress,
@@ -57,6 +58,7 @@ __all__ = [
     "Status",
     "TransferSession",
     "adopt",
+    "cleanup",
     "discover",
     "download",
     "enqueue",

@@ -37,7 +37,7 @@ import shutil
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 from voxprint_common.atomic import exclusive_lock, write_json
@@ -67,10 +67,12 @@ __all__ = [
     "cpu_onnxruntime_conflicts",
     "load",
     "lock_path",
+    "registered_paths_match",
     "release_component",
     "remember_model_stat",
     "remove_ref",
     "repair_manifest",
+    "retarget_model_paths",
     "runtime_component_id",
 ]
 
@@ -443,6 +445,80 @@ def release_component(
             dry_run=False,
             users_document=users_document,
         )
+
+
+def registered_paths_match(recorded: str, candidate: str) -> bool:
+    """Return whether two manifest paths name the same file.
+
+    Separators and drive-letter case follow Windows rules, including when
+    this process is not running on Windows. A drive-relative path does not
+    match a rooted path.
+
+    Args:
+        recorded: Path stored in ``shared/manifest.json``.
+        candidate: Path found on disk.
+    """
+    left = recorded.strip()
+    right = candidate.strip()
+    if not left or not right:
+        return False
+    if PureWindowsPath(left).as_posix().casefold() == PureWindowsPath(right).as_posix().casefold():
+        return True
+    try:
+        return Path(left).resolve() == Path(right).resolve()
+    except OSError:
+        return False
+
+
+def retarget_model_paths(
+    replacements: Mapping[str, str],
+    *,
+    manifest: Path | None = None,
+    timeout: float = _TIMEOUT,
+    dry_run: bool = False,
+) -> list[dict[str, str]]:
+    """Point model components from a legacy file to its blob.
+
+    This is the migration that ships with cleanup. The previous path is kept
+    on the component as ``retargeted_from``. Schema stays 1. A dry run reports
+    the same rows and does not write.
+
+    Args:
+        replacements: Legacy path to blob path.
+        manifest: Manifest path. Defaults to the suite file.
+        timeout: Lock timeout in seconds.
+        dry_run: Report matches and do not write.
+
+    Returns:
+        One row per component that is, or would be, retargeted.
+    """
+    target = manifest or manifest_file()
+    if not target.is_file() or not replacements:
+        return []
+    with exclusive_lock(lock_path(target), timeout=timeout):
+        document = _load_migrate(target)
+        notes: list[dict[str, str]] = []
+        changed = False
+        for component_id, component in document.components.items():
+            if component.kind != "model" or not component.path:
+                continue
+            blob = ""
+            for legacy, dest in replacements.items():
+                if registered_paths_match(component.path, legacy):
+                    blob = dest
+                    break
+            if not blob or registered_paths_match(component.path, blob):
+                continue
+            stored = _check_component_path(blob, kind="model", model_roots=_model_roots(None))
+            notes.append({"component": component_id, "from": component.path, "to": stored})
+            if dry_run:
+                continue
+            component.extra["retargeted_from"] = component.path
+            component.path = stored
+            changed = True
+        if changed:
+            _write(target, document)
+        return notes
 
 
 def repair_manifest(

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.2 - 2026-10-26
+
+`adopt` reports a source file whose hash matches a blob and whose inode does not. The text report and `--json` include each `duplicate` row (`path`, `bytes`, `blob`) and `reclaimable_bytes`. The adopted, reused, skipped, and would-adopt counts stay as they were. A dry run still does not hash. A source that is already the blob inode is not read again.
+
+`voxprint-mdl cleanup` reclaims those copies. The default is a dry run. `--apply --mode link` replaces a hash-matched legacy file with a hardlink to `blobs\<sha256>`: link to a temporary name in the same directory, then rename over the original. A failed link is skipped and nothing is copied. `--mode delete` removes a file only after a fresh SHA-256 of the file and of the blob match, ignoring the hash cache. Empty directories are removed only when every file under them was verified. Files with no matching blob are `unique` and are left in place. `--gc` removes blobs that no view, app ref, or manifest names, under the same dry-run and `--apply` rules. Before a file is replaced or removed, model entries in `shared\manifest.json` that point at the legacy path are retargeted at the blob. The previous path is kept as `retargeted_from`. Schema stays 1. An interrupted link leaves the original file or the hardlink. A second run changes nothing.
+
+`docs/ci/pin-check.yml` is a reusable workflow apps can call to fail when a pyproject or lock pin for voxprint-common disagrees with the wanted tag's wheel sha256.
+
 ## 0.5.1 - 2026-10-26
 
 The manage-models window opens on the suite surface colours, at 1280 px wide, sized to its rows. The header shows the installed `.ico` when that file is present. Otherwise it paints the app glyph in the identity colour from `tokens.json` — Model Forge is the isometric cube in `#f58a3c` — on the dark rounded tile, and an unknown app falls back to the VOXPrint mark. The disk line prints a Windows drive path with backslashes. A model with several files is installed when each file matches its own size. Check and repair opened from Manage stays on the window's event loop and blocks that window until the check closes. A manage scan that fails is tried once more, then shown with Retry. The pink rule, the edge fade, and the empty band under the buttons are gone in manage mode. The app name sits in the header. Opening the window does not hash: a row is installed when the stored size and mtime match the file. The scan runs off the UI thread, and the window is on screen before that scan finishes.

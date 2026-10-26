@@ -26,7 +26,19 @@ voxprint-mdl --json adopt --dry-run --app canvas --manifest ./mdl.json --from ./
 
 A digest that matches the descriptor is stored at `<models_dir>\blobs\<sha256>`. An existing blob of that name is reused when it is already the right bytes. A leftover file there is replaced. Otherwise adopt hardlinks the candidate on the same volume, or copies it when a hardlink cannot be created. The source file is never deleted or moved. The blob is marked `.verified` and the app is added as a ref. When every file of a Canvas model is in the blob store, adopt builds `<models_dir>\views\canvas\<model-id>-<12 hex>\`. The 12 hex digits are the first 12 of the SHA-256 of the sorted `path<TAB>sha256` lines, which is the folder Canvas rc.28 opens. Each entry is a hard link to its blob, and `.voxprint-view.json` is schema 1 with `key` and `files`. Post-install hooks run when every planned file was adopted or reused, the same point as a download. A download builds that Canvas view too.
 
-A file that is missing, the wrong size, or the wrong digest is listed in the result and left for `download`. The command still exits 0. `ready` is true only when nothing was skipped. `--dry-run` reports path and size matches (`would_adopt`) and does not hash, link, or copy. A second run reuses the verified blob and does not read the source again.
+A file that is missing, the wrong size, or the wrong digest is listed in the result and left for `download`. The command still exits 0. `ready` is true only when nothing was skipped. `--dry-run` reports path and size matches (`would_adopt`) and does not hash, link, or copy. A second run reuses the verified blob. A source that is already that blob's inode is not read again. A separate copy is hashed and listed as `duplicate`, with `path`, `bytes`, and `blob`, plus `reclaimable_bytes` for the bytes a later hardlink could free. `--json` carries the same rows. The adopted, reused, skipped, and would-adopt counts are unchanged.
+
+When the blobs are already present and the legacy folders are still full copies, reclaim the disk with `cleanup`. The default is a dry run:
+
+```bat
+voxprint-mdl cleanup --app canvas --manifest "C:\Program Files\VOXPrint AI Suite\Canvas\mdl.json" --legacy "%LOCALAPPDATA%\VOXPrint AI Suite\models\Tongyi-MAI--Z-Image-Turbo" --legacy "%LOCALAPPDATA%\VOXPrint AI Suite\models\huihui-ai--Huihui-Qwen3-4B-Instruct-2507-abliterated"
+```
+
+`--apply --mode link` replaces each hash-matched file with a hardlink to `blobs\<sha256>`. The link is created under a temporary name in the same directory, then renamed over the original, so a cancelled run leaves the original file or the hardlink. A link that fails, including a file on another volume, is skipped. Nothing is copied. `--mode delete` removes a file only after a fresh SHA-256 of the file and of the blob match. The hash cache is not enough. Empty directories go away only when every file that was in them was verified. A file with no matching blob is `unique` and stays. `--gc` lists blobs that no view, app ref, or manifest names, and removes them only with `--apply`. Model paths in `shared\manifest.json` that still name a legacy file are pointed at the blob first, and the old path is kept as `retargeted_from`. Schema stays 1. A second run changes nothing.
+
+```bat
+voxprint-mdl cleanup --apply --mode link --app canvas --manifest "C:\Program Files\VOXPrint AI Suite\Canvas\mdl.json" --legacy "%LOCALAPPDATA%\VOXPrint AI Suite\models\Tongyi-MAI--Z-Image-Turbo" --legacy "%LOCALAPPDATA%\VOXPrint AI Suite\models\huihui-ai--Huihui-Qwen3-4B-Instruct-2507-abliterated"
+```
 
 `download` uses the same blob. A finished `blobs\<sha256>` of the right size is not fetched again: the `.verified` marker is enough, and the digest is read only when that marker is missing. A fetch writes that marker when the file lands, and again when a hash confirms a blob that was already there.
 

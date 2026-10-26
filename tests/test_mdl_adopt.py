@@ -104,6 +104,9 @@ def test_adopt_links_a_match_skips_a_mismatch_and_second_run_is_a_noop(tmp_path:
     assert nested.read_bytes() == NESTED
     assert wrong.read_bytes() == wrong_bytes
     assert (good.stat().st_dev, good.stat().st_ino, good.stat().st_mtime_ns) == good_stat
+    assert outcome.status.extra["duplicate"] == []
+    assert outcome.status.extra["reclaimable_bytes"] == 0
+    assert "duplicate" not in outcome.message
     marker = blob.with_name(blob.name + ".verified")
     assert marker.read_text(encoding="utf-8").strip() == sha256_bytes(GOOD)
     component = load().components[f"model-{sha256_bytes(GOOD)[:12]}"]
@@ -152,6 +155,11 @@ def test_adopt_copies_when_a_hardlink_is_impossible(
     assert blob.stat().st_ino != good.stat().st_ino
     assert good.read_bytes() == GOOD
     assert outcome.status.extra["adopted"][0]["file"] == "weights.bin"
+    assert outcome.status.extra["duplicate"] == [
+        {"path": str(good), "bytes": len(GOOD), "blob": str(blob)}
+    ]
+    assert outcome.status.extra["reclaimable_bytes"] == len(GOOD)
+    assert f"duplicate {good} {len(GOOD)} {blob}" in outcome.message
 
 
 def test_adopt_dry_run_json_does_not_write(
@@ -181,6 +189,8 @@ def test_adopt_dry_run_json_does_not_write(
     names = {row["file"] for row in result["would_adopt"]}
     assert names == {"weights.bin", "voice.bin", "other.bin"}
     assert result["adopted"] == []
+    assert result["duplicate"] == []
+    assert result["reclaimable_bytes"] == 0
     assert not (models_dir() / "blobs").exists()
     assert main(["adopt", "--manifest", str(manifest)]) == 1
 
@@ -286,3 +296,39 @@ def test_download_reuses_an_existing_blob(tmp_path: Path, monkeypatch: pytest.Mo
     assert again.code == 0
     assert again.status.ready
     assert blob.read_bytes() == GOOD
+
+
+def test_adopt_json_lists_a_separate_copy_of_an_existing_blob(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    manifest = _manifest(tmp_path / "canvas")
+    good, _nested, _wrong = _drop(tmp_path)
+    blob = models_dir() / "blobs" / sha256_bytes(GOOD)
+    blob.parent.mkdir(parents=True)
+    blob.write_bytes(GOOD)
+    source = (good.stat().st_ino, good.read_bytes())
+    code = main(
+        [
+            "--json",
+            "adopt",
+            "--app",
+            "canvas",
+            "--manifest",
+            str(manifest),
+            "--model",
+            "weights",
+            "--from",
+            str(tmp_path / "drop"),
+        ]
+    )
+    captured = capsys.readouterr()
+    rows = [json.loads(line) for line in captured.out.splitlines() if line.strip()]
+    assert code == 0
+    result = rows[-1]
+    assert result["type"] == "result"
+    assert result["reused"][0]["file"] == "weights.bin"
+    assert result["adopted"] == []
+    assert result["duplicate"] == [{"path": str(good), "bytes": len(GOOD), "blob": str(blob)}]
+    assert result["reclaimable_bytes"] == len(GOOD)
+    assert (good.stat().st_ino, good.read_bytes()) == source
+    assert "duplicate" in result["message"]
