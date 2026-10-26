@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -343,7 +344,11 @@ def test_display_path_uses_windows_separators() -> None:
     shown = display_path("C:/Program Files/VOXPrint AI Suite/Model Forge")
     assert shown == "C:\\Program Files\\VOXPrint AI Suite\\Model Forge"
     assert display_path("C:\\Program Files\\VOXPrint") == "C:\\Program Files\\VOXPrint"
-    assert display_path("/home/user/models") == "/home/user/models"
+    posix = display_path("/home/user/models")
+    if os.name == "nt":
+        assert posix == "\\home\\user\\models"
+    else:
+        assert posix == "/home/user/models"
 
 
 def test_sizes_and_disk_copy_follow_the_locale() -> None:
