@@ -964,13 +964,29 @@ def _size_verify_columns(table: object, lang: str) -> None:
                 widths[column], metrics.horizontalAdvance(item.text()) + _COLUMN_PAD
             )
     viewport = table.viewport().width()
-    if viewport < 400:
+    if viewport < 80:
         viewport = _VERIFY_WIDTH - 48
+    natural = list(widths)
     spare = viewport - sum(widths)
+    clipped = False
     if spare > 0:
         widths[0] += spare
+        table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
     elif spare < 0:
-        widths[0] = max(48, widths[0] + spare)
+        room = max(0, widths[0] - 96)
+        take = min(room, -spare)
+        widths[0] -= take
+        spare += take
+        clipped = widths[0] < natural[0]
+        if spare < 0:
+            widths[:] = natural
+            clipped = False
+            table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        else:
+            table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    else:
+        table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    table.setTextElideMode(Qt.TextElideMode.ElideRight if clipped else Qt.TextElideMode.ElideNone)
     header = table.horizontalHeader()
     left = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
     right = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter

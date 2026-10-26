@@ -977,7 +977,7 @@ def _builder(kind: str) -> object:
         def _fit_scroll(self) -> None:
             needed = max(1, self._body.sizeHint().height())
             if self._mode == "manage":
-                room = max(140, self._height_cap - 260)
+                room = max(140, self.height() - 260)
             else:
                 room = max(96, self.height() - 300)
             self._scroll.setFixedHeight(min(needed, room))

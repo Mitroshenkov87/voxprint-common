@@ -443,6 +443,40 @@ def test_verify_window_fits_at_1280_in_english_and_russian() -> None:
         assert widths[(lang, "verify")] == widths[(lang, "repair")]
 
 
+def test_narrow_verify_window_does_not_paint_over_the_next_cell() -> None:
+    pytest.importorskip("PySide6")
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication, QTableWidget
+
+    app = QApplication.instance() or QApplication([])
+    status = _snapshot(
+        "verify",
+        [("Video enhancement model", 1_200_000_000, 200_000_000, "checking")],
+    )
+    window = build_verify_window(status, lang="en", size=(760, 480))
+    app.processEvents()
+    table = window.findChild(QTableWidget, "verifyTable")
+    assert isinstance(table, QTableWidget)
+    header = table.horizontalHeader()
+    sections = [header.sectionSize(index) for index in range(table.columnCount())]
+    viewport = table.viewport().width()
+    scrolls = table.horizontalScrollBarPolicy() != Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    assert sum(sections) <= viewport + 1 or scrolls
+    metrics = table.fontMetrics()
+    overflow = False
+    for column in range(table.columnCount()):
+        item = table.item(0, column)
+        if item is None or not item.text():
+            continue
+        if metrics.horizontalAdvance(item.text()) + 8 > sections[column]:
+            overflow = True
+    if overflow:
+        assert table.textElideMode() == Qt.TextElideMode.ElideRight
+    window.hide()
+    window.deleteLater()
+    app.processEvents()
+
+
 def test_phase_label_appends_the_counter() -> None:
     pytest.importorskip("PySide6")
     from PySide6.QtWidgets import QApplication, QLabel
@@ -788,6 +822,11 @@ def test_manage_open_does_not_hash(tmp_path: Path, monkeypatch: pytest.MonkeyPat
         assert view is not None and view.manage is not None
         assert view.manage.installed[0].state == "ready"
         _assert_window_floor(window, preferred=(1280, 900))
+        window.resize(window.width(), 480)
+        window._body.setMinimumHeight(2000)
+        window._fit_scroll()
+        assert window._scroll.height() <= window.height() - 80
+        window._body.setMinimumHeight(0)
         assert window._footer.isVisible() is False
         assert window._rule.isVisible() is False
         assert window._fade.isVisible() is False

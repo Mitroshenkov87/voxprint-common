@@ -11,6 +11,7 @@ timer. ``on_deactivate`` runs on the UI thread. ``items``, ``job``, and
 
 from __future__ import annotations
 
+import contextlib
 import enum
 import logging
 import threading
@@ -19,8 +20,9 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import assert_never
 
-from PySide6.QtCore import QPoint, Qt, QThread, Signal
-from PySide6.QtGui import QColor, QPainter, QPaintEvent, QPen, QPolygon
+import shiboken6
+from PySide6.QtCore import QCoreApplication, QPoint, Qt, QThread, Signal
+from PySide6.QtGui import QCloseEvent, QColor, QPainter, QPaintEvent, QPen, QPolygon
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from voxprint_common.i18n import tr
@@ -42,6 +44,20 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+
+def _halt_worker(thread: QThread, token: CancelToken) -> None:
+    """Cancel ``thread`` and return only after ``run`` has returned."""
+    if not shiboken6.isValid(thread):
+        return
+    token._cancel()
+    for signal in (getattr(thread, "advanced", None), getattr(thread, "finished_run", None)):
+        if signal is None:
+            continue
+        with contextlib.suppress(RuntimeError):
+            signal.disconnect()
+    if shiboken6.isValid(thread) and thread.isRunning():
+        thread.wait()
 
 
 class GateState(enum.Enum):
@@ -293,6 +309,8 @@ class CheckGate(QWidget):
         self._results: dict[str, ItemResult] = {}
         self._deactivated: tuple[str, ...] = ()
         self._generation = 0
+        self._joined = False
+        self._stop_hook: Callable[..., None] | None = None
         self._thread: _Worker | None = None
         self._token: CancelToken | None = None
         self._done = 0
@@ -366,6 +384,7 @@ class CheckGate(QWidget):
         """Start a check on a worker. A check already running is left as it is."""
         if self._thread is not None and self._thread.isRunning():
             return
+        self._joined = False
         self._generation += 1
         generation = self._generation
         self._results = {}
@@ -380,11 +399,12 @@ class CheckGate(QWidget):
             self._unload,
             token,
             generation,
-            self,
+            None,
         )
         worker.advanced.connect(self._on_progress)
         worker.finished_run.connect(self._on_finished)
         self._thread = worker
+        self._arm_lifetime(worker, token)
         self._set_state(GateState.RUNNING, finished=False)
         worker.start()
 
@@ -407,6 +427,42 @@ class CheckGate(QWidget):
         self._total = total
         self._deactivated = deactivated
         self._set_state(state, finished=False)
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        """Stop the worker before the gate goes away."""
+        self._join_worker()
+        super().closeEvent(event)
+
+    def _arm_lifetime(self, thread: _Worker, token: CancelToken) -> None:
+        """Stop ``thread`` when the gate is destroyed.
+
+        A bound method is not called from ``destroyed`` while the gate is
+        already going away, so the slot is a function that owns the thread.
+        """
+        previous = self._stop_hook
+        if previous is not None:
+            with contextlib.suppress(RuntimeError):
+                self.destroyed.disconnect(previous)
+
+        def stop(*_args: object, thread: _Worker = thread, token: CancelToken = token) -> None:
+            _halt_worker(thread, token)
+
+        self._stop_hook = stop
+        self.destroyed.connect(stop)
+
+    def _join_worker(self) -> None:
+        """Cancel the worker and wait until it has left ``run``."""
+        if self._joined:
+            return
+        self._joined = True
+        thread = self._thread
+        token = self._token
+        self._thread = None
+        if thread is None or token is None:
+            return
+        _halt_worker(thread, token)
+        QCoreApplication.removePostedEvents(self)
+        thread.deleteLater()
 
     def _on_check_clicked(self, _checked: bool = False) -> None:
         self.start()
@@ -431,13 +487,16 @@ class CheckGate(QWidget):
         if sender is self._thread:
             self._thread = None
         if isinstance(sender, QThread):
-            sender.wait()
+            if sender.isRunning():
+                sender.wait()
             sender.deleteLater()
         if payload.generation != self._generation:
+            self._refresh_copy()
             return
         results = {result.id: result for result in payload.results}
         state, deactivated = self._resolve(payload)
         if payload.generation != self._generation:
+            self._refresh_copy()
             return
         self._results = results
         self._deactivated = deactivated
@@ -482,7 +541,7 @@ class CheckGate(QWidget):
         if show:
             self._detail.setText(tr("check_gate.deactivated", count=count))
         self._detail.setVisible(show)
-        running = self._state is GateState.RUNNING
+        running = self._thread is not None and self._thread.isRunning()
         self._check.setEnabled(not running)
         self._cancel.setEnabled(running)
 

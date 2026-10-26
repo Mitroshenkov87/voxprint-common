@@ -317,3 +317,59 @@ def test_second_start_while_running_is_ignored() -> None:
     release.set()
     assert _wait(qt, gate, lambda: None) is qt.GateState.PASSED
     assert calls == ["a"]
+
+
+def test_edit_during_a_run_keeps_cancel() -> None:
+    qt = _qt()
+    entered = threading.Event()
+
+    def job(item, token):
+        entered.set()
+        deadline = time.monotonic() + 2
+        while not token.is_cancelled and time.monotonic() < deadline:
+            time.sleep(0.01)
+        return qt.ItemResult(item.id, True)
+
+    gate = _gate(qt, job, lambda: [qt.CheckItem("a", "A")])
+    gate.start()
+    assert entered.wait(2)
+    gate.mark_dirty()
+    assert gate.state is qt.GateState.DIRTY
+    assert gate._check.isEnabled() is False
+    assert gate._cancel.isEnabled() is True
+    gate.start()
+    gate.cancel()
+    deadline = time.monotonic() + 2
+    while gate._thread is not None and time.monotonic() < deadline:
+        _app(qt).processEvents()
+        time.sleep(0.01)
+    assert gate.state is qt.GateState.DIRTY
+    assert gate.can_proceed is False
+    assert gate._check.isEnabled() is True
+    assert gate._cancel.isEnabled() is False
+
+
+def test_destroying_the_gate_waits_for_the_worker() -> None:
+    import shiboken6
+
+    qt = _qt()
+    entered = threading.Event()
+    unloaded = threading.Event()
+
+    def job(item, token):
+        entered.set()
+        deadline = time.monotonic() + 2
+        while not token.is_cancelled and time.monotonic() < deadline:
+            time.sleep(0.01)
+        return qt.ItemResult(item.id, False)
+
+    gate = _gate(
+        qt,
+        job,
+        lambda: [qt.CheckItem("a", "A")],
+        unload=unloaded.set,
+    )
+    gate.start()
+    assert entered.wait(2)
+    shiboken6.delete(gate)
+    assert unloaded.is_set()
