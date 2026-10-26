@@ -1,4 +1,15 @@
 {
+  "check_gate.cancel": "Cancel",
+  "check_gate.check": "Check",
+  "check_gate.deactivated": {
+    "one": "{count} deactivated",
+    "other": "{count} deactivated"
+  },
+  "check_gate.state.cancelled": "Cancelled",
+  "check_gate.state.dirty": "Not checked",
+  "check_gate.state.failed": "Failed",
+  "check_gate.state.passed": "Passed",
+  "check_gate.state.running": "Checking {done}/{total}",
   "command.edit.redo": "Redo",
   "command.edit.undo": "Undo",
   "command.file.save": "Save",
@@ -93,6 +104,23 @@
   "mdl.verify.status.pending": "Waiting",
   "mdl.verify.status.repaired": "Repaired",
   "mdl.verify.status.repairing": "Repairing",
+  "mdl.verify.line": "{models}: {ok}, {damaged}, {missing}",
+  "mdl.verify.line.damaged": {
+    "one": "{count} damaged",
+    "other": "{count} damaged"
+  },
+  "mdl.verify.line.missing": {
+    "one": "{count} missing",
+    "other": "{count} missing"
+  },
+  "mdl.verify.line.models": {
+    "one": "{count} model",
+    "other": "{count} models"
+  },
+  "mdl.verify.line.ok": {
+    "one": "{count} OK",
+    "other": "{count} OK"
+  },
   "mdl.verify.summary": "{ok}, {missing}, {corrupt}, {repaired}",
   "mdl.verify.summary.corrupt": {
     "one": "{count} corrupt",

@@ -4,6 +4,14 @@ voxprint-common is a library. Each app bundles the wheel in its installer, or in
 
 Pin `voxprint-common==0.2.4`. The import package is `voxprint_common`. `voxprint_common.API` is `1`.
 
+## Changes in 0.5.3
+
+`CheckGate` is optional. An app that adopts it imports `voxprint_common.ui.check_gate`, which loads PySide6. An edit calls `mark_dirty()`. Next starts disabled and follows `canProceedChanged`. Re-activating an item is `mark_dirty()` again.
+
+Plain-text `voxprint-mdl verify` now prints the model summary instead of `ready`. `--json` is unchanged. Manage models and check-and-repair open at least 760 by 480 logical pixels, inside the screen.
+
+Apps stay responsive on 16 GB of VRAM and 64 GB of RAM. `ModelPark.vram_limit()` is the GPU working set. Load one stage and unload it afterwards. Keep that work off the UI thread, and prove the change on the laptop before a full build.
+
 ## Changes in 0.5.2
 
 `voxprint-mdl cleanup --apply` rewrites model component paths in `shared/manifest.json` before it links or deletes a legacy file. The new path is `blobs/<sha256>`. The previous path is stored on that component as `retargeted_from`. The manifest schema stays 1. `retarget_model_paths` is that migration; a dry run reports the same rows and does not write. A path that cleanup did not match is left as it is.

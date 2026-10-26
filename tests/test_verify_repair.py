@@ -14,13 +14,19 @@ import pytest
 from voxprint_common.cli_protocol import EXIT_CANCELLED, EXIT_OK
 from voxprint_common.gpu_probe import GpuDevice, VramTier
 from voxprint_common.hashing import sha256_bytes
-from voxprint_common.i18n import tr_lang
+from voxprint_common.i18n import set_language, tr_lang
 from voxprint_common.mdl.catalog import load_manifest, plan_files
 from voxprint_common.mdl.cli import main
 from voxprint_common.mdl.fetch import FetchProgress
-from voxprint_common.mdl.job import Outcome, verify_repair, verify_summary
+from voxprint_common.mdl.job import (
+    Outcome,
+    verify,
+    verify_plain_line,
+    verify_repair,
+    verify_summary,
+)
 from voxprint_common.mdl.present import format_size
-from voxprint_common.mdl.progress_ui import build_verify_window, run_window
+from voxprint_common.mdl.progress_ui import build_verify_window, clamp_window_size, run_window
 from voxprint_common.mdl.status import JobState, Status, Step
 from voxprint_common.suite_settings import set_keep_awake_during_jobs
 from voxprint_common.ui.tokens import load
@@ -80,6 +86,62 @@ def _write_store(manifest: Path) -> dict[str, Path]:
     paths["voice"].write_bytes(VOICE)
     paths["broken"].write_bytes(b"xxxx")
     return paths
+
+
+def _assert_window_floor(window: object, preferred: tuple[int, int] = (1280, 720)) -> None:
+    """The shown window stays at or above 760 by 480 and inside the screen."""
+    assert window.minimumWidth() >= 760
+    assert window.minimumHeight() >= 480
+    assert window.width() >= window.minimumWidth()
+    assert window.height() >= window.minimumHeight()
+    screen = window.screen()
+    assert screen is not None
+    area = screen.availableGeometry()
+    assert window.width() <= area.width()
+    assert window.height() <= area.height()
+    assert window.width() == min(max(preferred[0], 760), area.width())
+
+
+def test_window_floor_stays_inside_a_small_screen() -> None:
+    assert clamp_window_size(1280, 200, available=None) == (1280, 480)
+    assert clamp_window_size(400, 200, available=None) == (760, 480)
+    assert clamp_window_size(1280, 900, available=(1920, 1080)) == (1280, 900)
+    assert clamp_window_size(1280, 900, available=(1000, 600)) == (1000, 600)
+    assert clamp_window_size(400, 200, available=(700, 400)) == (760, 480)
+
+
+def test_plain_verify_prints_model_summary(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    set_language("en")
+    manifest = _manifest(tmp_path)
+    paths = _write_store(manifest)
+    code = main(["verify", "--manifest", str(manifest)])
+    err = capsys.readouterr().err.strip()
+    assert code != 0
+    assert err == "3 models: 1 OK, 1 damaged, 1 missing"
+    assert err != "ready"
+    assert verify([manifest], devices=[GPU]).message.startswith("sha256 mismatch")
+    set_language("ru")
+    assert (
+        verify_plain_line(verify([manifest], devices=[GPU]).status, "ru")
+        == "3 модели: 1 в порядке, 1 повреждена, 1 отсутствует"
+    )
+    paths["broken"].write_bytes(BROKEN)
+    paths["gone"].write_bytes(GONE)
+    set_language("en")
+    code = main(["verify", "--manifest", str(manifest)])
+    err = capsys.readouterr().err.strip()
+    assert code == 0
+    assert err == "3 models: 3 OK, 0 damaged, 0 missing"
+    code = main(["verify", "--manifest", str(manifest), "--json"])
+    captured = capsys.readouterr()
+    rows = [json.loads(line) for line in captured.out.splitlines() if line.strip()]
+    result = rows[-1]
+    assert result["message"] == "ready"
+    assert result["ok"] is True
+    assert set(result) == {"type", "ok", "code", "message", "ready", "state", "jobs"}
+    assert "3 models" not in captured.err
 
 
 def test_repair_downloads_only_missing_and_corrupt(
@@ -229,7 +291,7 @@ def test_verify_window_opens_and_title_close_returns_the_job_code() -> None:
                 attempts += 1
                 if button.isEnabled():
                     assert window.isVisible()
-                    assert window.width() == 1280
+                    _assert_window_floor(window)
                     window.close()
                     return
                 if attempts > 50:
@@ -315,7 +377,7 @@ def test_verify_window_fits_at_1280_in_english_and_russian() -> None:
             app = QApplication.instance()
             assert app is not None
             app.processEvents()
-            assert window.width() == 1280
+            _assert_window_floor(window, preferred=(1280, 720))
             assert f"border-radius: {radius}px" in window.styleSheet()
             table = window.findChild(QTableWidget, "verifyTable")
             assert table is not None
@@ -715,7 +777,7 @@ def test_manage_open_does_not_hash(tmp_path: Path, monkeypatch: pytest.MonkeyPat
         view = window._view
         assert view is not None and view.manage is not None
         assert view.manage.installed[0].state == "ready"
-        assert window.width() == 1280
+        _assert_window_floor(window, preferred=(1280, 900))
         assert window._footer.isVisible() is False
         assert window._rule.isVisible() is False
         assert window._fade.isVisible() is False

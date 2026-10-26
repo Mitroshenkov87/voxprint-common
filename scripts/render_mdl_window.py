@@ -10,6 +10,17 @@ import os
 import shutil
 from pathlib import Path
 
+
+def _windows_font_dir() -> None:
+    """Point offscreen Qt at the Windows font folder when nothing else did."""
+    if os.name != "nt" or os.environ.get("QT_QPA_FONTDIR"):
+        return
+    fonts = r"C:\Windows\Fonts"
+    if os.path.isdir(fonts):
+        os.environ["QT_QPA_FONTDIR"] = fonts
+
+
+_windows_font_dir()
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from voxprint_common.i18n import set_language, tr_lang

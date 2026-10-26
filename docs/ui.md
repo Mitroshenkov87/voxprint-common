@@ -57,7 +57,58 @@ from voxprint_common.ui.palette import score_text
 from voxprint_common.ui.tokens import load
 ```
 
-Importing `voxprint_common`, or any of those modules, does not import PySide6. Install the `ui` extra before constructing `ReferenceShell`, `Splash`, or the download window.
+Importing `voxprint_common`, or any of those modules, does not import PySide6. Install the `ui` extra before constructing `ReferenceShell`, `Splash`, or the download window. Importing `voxprint_common.ui.check_gate` loads PySide6.
+
+## Check before a model runs
+
+An edit does not run a model. Analysis and validation run only when the user presses Check. `CheckGate` is that control.
+
+`mark_dirty()` is what an edit calls. It turns the indicator to the red stop and does not run the job. `can_proceed` is true only while the gate is passed. Next starts disabled. Connect `canProceedChanged` so Next stays off until the check passes.
+
+Check runs the job on a worker thread, one active item at a time. The row shows progress as N/M and a Cancel button. Cancel stops after the current item and leaves the red stop. `unload()` runs on the worker after every run, including cancel and a raised error, so the model is freed. The job does not run on the UI thread. The running mark is a static accent arc. The widget does not start a timer.
+
+Passed is a green arrow. Dirty, failed, and cancelled are a red stop.
+
+`on_deactivate` receives the ids of items that failed. It runs on the UI thread after every active item has been checked. When the hook returns without raising, those items count as handled. If at least one checked item passed, the gate ends passed, `can_proceed` is true, and `deactivated` lists the ids that were switched off. The passed row then reads how many were deactivated. The gate ends failed only when `on_deactivate` is missing, when it raises, or when no active item passed. A run where every active item failed still records `deactivated` when the hook returns. The red stop does not show that count. Turning an item back on is the host's job: set it active and call `mark_dirty()`.
+
+```python
+from voxprint_common.ui.check_gate import CheckGate, CheckItem, ItemResult
+
+def items():
+    return [CheckItem("a", "First take", active=True)]
+
+def job(item, token):
+    if token.is_cancelled:
+        return ItemResult(item.id, False, "cancelled")
+    return ItemResult(item.id, True)
+
+gate = CheckGate(job, items=items, unload=model.release, on_deactivate=turn_off)
+next_button.setEnabled(gate.can_proceed)
+gate.canProceedChanged.connect(next_button.setEnabled)
+editor.textChanged.connect(gate.mark_dirty)
+```
+
+The pictures below are the red stop, the running mark, and the passed arrow with deactivated items. English and Russian, at 100% and 150%.
+
+![Check gate, English](renders/check-gate-en.png)
+
+![Check gate, English at 150%](renders/check-gate-en-150.png)
+
+![Check gate, Russian](renders/check-gate-ru.png)
+
+![Check gate, Russian at 150%](renders/check-gate-ru-150.png)
+
+## Hardware baseline
+
+Every app stays responsive on 16 GB of VRAM and 64 GB of RAM. A 16 GB card does not hand the process the whole card. `ModelPark.vram_limit()` is the GPU working set a stage may occupy. The default budget is 16 GiB, and the limit is that budget minus 1 GiB.
+
+The target machine is that laptop. Never design for server GPUs.
+
+Load the models for one stage through `ModelPark.stage`, and unload them when the stage ends. `stage` moves the stage's models back to RAM on the way out.
+
+Keep heavy work off the UI thread. Loading, inference, and a check run on a worker. The UI thread updates widgets when the worker reports.
+
+Prove each optimization with a short patch on the laptop before a full build. That run is what shows the change still fits in `vram_limit()` and the window still answers.
 
 ## Layout
 

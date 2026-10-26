@@ -308,6 +308,11 @@ def verify(
     status = _status_for(files, tier, JobState.READY)
     mismatches: list[str] = []
     for item, step in zip(files, status.steps, strict=True):
+        if not item.destination.is_file():
+            step.state = "missing"
+            step.received = 0
+            mismatches.append(item.label)
+            continue
         if _hash_ok(item):
             step.state = "verified"
             step.received = item.size
@@ -633,6 +638,50 @@ def verify_summary(counts: Mapping[str, int], lang: str | None = None) -> str:
         corrupt=corrupt,
         repaired=repaired,
     )
+
+
+def verify_plain_line(status: Status, lang: str | None = None) -> str:
+    """Return the one-line model summary for plain-text ``verify``.
+
+    ``--json`` keeps the existing result fields. This line is the human text:
+    how many models passed, how many are damaged, and how many are missing.
+
+    Args:
+        status: Snapshot from :func:`verify`.
+        lang: Catalog language. The active language is used when omitted.
+    """
+    code = lang or get_language()
+    ok_count, damaged_count, missing_count = _plain_counts(status)
+    total = ok_count + damaged_count + missing_count
+    return tr_lang(
+        "mdl.verify.line",
+        code,
+        models=tr_lang("mdl.verify.line.models", code, count=total),
+        ok=tr_lang("mdl.verify.line.ok", code, count=ok_count),
+        damaged=tr_lang("mdl.verify.line.damaged", code, count=damaged_count),
+        missing=tr_lang("mdl.verify.line.missing", code, count=missing_count),
+    )
+
+
+def _plain_counts(status: Status) -> tuple[int, int, int]:
+    groups: dict[str, list[str]] = {}
+    order: list[str] = []
+    for index, step in enumerate(status.steps):
+        key = step.item_id or f"{index}:{step.sha256 or step.model}"
+        if key not in groups:
+            order.append(key)
+            groups[key] = []
+        groups[key].append(step.state)
+    ok_count = damaged_count = missing_count = 0
+    for key in order:
+        states = groups[key]
+        if states and all(state in {"verified", "ok"} for state in states):
+            ok_count += 1
+        elif states and all(state == "missing" for state in states):
+            missing_count += 1
+        else:
+            damaged_count += 1
+    return ok_count, damaged_count, missing_count
 
 
 def _health_message(counts: Mapping[str, int]) -> str:

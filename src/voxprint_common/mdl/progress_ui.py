@@ -46,6 +46,7 @@ __all__ = [
 
 _VERIFY_WIDTH = 1280
 _VERIFY_HEIGHT = 720
+_WINDOW_MIN = (760, 480)
 _COLUMN_PAD = 28
 _ROW_HEIGHT = 36
 _ROW_BAR_HEIGHT = 17
@@ -238,6 +239,61 @@ def run_verify_repair(
     return Outcome(code, "", Status(state))
 
 
+def clamp_window_size(
+    width: int,
+    height: int,
+    *,
+    available: tuple[int, int] | None = None,
+    minimum: tuple[int, int] = _WINDOW_MIN,
+) -> tuple[int, int]:
+    """Fit a window inside the screen without going under ``minimum``.
+
+    Sizes are logical pixels. When the screen is smaller than ``minimum``,
+    the floor still wins so the window cannot open shorter than that floor.
+
+    Args:
+        width: Preferred width.
+        height: Preferred height.
+        available: Screen width and height. ``None`` when the screen is unknown.
+        minimum: Smallest width and height. The default is 760 by 480.
+    """
+    floor_w, floor_h = minimum
+    chosen_w = max(floor_w, width)
+    chosen_h = max(floor_h, height)
+    if available is None:
+        return chosen_w, chosen_h
+    screen_w, screen_h = available
+    if screen_w >= floor_w:
+        chosen_w = min(chosen_w, screen_w)
+    if screen_h >= floor_h:
+        chosen_h = min(chosen_h, screen_h)
+    return chosen_w, chosen_h
+
+
+def apply_window_floor(window: object, width: int, height: int) -> None:
+    """Set the 760 by 480 floor and a size that fits the content and the screen.
+
+    Args:
+        window: Qt widget. PySide6 is imported here.
+        width: Preferred width in logical pixels.
+        height: Preferred height in logical pixels.
+    """
+    from PySide6.QtWidgets import QApplication
+
+    window.setMinimumSize(*_WINDOW_MIN)  # type: ignore[attr-defined]
+    screen_of = getattr(window, "screen", None)
+    screen = screen_of() if callable(screen_of) else None
+    if screen is None:
+        app = QApplication.instance()
+        screen = app.primaryScreen() if app is not None else None
+    available = None
+    if screen is not None:
+        area = screen.availableGeometry()
+        available = (area.width(), area.height())
+    chosen_w, chosen_h = clamp_window_size(width, height, available=available)
+    window.resize(chosen_w, chosen_h)  # type: ignore[attr-defined]
+
+
 def build_verify_window(
     status: Status,
     *,
@@ -261,6 +317,7 @@ def build_verify_window(
     code = lang or get_language()
     window, app = _verify_shell(status, lang=code, size=size)
     window.show()
+    apply_window_floor(window, size[0], size[1])
     app.processEvents()
     _fill_verify(window, status, code)
     app.processEvents()
@@ -610,6 +667,7 @@ def _run_verify_window(
     launch()
     window.setWindowModality(Qt.WindowModality.ApplicationModal)
     window.show()
+    apply_window_floor(window, _VERIFY_WIDTH, _VERIFY_HEIGHT)
     if on_done is not None:
         return 0
     code = int(app.exec())
@@ -650,7 +708,7 @@ def _verify_shell(status: Status, *, lang: str, size: tuple[int, int]) -> tuple[
     window.setObjectName("root")
     window.setWindowTitle(window_title())
     window.setStyleSheet(build_style(False))
-    window.setFixedSize(*size)
+    apply_window_floor(window, size[0], size[1])
     layout = QVBoxLayout(window)
     layout.setContentsMargins(16, 16, 16, 16)
     layout.setSpacing(8)

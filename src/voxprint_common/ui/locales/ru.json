@@ -1,4 +1,17 @@
 {
+  "check_gate.cancel": "Отмена",
+  "check_gate.check": "Проверить",
+  "check_gate.deactivated": {
+    "few": "{count} отключены",
+    "many": "{count} отключено",
+    "one": "{count} отключён",
+    "other": "{count} отключено"
+  },
+  "check_gate.state.cancelled": "Отменено",
+  "check_gate.state.dirty": "Не проверено",
+  "check_gate.state.failed": "Не пройдено",
+  "check_gate.state.passed": "Пройдено",
+  "check_gate.state.running": "Проверка {done}/{total}",
   "command.edit.redo": "Повторить",
   "command.edit.undo": "Отменить",
   "command.file.save": "Сохранить",
@@ -95,6 +108,31 @@
   "mdl.verify.status.pending": "Ожидание",
   "mdl.verify.status.repaired": "Восстановлен",
   "mdl.verify.status.repairing": "Загрузка",
+  "mdl.verify.line": "{models}: {ok}, {damaged}, {missing}",
+  "mdl.verify.line.damaged": {
+    "few": "{count} повреждены",
+    "many": "{count} повреждено",
+    "one": "{count} повреждена",
+    "other": "{count} повреждено"
+  },
+  "mdl.verify.line.missing": {
+    "few": "{count} отсутствуют",
+    "many": "{count} отсутствует",
+    "one": "{count} отсутствует",
+    "other": "{count} отсутствует"
+  },
+  "mdl.verify.line.models": {
+    "few": "{count} модели",
+    "many": "{count} моделей",
+    "one": "{count} модель",
+    "other": "{count} моделей"
+  },
+  "mdl.verify.line.ok": {
+    "few": "{count} в порядке",
+    "many": "{count} в порядке",
+    "one": "{count} в порядке",
+    "other": "{count} в порядке"
+  },
   "mdl.verify.summary": "{ok}, {missing}, {corrupt}, {repaired}",
   "mdl.verify.summary.corrupt": {
     "few": "{count} повреждены",

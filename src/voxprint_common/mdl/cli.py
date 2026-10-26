@@ -69,7 +69,15 @@ from voxprint_common.mdl.index import (
     verify_index_file,
     write_index_signature,
 )
-from voxprint_common.mdl.job import Outcome, detect_tier, download, plan, verify, verify_repair
+from voxprint_common.mdl.job import (
+    Outcome,
+    detect_tier,
+    download,
+    plan,
+    verify,
+    verify_plain_line,
+    verify_repair,
+)
 from voxprint_common.mdl.names import CLI_NAME, DISPLAY_NAME
 from voxprint_common.mdl.onnx_prebuilt import stale_rows
 from voxprint_common.mdl.progress_ui import run_verify_repair, run_window
@@ -287,6 +295,8 @@ def _run(args: argparse.Namespace, session: Session | None) -> tuple[int, str, d
             outcome = verify_repair(models, repair=True, manifests=manifests)
         else:
             outcome = verify(manifests, only=models)
+            if session is None and _human_verify_line(outcome):
+                return outcome.code, verify_plain_line(outcome.status), _payload(outcome.status)
     elif args.command == "adopt":
         return _adopt(args, on_progress)
     elif args.command == "cleanup":
@@ -601,6 +611,18 @@ def _window_code(outcome: WindowResult) -> int:
             return EXIT_FAILED
         case _ as unreachable:
             raise AssertionError(unreachable)
+
+
+def _human_verify_line(outcome: Outcome) -> bool:
+    """Return whether plain-text ``verify`` should print the model summary.
+
+    A finished check, including one that found damaged or missing files, uses
+    the summary. A catalog or hook failure keeps its own message. ``--json``
+    does not call this.
+    """
+    if outcome.code == EXIT_OK:
+        return True
+    return outcome.status.error.startswith("sha256 mismatch")
 
 
 def _verify_gui(args: argparse.Namespace) -> tuple[int, str, dict[str, object]]:
