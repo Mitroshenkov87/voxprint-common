@@ -1100,7 +1100,7 @@ class SimpleImageWidget:
     history strip shows a neutral placeholder for each finished item, not a
     photograph. The overflow menu is Open folder, Manage models, Settings, and
     Expert mode. Those commands, and an unavailable chip's action, call
-    ``on_command``. Canvas runs ``voxprint-mdl --gui --app canvas`` for Manage
+    ``on_command``. Canvas runs ``voxprint-mdl-gui --app canvas`` for Manage
     models. This widget does not start that program.
     """
 

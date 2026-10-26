@@ -48,7 +48,9 @@ APP_SCHEMA = "voxprint-app-models/1"
 
 _ID = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 _LICENSE = re.compile(r"^[a-z0-9][a-z0-9.+-]*$")
-_PATH = re.compile(r"^(?!voxprint-model\.json$)(?!/)(?!.*\\)(?!.*\.\./)[^\\]+$")
+_PATH = re.compile(
+    r"^(?!voxprint-model\.json$)(?!/)(?!.*\\)(?!.*\.\./)(?!.*(?:^|/)[A-Za-z]:)[^\\]+$"
+)
 _CARD = re.compile(r"^(?:|https://\S+)$")
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _SHA = re.compile(r"^[0-9a-f]{64}$")

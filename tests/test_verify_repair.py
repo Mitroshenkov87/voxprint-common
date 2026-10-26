@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import sys
+import time
 from pathlib import Path
 
 import pytest
 
-from voxprint_common.cli_protocol import EXIT_OK
+from voxprint_common.cli_protocol import EXIT_CANCELLED, EXIT_OK
 from voxprint_common.gpu_probe import GpuDevice, VramTier
 from voxprint_common.hashing import sha256_bytes
 from voxprint_common.i18n import tr_lang
@@ -366,3 +369,458 @@ def test_verify_window_fits_at_1280_in_english_and_russian() -> None:
             widths[(lang, phase)] = section
             window.hide()
         assert widths[(lang, "verify")] == widths[(lang, "repair")]
+
+
+def test_phase_label_appends_the_counter() -> None:
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication, QLabel
+
+    app = QApplication.instance() or QApplication([])
+    status = _snapshot("review", [("Voice", 10, 10, "ok")])
+    status.extra["done"] = 2
+    status.extra["total"] = 4
+    window = build_verify_window(status, lang="en", size=(1280, 720))
+    app.processEvents()
+    label = window.findChild(QLabel, "phase")
+    assert label is not None
+    assert label.text() == f"{tr_lang('mdl.verify.phase.review', 'en')} · 2/4"
+    window.hide()
+    window.deleteLater()
+    app.processEvents()
+
+
+def test_every_hash_finishes_before_repair_and_hashes_do_not_overlap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    set_keep_awake_during_jobs(False)
+    manifest = _manifest(tmp_path)
+    _write_store(manifest)
+    events: list[object] = []
+    live = {"n": 0, "peak": 0}
+    real = hashlib.sha256
+
+    class _Counting:
+        def __init__(self, data: bytes = b"") -> None:
+            live["n"] += 1
+            live["peak"] = max(live["peak"], live["n"])
+            events.append("hash")
+            self._inner = real(data)
+
+        def update(self, data: bytes) -> None:
+            self._inner.update(data)
+
+        def hexdigest(self) -> str:
+            try:
+                return self._inner.hexdigest()
+            finally:
+                live["n"] -= 1
+                events.append("hash-done")
+
+        def digest(self) -> bytes:
+            return self._inner.digest()
+
+        def copy(self) -> object:
+            return self._inner.copy()
+
+    def factory(data: bytes = b"", *, usedforsecurity: bool = True) -> _Counting:
+        del usedforsecurity
+        return _Counting(data)
+
+    def fake_fetch(
+        destination: Path,
+        urls: list[str],
+        *,
+        sha256: str,
+        size: int,
+        progress=None,
+        **kwargs: object,
+    ) -> None:
+        del urls, kwargs
+        events.append("fetch")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        blob = next(body for key, body in PAYLOADS.items() if DIGESTS[key] == sha256)
+        destination.write_bytes(blob)
+        if progress is not None:
+            progress(FetchProgress("huggingface", size, size, 1.0))
+
+    def on_status(status: Status) -> None:
+        events.append(
+            (
+                "phase",
+                status.extra.get("phase"),
+                tuple(step.state for step in status.steps),
+                status.extra.get("done"),
+                status.extra.get("total"),
+            )
+        )
+
+    monkeypatch.setattr(hashlib, "sha256", factory)
+    monkeypatch.setattr("voxprint_common.mdl.job.fetch_file", fake_fetch)
+    outcome = verify_repair(
+        ("voice", "broken", "gone"),
+        repair=True,
+        manifests=[manifest],
+        devices=[GPU],
+        on_status=on_status,
+    )
+    assert outcome.code == EXIT_OK
+    assert live["peak"] == 1
+    fetch_at = events.index("fetch")
+    hash_dones = [index for index, item in enumerate(events) if item == "hash-done"]
+    assert hash_dones
+    assert max(hash_dones) < fetch_at
+    review_at = next(
+        index
+        for index, item in enumerate(events)
+        if isinstance(item, tuple) and item[1] == "review"
+    )
+    assert review_at < fetch_at
+    review = events[review_at]
+    assert isinstance(review, tuple)
+    assert review[1:] == ("review", ("ok", "corrupt", "missing"), 3, 3)
+
+
+def test_cached_digest_skips_a_second_hash(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    set_keep_awake_during_jobs(False)
+    manifest = _manifest(tmp_path)
+    _write_store(manifest)
+    calls = {"n": 0}
+    real = hashlib.sha256
+
+    def spy(data: bytes = b"", *, usedforsecurity: bool = True) -> object:
+        calls["n"] += 1
+        return real(data, usedforsecurity=usedforsecurity)
+
+    monkeypatch.setattr(hashlib, "sha256", spy)
+    first = verify_repair(
+        ("voice", "broken", "gone"),
+        repair=False,
+        manifests=[manifest],
+        devices=[GPU],
+    )
+    assert first.status.steps[0].state == "ok"
+    hashed = calls["n"]
+    assert hashed > 0
+    verify_repair(
+        ("voice", "broken", "gone"),
+        repair=False,
+        manifests=[manifest],
+        devices=[GPU],
+    )
+    assert calls["n"] == hashed
+
+
+def test_gui_entry_point_implies_the_gui_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, list[str]] = {}
+
+    def fake(argv: list[str]) -> int:
+        seen["argv"] = list(argv)
+        return 0
+
+    monkeypatch.setattr(sys, "argv", ["voxprint-mdl-gui", "--app", "model-forge"])
+    monkeypatch.setattr("voxprint_common.mdl.cli._open_named_window", fake)
+    assert main() == 0
+    assert seen["argv"][:2] == ["--gui", "--app"]
+
+
+def test_multi_file_model_matches_each_file(tmp_path: Path) -> None:
+    from voxprint_common.mdl.control import Controller
+    from voxprint_common.paths import models_dir
+
+    first = b"alpha-weights"
+    second = b"beta-weights-extra"
+    digests = (sha256_bytes(first), sha256_bytes(second))
+    blobs = models_dir() / "blobs"
+    blobs.mkdir(parents=True)
+    (blobs / digests[0]).write_bytes(first)
+    (blobs / digests[1]).write_bytes(second)
+    manifest = tmp_path / "mdl.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "app": "model-forge",
+                "models": [
+                    {
+                        "id": "pack",
+                        "version": "1",
+                        "vram_tier": "8gb",
+                        "name": {"en": "Pack"},
+                        "files": [
+                            {
+                                "path": "a.bin",
+                                "size": len(first),
+                                "sha256": digests[0],
+                                "mirrors": [
+                                    {"source": "url", "url": "https://huggingface.co/org/a.bin"}
+                                ],
+                            },
+                            {
+                                "path": "b.bin",
+                                "size": len(second),
+                                "sha256": digests[1],
+                                "mirrors": [
+                                    {"source": "url", "url": "https://huggingface.co/org/b.bin"}
+                                ],
+                            },
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    page = Controller().manage_page("model-forge", manifest, devices=[GPU], lang="en")
+    assert [row.state for row in page.installed] == ["ready"]
+    assert page.available == ()
+    again = Controller().manage_page("model-forge", manifest, devices=[GPU], lang="en")
+    assert again.installed[0].state == "ready"
+    (blobs / digests[1]).unlink()
+    partial = Controller().manage_page("model-forge", manifest, devices=[GPU], lang="en")
+    assert partial.installed[0].state == "error"
+
+
+def test_failed_manage_scan_retries_then_shows_an_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("PySide6")
+    from voxprint_common.mdl.control import Controller
+    from voxprint_common.ui.mdl_window import _probe_manage
+
+    calls = {"n": 0}
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        calls["n"] += 1
+        raise RuntimeError("scan broke")
+
+    monkeypatch.setattr("voxprint_common.ui.mdl_window._compose_manage_view", boom)
+    manifest = tmp_path / "mdl.json"
+    manifest.write_text("{}", encoding="utf-8")
+    window, app = _probe_manage()(Controller(), "model-forge", "", manifest)
+    try:
+        for _ in range(40):
+            window._apply_pending()
+            app.processEvents()
+            view = window._view
+            if view is not None and view.show_error:
+                break
+            time.sleep(0.05)
+        assert calls["n"] >= 2
+        view = window._view
+        assert view is not None and view.manage is not None
+        assert view.show_error
+        assert "no models" not in view.manage.empty_installed.lower()
+        assert window._error.isVisible()
+        assert window._primary.isVisible()
+        assert window._primary.text() == "Retry"
+    finally:
+        window._check_busy = False
+        window.hide()
+        window.deleteLater()
+        app.processEvents()
+
+
+def test_manage_check_does_not_start_another_event_loop() -> None:
+    pytest.importorskip("PySide6")
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication
+
+    from voxprint_common.mdl.progress_ui import _run_verify_window
+
+    app = QApplication.instance() or QApplication([])
+    seen: dict[str, object] = {}
+
+    def start(cancel: object, on_status: object) -> Outcome:
+        del cancel
+        on_status(Status(JobState.READY, extra={"phase": "summary"}))
+        return Outcome(EXIT_OK, "ok", Status(JobState.READY, extra={"phase": "summary"}))
+
+    def on_done(outcome: Outcome) -> None:
+        seen["code"] = outcome.code
+
+    before = {id(widget) for widget in app.topLevelWidgets()}
+    assert _run_verify_window(start, on_done=on_done) == 0
+    app.processEvents()
+    created = [widget for widget in app.topLevelWidgets() if id(widget) not in before]
+    assert created
+    window = created[-1]
+    assert window.windowModality() == Qt.WindowModality.ApplicationModal
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline and not window._verify_close.isEnabled():
+        app.processEvents()
+        time.sleep(0.02)
+    window.close()
+    app.processEvents()
+    assert seen.get("code") == EXIT_OK
+
+
+def test_manage_open_does_not_hash(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("PySide6")
+    from voxprint_common.gpu_probe import VramTier
+    from voxprint_common.mdl.control import Controller
+    from voxprint_common.ui.mdl_window import _compose_manage_view, _probe_manage
+
+    payload = b"manage-open-bytes"
+    digest = hashlib.sha256(payload).hexdigest()
+    manifest = tmp_path / "mdl.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "app": "model-forge",
+                "models": [
+                    {
+                        "id": "voice",
+                        "version": "1",
+                        "vram_tier": "8gb",
+                        "name": {"en": "Voice"},
+                        "files": [
+                            {
+                                "path": "voice.bin",
+                                "size": len(payload),
+                                "sha256": digest,
+                                "mirrors": [
+                                    {
+                                        "source": "url",
+                                        "url": "https://huggingface.co/org/voice.bin",
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    planned = plan_files([load_manifest(manifest)], VramTier.GB8, memory_gib=8)
+    planned[0].destination.parent.mkdir(parents=True, exist_ok=True)
+    planned[0].destination.write_bytes(payload)
+    calls = {"n": 0}
+    real = hashlib.sha256
+
+    def spy(data: bytes = b"", *, usedforsecurity: bool = True) -> object:
+        calls["n"] += 1
+        return real(data, usedforsecurity=usedforsecurity)
+
+    monkeypatch.setattr(hashlib, "sha256", spy)
+    controller = Controller()
+    painted = _compose_manage_view(controller, "model-forge", manifest)
+    assert painted.manage is not None
+    assert painted.manage.installed[0].state == "ready"
+    assert calls["n"] == 0
+    window, app = _probe_manage()(controller, "model-forge", "", manifest)
+    try:
+        assert calls["n"] == 0
+        view = window._view
+        assert view is not None and view.manage is not None
+        assert view.manage.installed[0].state == "ready"
+        assert window.width() == 1280
+        assert window._footer.isVisible() is False
+        assert window._rule.isVisible() is False
+        assert window._fade.isVisible() is False
+        assert window._status.isVisible() is False
+        assert "Model Forge" in window._subtitle.text()
+        assert window._badge._colour == "#f58a3c"
+        badge = window._badge.grab().toImage()
+
+        def colour_at(image: object, across: float, down: float) -> object:
+            x = min(image.width() - 1, max(0, int(across * image.width())))
+            y = min(image.height() - 1, max(0, int(down * image.height())))
+            return image.pixelColor(x, y)
+
+        top = colour_at(badge, 0.50, 0.43)
+        left = colour_at(badge, 0.35, 0.55)
+        right = colour_at(badge, 0.65, 0.55)
+        edge = colour_at(badge, 0.12, 0.50)
+        assert edge.red() < 80
+        assert top.red() > 180
+        assert top.red() > right.red() + 20
+        assert left.red() > right.red() + 20
+        window._check_busy = True
+        window.close()
+        assert window.isVisible()
+        window._check_busy = False
+        window._badge.set_mark("#60a5fa", "no-such-glyph", "VOXPrint")
+        mark = window._badge.grab().toImage()
+        arm = colour_at(mark, 0.40, 0.56)
+        gap = colour_at(mark, 0.50, 0.36)
+        assert arm.blue() > 140
+        assert gap.red() < 80
+        assert gap.blue() < 90
+    finally:
+        window.hide()
+        window.deleteLater()
+        app.processEvents()
+
+
+def test_closing_the_check_reenables_manage_immediately() -> None:
+    pytest.importorskip("PySide6")
+    import threading
+
+    from PySide6.QtWidgets import QApplication, QWidget
+
+    from voxprint_common.mdl.progress_ui import _run_verify_window, verify_job_running
+
+    app = QApplication.instance() or QApplication([])
+    manage = QWidget()
+    manage.setEnabled(False)
+    hold = threading.Event()
+    started = threading.Event()
+    seen: dict[str, int] = {}
+
+    def start(cancel: threading.Event, on_status: object) -> Outcome:
+        started.set()
+        on_status(Status(JobState.DOWNLOADING, extra={"phase": "verify"}))
+        hold.wait(2)
+        code = EXIT_CANCELLED if cancel.is_set() else EXIT_OK
+        state = JobState.CANCELLED if cancel.is_set() else JobState.READY
+        return Outcome(code, "", Status(state, extra={"phase": "summary"}))
+
+    def on_done(outcome: Outcome) -> None:
+        manage.setEnabled(True)
+        seen["code"] = outcome.code
+
+    try:
+        before = {id(widget) for widget in app.topLevelWidgets()}
+        assert _run_verify_window(start, on_done=on_done) == 0
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline and not started.is_set():
+            app.processEvents()
+            time.sleep(0.01)
+        assert started.is_set()
+        assert verify_job_running()
+        created = [widget for widget in app.topLevelWidgets() if id(widget) not in before]
+        window = created[-1]
+        window._verify_cancel.click()
+        assert manage.isEnabled()
+        assert seen["code"] == EXIT_CANCELLED
+        assert verify_job_running()
+        hold.set()
+        deadline = time.monotonic() + 2
+        while verify_job_running() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert not verify_job_running()
+
+        manage.setEnabled(False)
+        seen.clear()
+        started.clear()
+        hold.clear()
+        before = {id(widget) for widget in app.topLevelWidgets()}
+        assert _run_verify_window(start, on_done=on_done) == 0
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline and not started.is_set():
+            app.processEvents()
+            time.sleep(0.01)
+        created = [widget for widget in app.topLevelWidgets() if id(widget) not in before]
+        window = created[-1]
+        window.close()
+        assert manage.isEnabled()
+        assert seen["code"] == EXIT_CANCELLED
+    finally:
+        hold.set()
+        deadline = time.monotonic() + 2
+        while verify_job_running() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        manage.deleteLater()
+        app.processEvents()

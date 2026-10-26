@@ -43,11 +43,13 @@ from voxprint_common.mdl.events import (
 from voxprint_common.mdl.fetch import Cancelled, FetchError, FetchProgress, fetch_file
 from voxprint_common.mdl.hooks import HookError, apply_hooks
 from voxprint_common.mdl.names import DISPLAY_NAME
+from voxprint_common.mdl.presence import cached_digest, remember_digest
 from voxprint_common.mdl.priority import background_priority
 from voxprint_common.mdl.safety import UrlGuard
 from voxprint_common.mdl.segments import ConnectionBudget, segment_count
 from voxprint_common.mdl.status import JobState, Status, Step, load_status, save_status
 from voxprint_common.mdl.variants import choose_variant
+from voxprint_common.mdl.views import materialize_views
 from voxprint_common.paths import models_dir
 from voxprint_common.power import keep_awake
 from voxprint_common.runtime_manifest import ManifestError, add_ref, load
@@ -70,6 +72,7 @@ class Outcome:
 
 
 logger = logging.getLogger(__name__)
+_HASH_LOCK = threading.Lock()
 
 
 def detect_tier(devices: Sequence[GpuDevice] | None = None) -> VramTier:
@@ -247,6 +250,7 @@ def download(
                 publisher = _Publisher(status, on_status, on_progress, session)
                 publisher.push(force=True)
                 _fetch_all(files, status, publisher, options, cancel, session, workers)
+            materialize_views(files)
             apply_hooks(files)
     except HookError as exc:
         _mark_hook(status, exc)
@@ -335,12 +339,15 @@ def verify_repair(
     opener: object | None = None,
     guard: UrlGuard | None = None,
 ) -> Outcome:
-    """Check models, then download only the missing or corrupt ones.
+    """Check every model, show that result, then repair the bad ones.
 
-    Phase ``verify`` hashes each model and reports ``ok``, ``missing``, or
-    ``corrupt``. Phase ``repair`` runs when ``repair`` is true and a model is
-    missing or corrupt. It downloads those models and leaves the healthy ones
-    untouched. Phase ``summary`` records the counts on the status file.
+    Phase ``verify`` hashes one model at a time. No second hash starts until
+    the current file has finished. Phase ``review`` marks each row ok, missing,
+    or corrupt and publishes the summary. Phase ``repair`` starts only after
+    that, and only when ``repair`` is true, one model at a time. Phase
+    ``summary`` is the final count. Cancel finishes the current file and does
+    not start the next one. A cached digest is reused when the path, size, and
+    mtime are unchanged.
 
     Args:
         model_ids: Models to check. ``None`` checks the planned tier.
@@ -377,57 +384,73 @@ def verify_repair(
     if _stop(cancel):
         return _stopped(status, publisher)
     original: dict[str, str] = {}
-    for (model_id, items), step in zip(groups, status.steps, strict=True):
+    total = len(groups)
+    for index, ((model_id, items), step) in enumerate(
+        zip(groups, status.steps, strict=True), start=1
+    ):
         if _stop(cancel):
             return _stopped(status, publisher)
-        kind = _hash_model(items, step, status, publisher, cancel)
-        if kind is None:
-            return _stopped(status, publisher)
+        _set_counter(status, index, total)
+        kind = _hash_model(items, step, status, publisher)
         original[model_id] = kind
         step.state = kind
         if kind == "ok":
             step.received = step.size
         status.recompute()
         publisher.push(force=True)
+    _set_counter(status, total, total)
+    status.extra["phase"] = "review"
+    status.extra["counts"] = _health_counts(status)
+    status.recompute()
+    publisher.push(force=True)
     bad = [model_id for model_id, kind in original.items() if kind in {"missing", "corrupt"}]
     if repair and bad:
-        status.extra["phase"] = "repair"
-        for step in status.steps:
-            if step.item_id in bad:
-                step.state = "repairing"
-                step.received = 0
-        status.recompute()
-        publisher.push(force=True)
         if _stop(cancel):
             return _stopped(status, publisher)
-
-        def relay(snap: Status) -> None:
-            _apply_repair_progress(status, snap)
-            publisher.push()
-
-        outcome = download(
-            manifests,
-            devices=cards,
-            on_status=relay,
-            cancel=cancel,
-            priority=False,
-            display=False,
-            workers=1,
-            only=tuple(bad),
-            opener=opener,
-            guard=guard,
-        )
-        if outcome.code == EXIT_CANCELLED or _stop(cancel):
-            return _stopped(status, publisher)
-        _apply_repair_progress(status, outcome.status)
-        if outcome.code == EXIT_OK:
+        status.extra["phase"] = "repair"
+        repair_total = len(bad)
+        for index, model_id in enumerate(bad, start=1):
+            if _stop(cancel):
+                return _stopped(status, publisher)
+            _set_counter(status, index, repair_total)
             for step in status.steps:
-                if step.item_id in bad and step.state != "failed":
-                    step.state = "repaired"
-                    step.received = step.size
-        if outcome.code != EXIT_OK:
+                if step.item_id == model_id:
+                    step.state = "repairing"
+                    step.received = 0
+            status.recompute()
+            publisher.push(force=True)
+
+            def relay(snap: Status, done: int = index, total: int = repair_total) -> None:
+                _apply_repair_progress(status, snap)
+                _set_counter(status, done, total)
+                publisher.push()
+
+            outcome = download(
+                manifests,
+                devices=cards,
+                on_status=relay,
+                cancel=None,
+                priority=False,
+                display=False,
+                workers=1,
+                only=(model_id,),
+                opener=opener,
+                guard=guard,
+            )
+            if _stop(cancel):
+                _apply_repair_progress(status, outcome.status)
+                return _stopped(status, publisher)
+            _apply_repair_progress(status, outcome.status)
+            if outcome.code == EXIT_OK:
+                for step in status.steps:
+                    if step.item_id == model_id and step.state != "failed":
+                        step.state = "repaired"
+                        step.received = step.size
+                status.recompute()
+                publisher.push(force=True)
+                continue
             for step in status.steps:
-                if step.state == "repairing":
+                if step.item_id == model_id:
                     step.state = "failed"
             status.state = JobState.FAILED
             status.error = outcome.message
@@ -486,16 +509,21 @@ def _model_step(model_id: str, items: Sequence[PlannedFile]) -> Step:
     )
 
 
+def _set_counter(status: Status, done: int, total: int) -> None:
+    status.extra["done"] = done
+    status.extra["total"] = total
+
+
 def _hash_model(
     items: Sequence[PlannedFile],
     step: Step,
     status: Status,
     publisher: _Publisher,
-    cancel: threading.Event | None,
-) -> str | None:
-    """Hash one model's files.
+) -> str:
+    """Hash one model's files, or reuse a digest cached for the same stat.
 
-    Returns ``ok``, ``missing``, or ``corrupt``. ``None`` means the job was cancelled.
+    Returns ``ok``, ``missing``, or ``corrupt``. The current file runs to
+    completion; the caller decides whether to start another model.
     """
     step.state = "checking"
     step.received = 0
@@ -503,22 +531,24 @@ def _hash_model(
     publisher.push(force=True)
     hashed = 0
     for item in items:
-        if _stop(cancel):
-            return None
         if not item.destination.is_file():
             step.received = hashed
             return "missing"
+        cached = cached_digest(item.destination)
+        if cached is not None:
+            found = cached
+            amount = item.destination.stat().st_size
+        else:
 
-        def tick(done: int, base: int = hashed) -> None:
-            _hash_tick(step, status, publisher, base + done)
+            def tick(done: int, base: int = hashed) -> None:
+                _hash_tick(step, status, publisher, base + done)
 
-        try:
-            found, amount = _hash_file(item.destination, cancel, tick)
-        except OSError:
-            logger.warning("could not hash %s", item.destination)
-            return "corrupt"
-        if found is None:
-            return None
+            try:
+                found, amount = _hash_file(item.destination, tick)
+            except OSError:
+                logger.warning("could not hash %s", item.destination)
+                return "corrupt"
+            remember_digest(item.destination, found)
         hashed += amount
         step.received = min(step.size, hashed)
         status.recompute()
@@ -534,24 +564,20 @@ def _hash_tick(step: Step, status: Status, publisher: _Publisher, done: int) -> 
     publisher.push()
 
 
-def _hash_file(
-    path: Path,
-    cancel: threading.Event | None,
-    on_chunk: Callable[[int], None],
-) -> tuple[str | None, int]:
-    digest = hashlib.sha256()
-    read = 0
-    with path.open("rb") as handle:
-        while True:
-            if _stop(cancel):
-                return None, read
-            block = handle.read(1024 * 1024)
-            if not block:
-                break
-            digest.update(block)
-            read += len(block)
-            on_chunk(read)
-    return digest.hexdigest(), read
+def _hash_file(path: Path, on_chunk: Callable[[int], None]) -> tuple[str, int]:
+    """Hash ``path`` to the end. One hash holds ``_HASH_LOCK`` until it returns."""
+    with _HASH_LOCK:
+        digest = hashlib.sha256()
+        read = 0
+        with path.open("rb") as handle:
+            while True:
+                block = handle.read(1024 * 1024)
+                if not block:
+                    break
+                digest.update(block)
+                read += len(block)
+                on_chunk(read)
+        return digest.hexdigest(), read
 
 
 def _apply_repair_progress(status: Status, snap: Status) -> None:
@@ -687,7 +713,7 @@ def _fetch_all(
             return
         step = status.steps[index]
         with lock:
-            if step.state == "verified" and _hash_ok(item):
+            if _reusable(item):
                 present = True
             else:
                 present = False
@@ -696,6 +722,7 @@ def _fetch_all(
                 step.state = "paused" if session is not None and session.paused else "downloading"
                 publisher.push(force=True)
         if present:
+            _mark_verified(item)
             _remember(item)
             return
 
@@ -742,6 +769,8 @@ def _fetch_all(
                 publisher.push(force=True)
             errors.append(exc)
             return
+        _mark_verified(item)
+        remember_digest(item.destination, item.sha256)
         _remember(item)
         with lock:
             step.state = "verified"
@@ -826,14 +855,61 @@ def _note_local(status: Status, files: Sequence[PlannedFile]) -> None:
     status.recompute()
 
 
+def _reusable(item: PlannedFile) -> bool:
+    """Return whether ``blobs/<sha>`` can be kept without fetching it again.
+
+    A partial file with no finished blob is resumed. A finished file of the
+    right size is kept when its ``.verified`` marker matches, or when a hash
+    matches. The caller writes the marker.
+    """
+    path = item.destination
+    partial = path.with_name(path.name + ".partial")
+    if partial.is_file() and not path.is_file():
+        return False
+    if not path.is_file() or path.stat().st_size != item.size:
+        return False
+    if _verified_marker(item):
+        return True
+    return _hash_ok(item)
+
+
+def _verified_marker(item: PlannedFile) -> bool:
+    marker = item.destination.with_name(item.destination.name + ".verified")
+    try:
+        recorded = marker.read_text(encoding="utf-8").strip()
+    except OSError:
+        return False
+    return recorded == item.sha256.strip().lower()
+
+
+def _mark_verified(item: PlannedFile) -> None:
+    """Write the ``.verified`` marker download and adopt share."""
+    marker = item.destination.with_name(item.destination.name + ".verified")
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    text = item.sha256.strip().lower() + "\n"
+    try:
+        if marker.is_file() and marker.read_text(encoding="utf-8") == text:
+            return
+    except OSError:
+        pass
+    marker.write_text(text, encoding="utf-8")
+
+
 def _hash_ok(item: PlannedFile) -> bool:
     if not item.destination.is_file():
         return False
-    try:
-        verify_hash(item.destination, item.sha256)
-    except HashMismatch, OSError, ValueError:
-        return False
-    return True
+    found = cached_digest(item.destination)
+    if found is None:
+        try:
+            found = verify_hash(item.destination, item.sha256)
+        except HashMismatch as exc:
+            remember_digest(item.destination, exc.found)
+            return False
+        except OSError, ValueError:
+            return False
+        remember_digest(item.destination, found)
+        return True
+    return found == item.sha256.strip().lower()
 
 
 def _remember(item: PlannedFile) -> None:

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "voxprint-common"
-version = "0.5.0"
+version = "0.5.1"
 description = "Shared Python library for the Voxprint AI Media Suite."
 readme = "README.md"
 requires-python = ">=3.14"
@@ -38,6 +38,9 @@ dev = [
 
 [project.scripts]
 voxprint-mdl = "voxprint_common.mdl.cli:main"
+
+[project.gui-scripts]
+voxprint-mdl-gui = "voxprint_common.mdl.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/Mitroshenkov87/voxprint-common"

@@ -1,3 +1,4 @@
+import os
 import struct
 import zlib
 
@@ -20,6 +21,12 @@ def _png(size: int) -> bytes:
         + chunk(b"IDAT", zlib.compress(raw))
         + chunk(b"IEND", b"")
     )
+
+
+def test_model_forge_identity_colour_comes_from_tokens():
+    assert branding.identity_colour("model-forge") == "#f58a3c"
+    if os.name != "nt":
+        assert branding.detach_console() is False
 
 
 def test_identity_and_ico_round_trip(tmp_path):

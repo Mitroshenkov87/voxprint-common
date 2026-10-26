@@ -27,7 +27,7 @@ import urllib.parse
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import assert_never
 
 from voxprint_common.download import DownloadError, huggingface_url, modelscope_url
@@ -264,6 +264,7 @@ class PlannedFile:
     tier: str = ""
     display_name: str = ""
     model_id: str = ""
+    layouts: tuple[tuple[str, str], ...] = ()
     hooks: tuple[HookPlan, ...] = ()
     mirror_policy: str = "race"
     fallback_key: str = ""
@@ -511,6 +512,7 @@ def plan_files(
                         tier=model.tier.value,
                         display_name=label,
                         model_id=model.id,
+                        layouts=((model.id, item.path),),
                         hooks=model_hooks,
                         mirror_policy=item.mirror_policy,
                     )
@@ -528,6 +530,9 @@ def plan_files(
                     current.apps.append(prepared.app)
                 if model.id not in current.model_ids:
                     current.model_ids.append(model.id)
+                pair = (model.id, item.path)
+                if pair not in current.layouts:
+                    current.layouts = (*current.layouts, pair)
                 if not current.display_name:
                     current.display_name = label
                 if not current.model_id:
@@ -569,6 +574,7 @@ def _planned(
         tier=model.tier.value,
         display_name=label,
         model_id=model.id,
+        layouts=((model.id, item.path),),
         hooks=hooks,
         mirror_policy=item.mirror_policy,
     )
@@ -1639,7 +1645,13 @@ def _slug(value: str, label: str) -> str:
 def _rel(filename: str) -> str:
     text = filename.strip().replace("\\", "/")
     parts = [part for part in text.split("/") if part not in ("", ".")]
-    if not parts or ".." in parts or text.startswith("/"):
+    windows = PureWindowsPath(text)
+    escaped = windows.drive or windows.root or windows.is_absolute()
+    for part in parts:
+        piece = PureWindowsPath(part)
+        if piece.drive or piece.root or piece.is_absolute():
+            escaped = True
+    if not parts or ".." in parts or text.startswith("/") or escaped:
         raise CatalogError(f"filename must stay inside the model, got {filename!r}")
     return "/".join(parts)
 

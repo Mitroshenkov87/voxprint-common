@@ -15,6 +15,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import assert_never
 
+from voxprint_common.branding import detach_console
 from voxprint_common.cli_protocol import EXIT_CANCELLED, EXIT_FAILED, EXIT_OK
 from voxprint_common.gpu_probe import GpuDevice
 from voxprint_common.i18n import get_language, tr_lang
@@ -60,6 +61,31 @@ OVERALL = "Общий прогресс"
 COLUMNS = ("Модель", "Размер", "Источник", "Скорость", "Осталось")
 
 Starter = Callable[[threading.Event, Callable[[Status], None]], Outcome]
+_VERIFY_JOBS = 0
+_VERIFY_JOBS_LOCK = threading.Lock()
+
+
+def verify_job_running() -> bool:
+    """Return whether a check is still hashing or repairing.
+
+    Closing the check window re-enables Manage immediately. This stays true
+    until the current file has finished, so a second check does not write the
+    same blobs.
+    """
+    with _VERIFY_JOBS_LOCK:
+        return _VERIFY_JOBS > 0
+
+
+def _enter_verify_job() -> None:
+    global _VERIFY_JOBS
+    with _VERIFY_JOBS_LOCK:
+        _VERIFY_JOBS += 1
+
+
+def _leave_verify_job() -> None:
+    global _VERIFY_JOBS
+    with _VERIFY_JOBS_LOCK:
+        _VERIFY_JOBS = max(0, _VERIFY_JOBS - 1)
 
 
 class WindowMode(StrEnum):
@@ -135,6 +161,7 @@ def run_window(start: Starter, *, mode: str = "download") -> int:
         run stays open on the summary until Close. Failure of a download leaves
         the window open until Повторить or the window is closed.
     """
+    detach_console()
     chosen = WindowMode(mode)
     match chosen:
         case WindowMode.DOWNLOAD:
@@ -152,12 +179,15 @@ def run_verify_repair(
     manifests: Sequence[Path] | None = None,
     show: bool = True,
     devices: Sequence[GpuDevice] | None = None,
+    on_done: Callable[[Outcome], None] | None = None,
 ) -> Outcome:
     """Check ``model_ids`` and, when ``repair`` is set, download the bad ones.
 
-    This is the call Model Forge uses for Check and repair models. The window
-    opens on the verify phase, shows each model as OK, missing, or corrupt,
-    repairs only the missing and corrupt models, then shows a summary.
+    This is the call Model Forge uses for Check and repair. Phase verify hashes
+    one model at a time. Phase review then marks every row OK, missing, or
+    corrupt and publishes that summary. Phase repair starts only after review,
+    one marked model at a time. Phase summary is the final count. No repair
+    begins until every verification hash has finished.
 
     Args:
         model_ids: Models to check. ``None`` checks the planned tier.
@@ -165,10 +195,16 @@ def run_verify_repair(
         manifests: ``mdl.json`` paths. Discovered when omitted.
         show: Open the window. False runs the job on this thread.
         devices: GPUs to plan for.
+        on_done: Called on the UI thread when the window closes. When set, the
+            check stays on the event loop that is already running. It does not
+            call ``QApplication.exec``, and the window is application-modal so
+            the manage window cannot start another check while this one runs.
 
     Returns:
         The job outcome. With ``show`` false, the outcome is the job's own.
-        With the window, it is the outcome the worker stored.
+        With the window and no ``on_done``, it is the outcome the worker stored.
+        With ``on_done``, the return value is only a stand-in; the callback
+        receives the outcome when the window closes.
     """
     holder: dict[str, Outcome] = {}
 
@@ -185,7 +221,13 @@ def run_verify_repair(
         return outcome
 
     if not show:
-        return start(threading.Event(), lambda _status: None)
+        outcome = start(threading.Event(), lambda _status: None)
+        if on_done is not None:
+            on_done(outcome)
+        return outcome
+    if on_done is not None:
+        _run_verify_window(start, on_done=on_done)
+        return Outcome(EXIT_OK, "", Status(JobState.DOWNLOADING, extra={"phase": "verify"}))
     code = run_window(start, mode=WindowMode.VERIFY.value)
     found = holder.get("outcome")
     if found is not None:
@@ -433,9 +475,18 @@ def _run_download_window(start: Starter) -> int:
     return code
 
 
-def _run_verify_window(start: Starter) -> int:
-    """Show the check-and-repair window until the summary is closed."""
-    from PySide6.QtCore import QTimer
+def _run_verify_window(
+    start: Starter,
+    *,
+    on_done: Callable[[Outcome], None] | None = None,
+) -> int:
+    """Show the check-and-repair window until the summary is closed.
+
+    ``on_done`` means a window is already running. This function shows a modal
+    check and returns without starting another event loop. The callback runs
+    when that check closes.
+    """
+    from PySide6.QtCore import Qt, QTimer
     from PySide6.QtWidgets import QApplication
 
     app = QApplication.instance()
@@ -456,21 +507,31 @@ def _run_verify_window(start: Starter) -> int:
         event = threading.Event()
         shell["cancel"] = event
 
-        def run() -> None:
-            def on_status(status: Status) -> None:
-                with lock:
-                    holder["status"] = _copy(status)
-
-            try:
-                outcome = start(event, on_status)
-            except Exception as exc:
-                outcome = Outcome(EXIT_FAILED, str(exc), Status(JobState.FAILED, error=str(exc)))
+        def on_status(status: Status) -> None:
             with lock:
-                holder["status"] = _copy(outcome.status)
-                shell["outcome"] = outcome
+                holder["status"] = _copy(status)
 
+        def run() -> None:
+            try:
+                try:
+                    outcome = start(event, on_status)
+                except Exception as exc:
+                    outcome = Outcome(
+                        EXIT_FAILED, str(exc), Status(JobState.FAILED, error=str(exc))
+                    )
+                with lock:
+                    holder["status"] = _copy(outcome.status)
+                    shell["outcome"] = outcome
+            finally:
+                _leave_verify_job()
+
+        _enter_verify_job()
         thread = threading.Thread(target=run, name="voxprint-mdl-verify", daemon=True)
-        thread.start()
+        try:
+            thread.start()
+        except Exception:
+            _leave_verify_job()
+            raise
 
     def refresh() -> None:
         with lock:
@@ -487,13 +548,39 @@ def _run_verify_window(start: Starter) -> int:
         if callable(getattr(cancel, "setEnabled", None)):
             cancel.setEnabled(False)
 
+    timer_box: dict[str, QTimer | None] = {"timer": None}
+
+    def finish(code: int) -> None:
+        if shell.get("done"):
+            return
+        shell["done"] = True
+        timer = timer_box["timer"]
+        if timer is not None:
+            timer.stop()
+        found = shell.get("outcome")
+        if not isinstance(found, Outcome):
+            state = JobState.CANCELLED if code == EXIT_CANCELLED else JobState.FAILED
+            found = Outcome(code, "", Status(state))
+        callback = shell.get("on_done")
+        if callable(callback):
+            callback(found)
+            verify_window = shell.get("window")
+            hide = getattr(verify_window, "hide", None)
+            if callable(hide):
+                hide()
+            later = getattr(verify_window, "deleteLater", None)
+            if callable(later):
+                later()
+            return
+        app.exit(code)
+
     def on_close() -> None:
         if closing["value"]:
             return
         closing["value"] = True
         outcome = shell.get("outcome")
         code = outcome.code if isinstance(outcome, Outcome) else EXIT_CANCELLED
-        app.exit(code)
+        finish(code)
 
     def on_cancel() -> None:
         event = shell.get("cancel")
@@ -502,7 +589,7 @@ def _run_verify_window(start: Starter) -> int:
         if closing["value"]:
             return
         closing["value"] = True
-        QTimer.singleShot(400, lambda: app.exit(EXIT_CANCELLED))
+        finish(EXIT_CANCELLED)
 
     initial = Status(JobState.DOWNLOADING, extra={"phase": "verify"})
     window, _app = _verify_shell(
@@ -514,12 +601,17 @@ def _run_verify_window(start: Starter) -> int:
     shell["lang"] = get_language()
     shell["close_handler"] = on_close
     shell["cancel_handler"] = on_cancel
+    shell["on_done"] = on_done
     _wire_verify(window, on_close, on_cancel, shell)
     timer = QTimer(window)
+    timer_box["timer"] = timer
     timer.timeout.connect(refresh)
     timer.start(100)
     launch()
+    window.setWindowModality(Qt.WindowModality.ApplicationModal)
     window.show()
+    if on_done is not None:
+        return 0
     code = int(app.exec())
     timer.stop()
     return code
@@ -704,6 +796,7 @@ def _fill_verify(window: object, status: Status, lang: str) -> None:
         overall.setValue(0)
     counts = _count_states(status)
     window._verify_summary.setText(verify_summary(counts, lang))
+    phase.setText(_phase_text(status, lang))
     done_phase = _phase_of(status) == "summary"
     window._verify_close.setEnabled(done_phase)
     window._verify_cancel.setEnabled(not done_phase)
@@ -841,7 +934,7 @@ def _column_labels(lang: str) -> list[str]:
 
 def _phase_of(status: Status) -> str:
     phase = status.extra.get("phase")
-    if phase in {"verify", "repair", "summary"}:
+    if phase in {"verify", "review", "repair", "summary"}:
         return str(phase)
     return "verify"
 
@@ -850,12 +943,24 @@ def _phase_label(phase: str, lang: str) -> str:
     match phase:
         case "verify":
             return tr_lang("mdl.verify.phase.verify", lang)
+        case "review":
+            return tr_lang("mdl.verify.phase.review", lang)
         case "repair":
             return tr_lang("mdl.verify.phase.repair", lang)
         case "summary":
             return tr_lang("mdl.verify.phase.summary", lang)
         case _:
             return tr_lang("mdl.verify.phase.verify", lang)
+
+
+def _phase_text(status: Status, lang: str) -> str:
+    label = _phase_label(_phase_of(status), lang)
+    done = status.extra.get("done")
+    total = status.extra.get("total")
+    if isinstance(done, int) and isinstance(total, int) and total > 0:
+        counter = tr_lang("mdl.verify.counter", lang, done=done, total=total)
+        return f"{label} · {counter}"
+    return label
 
 
 def _status_label(state: str, lang: str) -> str:

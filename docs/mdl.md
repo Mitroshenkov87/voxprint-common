@@ -15,15 +15,30 @@ voxprint-mdl download --app enlarge --manifest "/opt/voxprint-ai-suite/enlarge/m
 
 `download` enqueues and then runs the worker, or attaches if another process already holds it. `enqueue` only appends the job. `status --wait` attaches until the queue is idle. On Windows the manifest path is `C:\Program Files\VOXPrint AI Suite\Enlarge\mdl.json` (or `voxprint-app-models.json`).
 
+When the bytes are already on disk, adopt them instead of downloading:
+
+```bash
+voxprint-mdl adopt --app canvas --from D:\models --from E:\incoming
+voxprint-mdl --json adopt --dry-run --app canvas --manifest ./mdl.json --from ./drop
+```
+
+`adopt` plans the same files as `download`, including `--model` when a model is on demand. For each file it looks in every `--from` directory. A file whose path relative to that directory equals the descriptor path wins. Otherwise the first file with the same filename and size is the candidate. Candidates are hashed one at a time. With `--gui` that hash runs on the progress window's worker, and the bar advances as each file is read.
+
+A digest that matches the descriptor is stored at `<models_dir>\blobs\<sha256>`. An existing blob of that name is reused when it is already the right bytes. A leftover file there is replaced. Otherwise adopt hardlinks the candidate on the same volume, or copies it when a hardlink cannot be created. The source file is never deleted or moved. The blob is marked `.verified` and the app is added as a ref. When every file of a Canvas model is in the blob store, adopt builds `<models_dir>\views\canvas\<model-id>-<12 hex>\`. The 12 hex digits are the first 12 of the SHA-256 of the sorted `path<TAB>sha256` lines, which is the folder Canvas rc.28 opens. Each entry is a hard link to its blob, and `.voxprint-view.json` is schema 1 with `key` and `files`. Post-install hooks run when every planned file was adopted or reused, the same point as a download. A download builds that Canvas view too.
+
+A file that is missing, the wrong size, or the wrong digest is listed in the result and left for `download`. The command still exits 0. `ready` is true only when nothing was skipped. `--dry-run` reports path and size matches (`would_adopt`) and does not hash, link, or copy. A second run reuses the verified blob and does not read the source again.
+
+`download` uses the same blob. A finished `blobs\<sha256>` of the right size is not fetched again: the `.verified` marker is enough, and the digest is read only when that marker is missing. A fetch writes that marker when the file lands, and again when a hash confirms a blob that was already there.
+
 `--gui` opens the download window. It needs `voxprint-common[ui]`. Labels come from `voxprint_common.i18n` (English, German, Russian, Ukrainian, Latvian). Without `--gui` the job is headless and suitable for a silent install. A hook failure uses exit code 2. The window's Retry runs the job again.
 
 Apps keep a Manage models button and drop their own download screens. The button runs:
 
 ```bash
-voxprint-mdl --gui --app clarity
+voxprint-mdl-gui --app clarity
 ```
 
-That focuses the single window on the manage page for that app. `voxprint-mdl worker` keeps the queue and the window process running. A second launch, from another installer or from Manage models, focuses the window that is already open. New files appear in the same queue, grouped by app. Closing the window does not cancel the transfer. On Windows the process stays in the notification area when a tray icon is available. Otherwise the window says that downloads continue in the background.
+That focuses the single window on the manage page for that app. `voxprint-mdl-gui` is the windowed entry point and does not open a console. `voxprint-mdl --gui` is the console script and keeps one. `voxprint-mdl worker` keeps the queue and the window process running. A second launch, from another installer or from Manage models, focuses the window that is already open. New files appear in the same queue, grouped by app. Closing the window does not cancel the transfer. On Windows the process stays in the notification area when a tray icon is available. Otherwise the window says that downloads continue in the background.
 
 Omit `--manifest` to discover every installed app. Discovery reads `<home>/state/installed-apps.json` when that file exists (`{"schema": 1, "apps": [{"id": "enlarge", "path": "..."}]}`), then `mdl.json`, then `voxprint-app-models.json`. An empty registry means nothing is installed. When the registry is absent, the command looks under the suite root: `VOXPRINT_SUITE_ROOT`, otherwise `%PROGRAMFILES%\VOXPrint AI Suite\<App Name>` on Windows and `/opt/voxprint-ai-suite/<app>` on Linux.
 
@@ -33,6 +48,7 @@ Omit `--manifest` to discover every installed app. Discovery reads `<home>/state
 voxprint-mdl --json download --dry-run --manifest ./mdl.json
 voxprint-mdl enqueue --app enlarge --json
 voxprint-mdl plan
+voxprint-mdl adopt --app canvas --from D:\models
 voxprint-mdl verify
 voxprint-mdl status --json --wait
 ```

@@ -68,6 +68,7 @@ __all__ = [
     "load",
     "lock_path",
     "release_component",
+    "remember_model_stat",
     "remove_ref",
     "repair_manifest",
     "runtime_component_id",
@@ -306,6 +307,45 @@ def add_ref(
             current.extra["files"] = listed
         _write(target, document)
         return current
+
+
+def remember_model_stat(
+    component_id: str,
+    size: int,
+    mtime_ns: int,
+    *,
+    manifest: Path | None = None,
+    timeout: float = _TIMEOUT,
+) -> None:
+    """Store a file's size and mtime on an installed component.
+
+    The manage window compares these two numbers to ``stat`` and does not hash.
+    A missing component is left unchanged. The file itself is not read.
+
+    Args:
+        component_id: Component id, such as ``model-`` plus a digest prefix.
+        size: File size in bytes.
+        mtime_ns: ``st_mtime_ns`` from ``stat``.
+        manifest: Manifest path. Defaults to the suite file.
+        timeout: Seconds to wait for ``manifest.lock``.
+    """
+    if not component_id or isinstance(size, bool) or isinstance(mtime_ns, bool):
+        return
+    if not isinstance(size, int) or not isinstance(mtime_ns, int):
+        return
+    target = manifest or manifest_file()
+    if not target.is_file():
+        return
+    with exclusive_lock(lock_path(target), timeout=timeout):
+        document = _load_migrate(target)
+        current = document.components.get(component_id)
+        if current is None:
+            return
+        if current.extra.get("size") == size and current.extra.get("mtime_ns") == mtime_ns:
+            return
+        current.extra["size"] = size
+        current.extra["mtime_ns"] = mtime_ns
+        _write(target, document)
 
 
 def remove_ref(

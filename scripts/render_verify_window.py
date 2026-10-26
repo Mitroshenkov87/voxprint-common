@@ -35,8 +35,17 @@ _NAMES = {
 }
 
 
-def _status(phase: str, rows: list[tuple[str, int, int, str]]) -> Status:
-    status = Status(JobState.DOWNLOADING, extra={"phase": phase, "mode": "verify"})
+def _status(
+    phase: str,
+    rows: list[tuple[str, int, int, str]],
+    *,
+    done: int,
+    total: int,
+) -> Status:
+    status = Status(
+        JobState.DOWNLOADING,
+        extra={"phase": phase, "mode": "verify", "done": done, "total": total},
+    )
     status.steps = [
         Step(
             model=name,
@@ -65,6 +74,13 @@ def _rows(lang: str, phase: str) -> list[tuple[str, int, int, str]]:
             (labels[2], 320_000_000, 0, "pending"),
             (labels[3], 90_000_000, 0, "pending"),
         ]
+    if phase == "review":
+        return [
+            (labels[0], 480_000_000, 480_000_000, "ok"),
+            (labels[1], 1_200_000_000, 1_200_000_000, "ok"),
+            (labels[2], 320_000_000, 0, "corrupt"),
+            (labels[3], 90_000_000, 0, "missing"),
+        ]
     return [
         (labels[0], 480_000_000, 480_000_000, "ok"),
         (labels[1], 1_200_000_000, 760_000_000, "repairing"),
@@ -76,11 +92,21 @@ def _rows(lang: str, phase: str) -> list[tuple[str, int, int, str]]:
 def main() -> None:
     """Write the English and Russian check and repair renders."""
     OUT.mkdir(parents=True, exist_ok=True)
+    counters = {"verify": (1, 4), "review": (4, 4), "repair": (1, 2)}
     for lang in ("en", "ru"):
-        for phase, stem in (("verify", "mdl-verify"), ("repair", "mdl-repair")):
+        for phase, stem in (
+            ("verify", "mdl-verify"),
+            ("review", "mdl-review"),
+            ("repair", "mdl-repair"),
+        ):
+            done, total = counters[phase]
             path = OUT / f"{stem}-{lang}.png"
             print(f"painting {path.name}", flush=True)
-            render_verify_window(_status(phase, _rows(lang, phase)), path, lang=lang)
+            render_verify_window(
+                _status(phase, _rows(lang, phase), done=done, total=total),
+                path,
+                lang=lang,
+            )
     try:
         ART.mkdir(parents=True, exist_ok=True)
         for png in OUT.glob("*.png"):

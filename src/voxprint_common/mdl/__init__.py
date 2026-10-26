@@ -16,6 +16,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from voxprint_common.mdl.adopt import adopt
 from voxprint_common.mdl.catalog import (
     HEADROOM,
     CatalogError,
@@ -55,6 +56,7 @@ __all__ = [
     "Ready",
     "Status",
     "TransferSession",
+    "adopt",
     "discover",
     "download",
     "enqueue",

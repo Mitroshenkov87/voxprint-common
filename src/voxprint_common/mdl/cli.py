@@ -1,9 +1,11 @@
 """``voxprint-mdl`` command line.
 
-Subcommands: ``plan``, ``enqueue``, ``download``, ``status``, ``verify``, ``worker``,
-``index``. ``--check`` prints which model index is in use.
+Subcommands: ``plan``, ``enqueue``, ``download``, ``adopt``, ``status``,
+``verify``, ``worker``, ``index``. ``--check`` prints which model index is in use.
 
-``voxprint-mdl --gui --app <id>`` opens Manage models with no subcommand.
+``voxprint-mdl-gui --app <id>`` opens Manage models with no console. The console
+script ``voxprint-mdl --gui --app <id>`` still opens that page and keeps a
+console attached.
 
 ``enqueue`` appends a job and exits. ``download`` enqueues when ``--app`` or
 ``--manifest`` is set, then runs the single worker or attaches to the one
@@ -11,10 +13,13 @@ already running. ``status --wait`` attaches until the queue is idle.
 
 ``--json`` writes UTF-8 progress lines and one result line on stdout. Human
 text goes to stderr. ``--dry-run`` builds the plan and checks free disk space
-without downloading or enqueueing. Both flags are accepted before or after
-the subcommand. ``--gui`` belongs on ``download`` and on ``verify``. ``verify --repair`` neutralises
-unsafe manifest paths and downloads only the missing or corrupt models.
-``verify --gui`` opens the check-and-repair window.
+without downloading or enqueueing. For ``adopt``, ``--dry-run`` reports
+path and size matches and does not hash, link, or copy. Both flags are
+accepted before or after the subcommand. ``--gui`` belongs on ``download``,
+``adopt``, and ``verify``. ``verify --repair`` neutralises unsafe manifest
+paths and downloads only the missing or corrupt models. ``verify --gui``
+opens the check-and-repair window. ``adopt --gui`` hashes in the progress
+window, one file at a time.
 
 Exit codes, shared with :mod:`voxprint_common.cli_protocol`:
 
@@ -30,10 +35,12 @@ from __future__ import annotations
 
 import argparse
 import sys
+import threading
 from collections.abc import Sequence
 from pathlib import Path
 
 from voxprint_common import __version__
+from voxprint_common.branding import detach_console
 from voxprint_common.cli_protocol import (
     EXIT_CANCELLED,
     EXIT_FAILED,
@@ -43,6 +50,7 @@ from voxprint_common.cli_protocol import (
     emit,
     result,
 )
+from voxprint_common.mdl.adopt import adopt
 from voxprint_common.mdl.catalog import (
     CatalogError,
     discover,
@@ -61,7 +69,7 @@ from voxprint_common.mdl.index import (
 from voxprint_common.mdl.job import Outcome, detect_tier, download, plan, verify, verify_repair
 from voxprint_common.mdl.names import CLI_NAME, DISPLAY_NAME
 from voxprint_common.mdl.onnx_prebuilt import stale_rows
-from voxprint_common.mdl.progress_ui import run_verify_repair
+from voxprint_common.mdl.progress_ui import run_verify_repair, run_window
 from voxprint_common.mdl.queue import enqueue, load_queue, run_or_attach
 from voxprint_common.mdl.readiness import publish_presence
 from voxprint_common.mdl.status import JobState, StatusError, load_status
@@ -95,12 +103,16 @@ class _Parser(argparse.ArgumentParser):
 def main(argv: Sequence[str] | None = None) -> int:
     """Run one subcommand and return the process exit code.
 
-    ``voxprint-mdl --gui --app <id>`` opens Manage models without a subcommand.
+    ``voxprint-mdl-gui --app <id>`` opens Manage models. ``--gui`` is implied
+    for that entry point. ``voxprint-mdl --gui --app <id>`` does the same from
+    the console script.
 
     Args:
         argv: Arguments without the program name. Defaults to ``sys.argv[1:]``.
     """
     args_list = list(sys.argv[1:] if argv is None else argv)
+    if argv is None and _launched_as_gui() and "--gui" not in args_list:
+        args_list = ["--gui", *args_list]
     if _bare_gui(args_list):
         return _open_named_window(args_list)
     want_json = "--json" in args_list
@@ -155,6 +167,7 @@ def _parser() -> _Parser:
         ("plan", "show the models this machine needs and check free disk space"),
         ("enqueue", "add a download job and exit"),
         ("download", "enqueue, then run the worker or attach to it"),
+        ("adopt", "link or copy local model files that match the descriptor"),
         ("status", "print the status file"),
         ("verify", "re-hash the planned models"),
         ("worker", "keep the download window and the queue worker running"),
@@ -179,6 +192,14 @@ def _parser() -> _Parser:
                 "--wait",
                 action="store_true",
                 help="run or attach until the queue is idle",
+            )
+        if name == "adopt":
+            command.add_argument(
+                "--from",
+                action="append",
+                dest="sources",
+                default=None,
+                help="directory of local model files; repeat to search more than one",
             )
         if name == "verify":
             command.add_argument(
@@ -212,8 +233,8 @@ def _run(args: argparse.Namespace, session: Session | None) -> tuple[int, str, d
         return _index_command(args)
     if args.command == "worker":
         return serve(), "", {}
-    if args.gui and args.command not in {"download", "verify"}:
-        return EXIT_USAGE, "--gui is only valid with download or verify", {}
+    if args.gui and args.command not in {"download", "verify", "adopt"}:
+        return EXIT_USAGE, "--gui is only valid with download, adopt, or verify", {}
     if args.gui and args.command == "download":
         return _gui(args, session)
     if args.command == "status":
@@ -239,6 +260,8 @@ def _run(args: argparse.Namespace, session: Session | None) -> tuple[int, str, d
             outcome = verify_repair(models, repair=True, manifests=manifests)
         else:
             outcome = verify(manifests, only=models)
+    elif args.command == "adopt":
+        return _adopt(args, on_progress)
     elif args.command == "download":
         if args.dry_run:
             if manifests is None and args.app:
@@ -257,6 +280,77 @@ def _run(args: argparse.Namespace, session: Session | None) -> tuple[int, str, d
     else:
         return EXIT_USAGE, f"unknown command {args.command}", {}
     return outcome.code, outcome.message, _payload(outcome.status)
+
+
+def _adopt(
+    args: argparse.Namespace,
+    on_progress: object,
+) -> tuple[int, str, dict[str, object]]:
+    """Link or copy local files named by ``--from`` into the blob store."""
+    sources = [Path(item) for item in (args.sources or [])]
+    if not sources:
+        return EXIT_USAGE, "adopt needs --from", {}
+    manifests = [Path(item) for item in args.manifest] if args.manifest else None
+    if manifests is None and args.app:
+        manifests = [app.path for app in discover() if app.id == args.app]
+        if not manifests:
+            return EXIT_USAGE, f"no installed manifest for {args.app}", {}
+    if manifests is None:
+        return EXIT_USAGE, "adopt needs --app or --manifest", {}
+    if args.app:
+        for path in manifests:
+            found = load_manifest(path)
+            if found.app != args.app:
+                return EXIT_USAGE, f"{path} is not the manifest for {args.app}", {}
+    models = tuple(args.model) if args.model else None
+    if args.gui:
+        return _adopt_gui(manifests, sources, models, dry_run=bool(args.dry_run))
+    outcome = adopt(
+        manifests,
+        sources,
+        dry_run=bool(args.dry_run),
+        on_progress=on_progress,  # type: ignore[arg-type]
+        only=models,
+    )
+    return outcome.code, outcome.message, _adopt_payload(outcome.status)
+
+
+def _adopt_gui(
+    manifests: list[Path],
+    sources: list[Path],
+    models: tuple[str, ...] | None,
+    *,
+    dry_run: bool,
+) -> tuple[int, str, dict[str, object]]:
+    """Hash adopt candidates on the progress window's worker thread."""
+    detach_console()
+
+    def start(cancel: threading.Event, on_status: object) -> Outcome:
+        return adopt(
+            manifests,
+            sources,
+            dry_run=dry_run,
+            on_status=on_status,  # type: ignore[arg-type]
+            cancel=cancel,
+            only=models,
+        )
+
+    try:
+        code = run_window(start)
+    except ImportError as exc:
+        return EXIT_FAILED, f"{DISPLAY_NAME} needs the ui extra for --gui ({exc})", {}
+    status = load_status()
+    message = str(status.extra.get("summary") or status.error or status.state.value)
+    return code, message, _adopt_payload(status)
+
+
+def _adopt_payload(status: object) -> dict[str, object]:
+    body = _payload(status)
+    extra = getattr(status, "extra", {})
+    for key in ("adopted", "reused", "skipped", "would_adopt"):
+        rows = extra.get(key) if isinstance(extra, dict) else None
+        body[key] = list(rows) if isinstance(rows, list) else []
+    return body
 
 
 def _check() -> tuple[int, str, dict[str, object]]:
@@ -374,12 +468,19 @@ def _wait(session: Session | None) -> tuple[int, str, dict[str, object]]:
     return outcome.code, outcome.message, _payload(outcome.status)
 
 
+def _launched_as_gui() -> bool:
+    """True when this process is the windowed ``voxprint-mdl-gui`` entry point."""
+    stem = Path(sys.argv[0]).name.lower().removesuffix(".exe")
+    return stem == "voxprint-mdl-gui"
+
+
 def _bare_gui(argv: Sequence[str]) -> bool:
-    commands = {"plan", "enqueue", "download", "status", "verify", "worker"}
+    commands = {"plan", "enqueue", "download", "adopt", "status", "verify", "worker"}
     return "--gui" in argv and not any(token in commands for token in argv)
 
 
 def _open_named_window(argv: Sequence[str]) -> int:
+    detach_console()
     tokens = list(argv)
     app = _flag_value(tokens, "--app")
     manifest = _flag_value(tokens, "--manifest")
@@ -415,6 +516,7 @@ def _window_code(outcome: WindowResult) -> int:
 
 def _verify_gui(args: argparse.Namespace) -> tuple[int, str, dict[str, object]]:
     """Open the check-and-repair window for ``voxprint-mdl verify --gui``."""
+    detach_console()
     models = tuple(args.model) if args.model else None
     manifests = [Path(item) for item in args.manifest] if args.manifest else None
     try:
@@ -431,6 +533,7 @@ def _verify_gui(args: argparse.Namespace) -> tuple[int, str, dict[str, object]]:
 
 def _gui(args: argparse.Namespace, session: Session | None) -> tuple[int, str, dict[str, object]]:
     del session
+    detach_console()
     app = args.app or "suite"
     manifests = [Path(item) for item in args.manifest]
     try:

@@ -4,6 +4,10 @@ voxprint-common is a library. Each app bundles the wheel in its installer, or in
 
 Pin `voxprint-common==0.2.4`. The import package is `voxprint_common`. `voxprint_common.API` is `1`.
 
+## Changes in 0.5.1
+
+A Manage models button runs `voxprint-mdl-gui --app <app_id>`. That entry point is a GUI script and does not open a console. `voxprint-mdl --gui --app <app_id>` remains the console script.
+
 ## Changes in the next release
 
 Catalog files shipped with this package are `voxprint_common/ui/locales/<lang>.json`, beside `tokens.json`. `suite.json` stays at `<data home>/state/suite.json`. Writers lock `suite.json.lock` and replace one key at a time. The viewer configuration of `SimpleLayout` has no input and no primary action. Its window minimum is 640 by 400. Other shells stay at a 960 by 640 minimum and open at 1200 by 900 until a rectangle is saved in `ui.window`.

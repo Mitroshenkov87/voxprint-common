@@ -3,7 +3,8 @@
 The rules are in ``docs/installer.md``. This module gives each app the same
 Start menu group, shortcut name, executable names, icon file name, and
 AppUserModelID, packs pre-rendered PNG frames into a multi-size ``.ico``, and
-checks an existing ``.ico``. It uses only the standard library.
+checks an existing ``.ico``, and reads each app's identity colour from the
+theme tokens. It does not import Qt.
 
     python -m voxprint_common.branding check assets/canvas.ico
     python -m voxprint_common.branding pack assets/canvas.ico icon-16.png icon-24.png ...
@@ -19,6 +20,8 @@ import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+
+from voxprint_common.ui.tokens import load as load_tokens
 
 SUITE_NAME = "VOXPrint AI Suite"
 """Start menu group and the folder under Program Files."""
@@ -178,6 +181,44 @@ def _require_sizes(found: Mapping[int, bytes]) -> None:
     missing = [size for size in ICO_SIZES if size not in found]
     if missing:
         raise IconError("missing icon sizes: " + ", ".join(map(str, missing)))
+
+
+def identity_colour(app_id: str) -> str:
+    """Return the identity colour for a suite id.
+
+    The colour is the ``identity`` entry in ``tokens.json``. Model Forge is
+    ``#f58a3c``. An id with no entry uses the accent token.
+
+    Args:
+        app_id: Suite id, such as ``model-forge``.
+
+    Returns:
+        An ``#RRGGBB`` colour.
+    """
+    tokens = load_tokens()
+    colour = tokens.identity.get(app_id, "")
+    if colour:
+        return colour
+    return tokens.colors["ACCENT"]
+
+
+def detach_console() -> bool:
+    """Drop a console this GUI process inherited.
+
+    A ``python.exe`` launch keeps a console behind the window. Freeing it
+    leaves the window on its own. A ``pythonw`` launch has nothing to drop.
+
+    Returns:
+        True when Windows freed the console. False on other systems and when
+        the process had no console.
+    """
+    if os.name != "nt":
+        return False
+    try:
+        kernel = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        return bool(kernel.FreeConsole())
+    except AttributeError, OSError:
+        return False
 
 
 def set_app_user_model_id(app_id: str) -> bool:
