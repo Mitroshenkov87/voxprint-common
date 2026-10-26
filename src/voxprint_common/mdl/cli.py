@@ -1,7 +1,8 @@
 """``voxprint-mdl`` command line.
 
-Subcommands: ``plan``, ``enqueue``, ``download``, ``adopt``, ``status``,
-``verify``, ``worker``, ``index``. ``--check`` prints which model index is in use.
+Subcommands: ``plan``, ``enqueue``, ``download``, ``adopt``, ``cleanup``,
+``status``, ``verify``, ``worker``, ``index``. ``--check`` prints which model
+index is in use.
 
 ``voxprint-mdl-gui --app <id>`` opens Manage models with no console. The console
 script ``voxprint-mdl --gui --app <id>`` still opens that page and keeps a
@@ -14,12 +15,13 @@ already running. ``status --wait`` attaches until the queue is idle.
 ``--json`` writes UTF-8 progress lines and one result line on stdout. Human
 text goes to stderr. ``--dry-run`` builds the plan and checks free disk space
 without downloading or enqueueing. For ``adopt``, ``--dry-run`` reports
-path and size matches and does not hash, link, or copy. Both flags are
-accepted before or after the subcommand. ``--gui`` belongs on ``download``,
-``adopt``, and ``verify``. ``verify --repair`` neutralises unsafe manifest
-paths and downloads only the missing or corrupt models. ``verify --gui``
-opens the check-and-repair window. ``adopt --gui`` hashes in the progress
-window, one file at a time.
+path and size matches and does not hash, link, or copy. ``cleanup`` reports
+unless ``--apply`` is set, and ``--dry-run`` together with ``--apply`` is a
+usage error. Both global flags are accepted before or after the subcommand.
+``--gui`` belongs on ``download``, ``adopt``, and ``verify``. ``verify
+--repair`` neutralises unsafe manifest paths and downloads only the missing
+or corrupt models. ``verify --gui`` opens the check-and-repair window.
+``adopt --gui`` hashes in the progress window, one file at a time.
 
 Exit codes, shared with :mod:`voxprint_common.cli_protocol`:
 
@@ -58,6 +60,7 @@ from voxprint_common.mdl.catalog import (
     load_manifest,
     plan_files,
 )
+from voxprint_common.mdl.cleanup import cleanup
 from voxprint_common.mdl.events import TransferSession
 from voxprint_common.mdl.hooks import hook_problems
 from voxprint_common.mdl.index import (
@@ -168,6 +171,7 @@ def _parser() -> _Parser:
         ("enqueue", "add a download job and exit"),
         ("download", "enqueue, then run the worker or attach to it"),
         ("adopt", "link or copy local model files that match the descriptor"),
+        ("cleanup", "reclaim legacy copies that match a blob"),
         ("status", "print the status file"),
         ("verify", "re-hash the planned models"),
         ("worker", "keep the download window and the queue worker running"),
@@ -200,6 +204,29 @@ def _parser() -> _Parser:
                 dest="sources",
                 default=None,
                 help="directory of local model files; repeat to search more than one",
+            )
+        if name == "cleanup":
+            command.add_argument(
+                "--legacy",
+                action="append",
+                default=None,
+                help="legacy model directory; repeat to scan more than one",
+            )
+            command.add_argument(
+                "--gc",
+                action="store_true",
+                help="report blobs that no view, app ref, or manifest names",
+            )
+            command.add_argument(
+                "--apply",
+                action="store_true",
+                help="replace or remove the reported files; the default is a dry run",
+            )
+            command.add_argument(
+                "--mode",
+                choices=("link", "delete"),
+                default="link",
+                help="link replaces a match with a hardlink; delete removes a verified match",
             )
         if name == "verify":
             command.add_argument(
@@ -262,6 +289,8 @@ def _run(args: argparse.Namespace, session: Session | None) -> tuple[int, str, d
             outcome = verify(manifests, only=models)
     elif args.command == "adopt":
         return _adopt(args, on_progress)
+    elif args.command == "cleanup":
+        return _cleanup(args, on_progress)
     elif args.command == "download":
         if args.dry_run:
             if manifests is None and args.app:
@@ -347,9 +376,69 @@ def _adopt_gui(
 def _adopt_payload(status: object) -> dict[str, object]:
     body = _payload(status)
     extra = getattr(status, "extra", {})
-    for key in ("adopted", "reused", "skipped", "would_adopt"):
+    for key in ("adopted", "reused", "skipped", "would_adopt", "duplicate"):
         rows = extra.get(key) if isinstance(extra, dict) else None
         body[key] = list(rows) if isinstance(rows, list) else []
+    reclaimable = extra.get("reclaimable_bytes") if isinstance(extra, dict) else 0
+    body["reclaimable_bytes"] = int(reclaimable) if isinstance(reclaimable, int) else 0
+    return body
+
+
+def _cleanup(
+    args: argparse.Namespace,
+    on_progress: object,
+) -> tuple[int, str, dict[str, object]]:
+    """Report or reclaim legacy copies. The default is a dry run."""
+    if args.apply and args.dry_run:
+        return EXIT_USAGE, "cleanup accepts either --apply or --dry-run", {}
+    legacy = [Path(item) for item in (args.legacy or [])]
+    if not legacy and not args.gc:
+        return EXIT_USAGE, "cleanup needs --legacy or --gc", {}
+    manifests = [Path(item) for item in args.manifest] if args.manifest else None
+    if manifests is None and args.app:
+        manifests = [app.path for app in discover() if app.id == args.app]
+        if not manifests:
+            return EXIT_USAGE, f"no installed manifest for {args.app}", {}
+    if args.app and manifests is not None:
+        for path in manifests:
+            found = load_manifest(path)
+            if found.app != args.app:
+                return EXIT_USAGE, f"{path} is not the manifest for {args.app}", {}
+    outcome = cleanup(
+        legacy,
+        manifests=manifests,
+        app=args.app,
+        mode=args.mode,
+        apply=bool(args.apply),
+        gc=bool(args.gc),
+        on_progress=on_progress,  # type: ignore[arg-type]
+    )
+    return outcome.code, outcome.message, _cleanup_payload(outcome.status)
+
+
+def _cleanup_payload(status: object) -> dict[str, object]:
+    body = _payload(status)
+    extra = getattr(status, "extra", {})
+    keys = (
+        "would_link",
+        "linked",
+        "would_delete",
+        "deleted",
+        "already",
+        "unique",
+        "skipped",
+        "mismatch",
+        "would_gc",
+        "gced",
+        "manifest",
+        "removed_dirs",
+    )
+    for key in keys:
+        rows = extra.get(key) if isinstance(extra, dict) else None
+        body[key] = list(rows) if isinstance(rows, list) else []
+    reclaimable = extra.get("reclaimable_bytes") if isinstance(extra, dict) else 0
+    body["reclaimable_bytes"] = int(reclaimable) if isinstance(reclaimable, int) else 0
+    body["cleanup_mode"] = extra.get("mode") if isinstance(extra, dict) else ""
     return body
 
 
@@ -475,7 +564,7 @@ def _launched_as_gui() -> bool:
 
 
 def _bare_gui(argv: Sequence[str]) -> bool:
-    commands = {"plan", "enqueue", "download", "adopt", "status", "verify", "worker"}
+    commands = {"plan", "enqueue", "download", "adopt", "cleanup", "status", "verify", "worker"}
     return "--gui" in argv and not any(token in commands for token in argv)
 
 

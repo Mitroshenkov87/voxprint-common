@@ -4,6 +4,10 @@ voxprint-common is a library. Each app bundles the wheel in its installer, or in
 
 Pin `voxprint-common==0.2.4`. The import package is `voxprint_common`. `voxprint_common.API` is `1`.
 
+## Changes in 0.5.2
+
+`voxprint-mdl cleanup --apply` rewrites model component paths in `shared/manifest.json` before it links or deletes a legacy file. The new path is `blobs/<sha256>`. The previous path is stored on that component as `retargeted_from`. The manifest schema stays 1. `retarget_model_paths` is that migration; a dry run reports the same rows and does not write. A path that cleanup did not match is left as it is.
+
 ## Changes in 0.5.1
 
 A Manage models button runs `voxprint-mdl-gui --app <app_id>`. That entry point is a GUI script and does not open a console. `voxprint-mdl --gui --app <app_id>` remains the console script.

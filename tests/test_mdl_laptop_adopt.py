@@ -223,6 +223,27 @@ def test_laptop_layout_reuses_z_image_adopts_writer_and_second_run_is_a_noop(
             else:
                 assert key in adopted
                 assert os.path.samefile(source, blob)
+    expected_duplicates = set()
+    reclaim = 0
+    for model in models:
+        if model["id"] != _Z_IMAGE:
+            continue
+        files = model["files"]
+        assert isinstance(files, list)
+        for item in files:
+            if not item["in_legacy"] or not item["blob_in_snapshot"]:
+                continue
+            source = root / str(model["legacy"]) / str(item["path"])
+            expected_duplicates.add(
+                (str(source), int(item["size"]), str(blobs / str(item["sha256"])))
+            )
+            reclaim += int(item["size"])
+    found_duplicates = {
+        (row["path"], row["bytes"], row["blob"]) for row in outcome.status.extra["duplicate"]
+    }
+    assert found_duplicates == expected_duplicates
+    assert outcome.status.extra["reclaimable_bytes"] == reclaim
+    assert "duplicate" in outcome.message
     assert _stamp(root, original_stat) == before
     assert sentinel.read_bytes() == b"stay"
     marker_paths = list((models_dir() / "views" / "canvas").glob("*/.voxprint-view.json"))

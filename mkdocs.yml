@@ -44,6 +44,7 @@ nav:
   - MDL review 0.2.0: mdl-review-0.2.0.md
   - Shared UI: ui.md
   - Windows installer: installer.md
+  - Dependency pin: pin.md
   - API:
       - paths: api/paths.md
       - branding: api/branding.md

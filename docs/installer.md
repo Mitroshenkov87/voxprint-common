@@ -190,7 +190,16 @@ On a machine that already has the legacy Hugging Face folders next to `blobs`:
 voxprint-mdl adopt --app canvas --manifest "C:\Program Files\VOXPrint AI Suite\Canvas\mdl.json" --model z-image-turbo-bf16-16gb --model qwen3-4b-writer --from "%LOCALAPPDATA%\VOXPrint AI Suite\models\Tongyi-MAI--Z-Image-Turbo" --from "%LOCALAPPDATA%\VOXPrint AI Suite\models\huihui-ai--Huihui-Qwen3-4B-Instruct-2507-abliterated"
 ```
 
-`qwen3-4b-writer` is optional in that manifest, so it is planned only when `--model` names it. The Z-Image-Turbo files that are already `blobs\<sha256>` are reused. The writer files that are not yet blobs are hardlinked in. Both legacy folders stay.
+`qwen3-4b-writer` is optional in that manifest, so it is planned only when `--model` names it. The Z-Image-Turbo files that are already `blobs\<sha256>` are reused. The writer files that are not yet blobs are hardlinked in. Both legacy folders stay. Adopt lists each remaining full copy as `duplicate` and the bytes `cleanup` could reclaim.
+
+When those folders are still separate copies of blobs that already exist, run a dry run, then link them. Delete is the other mode. It removes a file only when a fresh hash of the file and of the blob match.
+
+```bat
+voxprint-mdl cleanup --app canvas --manifest "C:\Program Files\VOXPrint AI Suite\Canvas\mdl.json" --legacy "%LOCALAPPDATA%\VOXPrint AI Suite\models\Tongyi-MAI--Z-Image-Turbo" --legacy "%LOCALAPPDATA%\VOXPrint AI Suite\models\huihui-ai--Huihui-Qwen3-4B-Instruct-2507-abliterated"
+voxprint-mdl cleanup --apply --mode link --app canvas --manifest "C:\Program Files\VOXPrint AI Suite\Canvas\mdl.json" --legacy "%LOCALAPPDATA%\VOXPrint AI Suite\models\Tongyi-MAI--Z-Image-Turbo" --legacy "%LOCALAPPDATA%\VOXPrint AI Suite\models\huihui-ai--Huihui-Qwen3-4B-Instruct-2507-abliterated"
+```
+
+A failed link is skipped and nothing is copied. `--gc` removes blobs nothing references, and only with `--apply`. `shared\manifest.json` entries that still name a legacy file are pointed at the blob before the file is replaced or removed.
 
 ```bash
 voxprint-mdl adopt --app canvas --manifest "{app}\mdl.json" --from D:\canvas-models

@@ -31,4 +31,4 @@ Extra fields are allowed. `type`, `ok`, `code`, and `message` are reserved.
 
 Enlarge's own job messages, and its older exit codes, stay in Enlarge. This protocol is the shared envelope.
 
-`voxprint-mdl` uses the same codes and the same result line. `--json` and `--dry-run` may appear before or after the subcommand. The installer contract is on the [model downloader](mdl.md) page.
+`voxprint-mdl` uses the same codes and the same result line. `--json` and `--dry-run` may appear before or after the subcommand. `adopt` adds `duplicate` and `reclaimable_bytes`. `cleanup` adds `would_link`, `linked`, `would_delete`, `deleted`, `unique`, `reclaimable_bytes`, and `cleanup_mode`. The installer contract is on the [model downloader](mdl.md) page.
