@@ -9,7 +9,8 @@ Import :mod:`voxprint_common.ui.theme`, :mod:`voxprint_common.ui.tokens`,
 or :mod:`voxprint_common.ui.palette` without Qt.
 :mod:`voxprint_common.ui.splash` and :mod:`voxprint_common.ui.shell` load
 PySide6 only when a window is constructed. ``SimpleImageWidget`` loads it
-when that view is constructed.
+when that view is constructed. :mod:`voxprint_common.ui.check_gate` loads
+PySide6 on import. This package does not import it.
 """
 
 from __future__ import annotations

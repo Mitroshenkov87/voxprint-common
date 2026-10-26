@@ -12,6 +12,18 @@ import subprocess
 import sys
 from pathlib import Path
 
+
+def _windows_font_dir() -> None:
+    """Point offscreen Qt at the Windows font folder when nothing else did."""
+    if os.name != "nt" or os.environ.get("QT_QPA_FONTDIR"):
+        return
+    fonts = r"C:\Windows\Fonts"
+    if os.path.isdir(fonts):
+        os.environ["QT_QPA_FONTDIR"] = fonts
+
+
+_windows_font_dir()
+
 if os.environ.get("MDL_RENDER_SCALE") == "150":
     os.environ["QT_SCALE_FACTOR"] = "1.5"
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")

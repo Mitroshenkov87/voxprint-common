@@ -1,4 +1,15 @@
 {
+  "check_gate.cancel": "Abbrechen",
+  "check_gate.check": "Prüfen",
+  "check_gate.deactivated": {
+    "one": "{count} deaktiviert",
+    "other": "{count} deaktiviert"
+  },
+  "check_gate.state.cancelled": "Abgebrochen",
+  "check_gate.state.dirty": "Nicht geprüft",
+  "check_gate.state.failed": "Nicht bestanden",
+  "check_gate.state.passed": "Bestanden",
+  "check_gate.state.running": "Prüfung {done}/{total}",
   "command.edit.redo": "Wiederholen",
   "command.edit.undo": "Rückgängig",
   "command.file.save": "Speichern",
@@ -93,6 +104,23 @@
   "mdl.verify.status.pending": "Warten",
   "mdl.verify.status.repaired": "Repariert",
   "mdl.verify.status.repairing": "Reparatur",
+  "mdl.verify.line": "{models}: {ok}, {damaged}, {missing}",
+  "mdl.verify.line.damaged": {
+    "one": "{count} beschädigt",
+    "other": "{count} beschädigt"
+  },
+  "mdl.verify.line.missing": {
+    "one": "{count} fehlend",
+    "other": "{count} fehlend"
+  },
+  "mdl.verify.line.models": {
+    "one": "{count} Modell",
+    "other": "{count} Modelle"
+  },
+  "mdl.verify.line.ok": {
+    "one": "{count} OK",
+    "other": "{count} OK"
+  },
   "mdl.verify.summary": "{ok}, {missing}, {corrupt}, {repaired}",
   "mdl.verify.summary.corrupt": {
     "one": "{count} beschädigt",

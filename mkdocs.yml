@@ -77,6 +77,7 @@ nav:
       - ui.variants: api/variants.md
       - ui.shell: api/shell.md
       - ui.splash: api/splash.md
+      - ui.check_gate: api/check-gate.md
       - provenance: api/provenance.md
 
 watch:

@@ -44,7 +44,11 @@ from voxprint_common.mdl.present import (
     WindowView,
     view_for,
 )
-from voxprint_common.mdl.progress_ui import run_verify_repair, verify_job_running
+from voxprint_common.mdl.progress_ui import (
+    apply_window_floor,
+    run_verify_repair,
+    verify_job_running,
+)
 from voxprint_common.ui.splash import Motif
 from voxprint_common.ui.splash import identity as splash_identity
 from voxprint_common.ui.theme import (
@@ -859,7 +863,7 @@ def _builder(kind: str) -> object:
             self._rule.setVisible(view.mode != "manage")
             self._rule.setStyleSheet(f"background: {colour}; border: none; border-radius: 2px;")
             if view.mode == "manage":
-                self.setMinimumSize(_MIN_W, 280)
+                self.setMinimumSize(760, 480)
             self._overall_caption.setText(view.overall_caption)
             self._overall_detail.setText(view.overall_detail)
             self._status.setText(view.status)
@@ -973,7 +977,7 @@ def _builder(kind: str) -> object:
         def _fit_scroll(self) -> None:
             needed = max(1, self._body.sizeHint().height())
             if self._mode == "manage":
-                room = max(140, self._height_cap - 260)
+                room = max(140, self.height() - 260)
             else:
                 room = max(96, self.height() - 300)
             self._scroll.setFixedHeight(min(needed, room))
@@ -1005,9 +1009,11 @@ def _builder(kind: str) -> object:
                 layout.activate()
             hint = max(self.minimumHeight(), self.sizeHint().height())
             height = min(limit[1], hint)
-            if not manage:
+            if manage:
+                apply_window_floor(self, width, max(480, height))
+            else:
                 height = max(_MIN_H, height)
-            self.resize(width, height)
+                self.resize(width, height)
             self._fit_width()
             self._fit_scroll()
 
@@ -1634,6 +1640,7 @@ def _builder(kind: str) -> object:
         window = DownloadWindow()
         window.bind(controller, app_id, open_cmd, mode, manifest)
         if mode == "manage":
+            window.setMinimumSize(760, 480)
             window.resize(_MANAGE_W, 720)
         window.show()
         app.processEvents()

@@ -46,6 +46,7 @@ The docs site is [mitroshenkov87.github.io/voxprint-common](https://mitroshenkov
 | `voxprint_common.ui.presets` | Preset files, schema `voxprint-presets/1`, writing one shared settings state |
 | `voxprint_common.ui.shell` | Reference window. PySide6 loads only when the window is built |
 | `voxprint_common.ui.splash` | 960×540 splash. PySide6 loads only when a splash is shown |
+| `voxprint_common.ui.check_gate` | Check button that blocks Next until a background check passes. Importing it loads PySide6 |
 | `voxprint_common.i18n` | JSON catalogs. English, German, Russian, Ukrainian, Latvian |
 | `voxprint_common.mdl` | VOXPrint MDL. Shared model download, adopt, and cleanup. `voxprint-mdl` |
 | `voxprint_common.provenance` | Documented stub. Embedding arrives in a later version |

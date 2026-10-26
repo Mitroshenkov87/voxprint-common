@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.3 - 2026-10-26
+
+`CheckGate` is the shared Check control. An edit calls `mark_dirty()` and does not run a model. The job runs on a worker thread after Check, one active item at a time, with Cancel and an N/M counter. `unload()` runs on that worker after every ending. `can_proceed` is true only while the gate is passed, and Next follows `canProceedChanged`. When `on_deactivate` returns without raising, failed items count as handled: if at least one checked item passed, the gate ends passed and `deactivated` lists the ids that were switched off. The passed row shows how many were deactivated. The gate fails when the hook is missing, when it raises, or when no active item passed. There is no new state for that case.
+
+Manage models and the check-and-repair window use a logical minimum of 760 by 480. The first size fits the content and stays inside the available screen.
+
+Plain-text `voxprint-mdl verify` prints one summary line, for example `11 models: 11 OK, 0 damaged, 0 missing`, in the active language. `--json` keeps the result fields it already had.
+
+The shared UI page states the check rule and the hardware baseline: stay responsive on 16 GB VRAM and 64 GB RAM, use `ModelPark.vram_limit()`, load one stage at a time, keep that work off the UI thread, and prove an optimization on the laptop before a full build.
+
 ## 0.5.2 - 2026-10-26
 
 `adopt` reports a source file whose hash matches a blob and whose inode does not. The text report and `--json` include each `duplicate` row (`path`, `bytes`, `blob`) and `reclaimable_bytes`. The adopted, reused, skipped, and would-adopt counts stay as they were. A dry run still does not hash. A source that is already the blob inode is not read again.

@@ -204,8 +204,6 @@ def test_window_strings_come_from_the_catalog() -> None:
                 and isinstance(node.args[0], ast.Constant)
             ):
                 key = node.args[0].value
-                if isinstance(key, str) and key not in english and not key.startswith("mdl."):
-                    missing.append(f"{path}:{key}")
                 if isinstance(key, str) and key not in english:
                     children = [item for item in english if item.startswith(f"{key}.")]
                     if not children:

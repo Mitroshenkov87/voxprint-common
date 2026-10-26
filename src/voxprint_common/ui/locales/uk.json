@@ -1,4 +1,17 @@
 {
+  "check_gate.cancel": "Скасувати",
+  "check_gate.check": "Перевірити",
+  "check_gate.deactivated": {
+    "few": "{count} вимкнені",
+    "many": "{count} вимкнено",
+    "one": "{count} вимкнений",
+    "other": "{count} вимкнено"
+  },
+  "check_gate.state.cancelled": "Скасовано",
+  "check_gate.state.dirty": "Не перевірено",
+  "check_gate.state.failed": "Не пройдено",
+  "check_gate.state.passed": "Пройдено",
+  "check_gate.state.running": "Перевірка {done}/{total}",
   "command.edit.redo": "Повторити",
   "command.edit.undo": "Скасувати",
   "command.file.save": "Зберегти",
@@ -95,6 +108,31 @@
   "mdl.verify.status.pending": "Очікування",
   "mdl.verify.status.repaired": "Відновлено",
   "mdl.verify.status.repairing": "Відновлення",
+  "mdl.verify.line": "{models}: {ok}, {damaged}, {missing}",
+  "mdl.verify.line.damaged": {
+    "few": "{count} пошкоджені",
+    "many": "{count} пошкоджено",
+    "one": "{count} пошкоджена",
+    "other": "{count} пошкоджено"
+  },
+  "mdl.verify.line.missing": {
+    "few": "{count} відсутні",
+    "many": "{count} відсутньо",
+    "one": "{count} відсутня",
+    "other": "{count} відсутньо"
+  },
+  "mdl.verify.line.models": {
+    "few": "{count} моделі",
+    "many": "{count} моделей",
+    "one": "{count} модель",
+    "other": "{count} моделей"
+  },
+  "mdl.verify.line.ok": {
+    "few": "{count} в порядку",
+    "many": "{count} в порядку",
+    "one": "{count} в порядку",
+    "other": "{count} в порядку"
+  },
   "mdl.verify.summary": "{ok}, {missing}, {corrupt}, {repaired}",
   "mdl.verify.summary.corrupt": {
     "few": "{count} пошкоджені",

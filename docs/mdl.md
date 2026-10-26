@@ -65,6 +65,8 @@ voxprint-mdl verify
 voxprint-mdl status --json --wait
 ```
 
+Plain-text `verify` prints one line, such as `11 models: 11 OK, 0 damaged, 0 missing`. `--json` keeps the result fields it already writes.
+
 From Python, `enqueue(app)` returns a job id and `ensure_ready(app)` enqueues, runs or attaches, and returns `Ready` or `Failed`.
 
 ## Queue
@@ -258,6 +260,8 @@ There is one window for the whole queue. Each app is a group with that app's spl
 Pause and Resume talk to the worker's `TransferSession`. Cancel asks for confirmation and says the download can resume later. Errors are a short "What happened" and "What to do", with Retry. The traceback stays behind Details and in the log file.
 
 Manage models lists installed files with size and status, and optional models this GPU tier can run. A model whose minimum VRAM is above the card is hidden. Add enqueues that model. Remove drops this app's ref and deletes the file only when no other app still uses it. Verify re-hashes the plan.
+
+Manage models and the check-and-repair window open at a logical minimum of 760 by 480. The first size fits the rows and stays inside the screen.
 
 `voxprint-mdl verify --gui` opens the check-and-repair window. The first phase hashes each model. The rows then read OK, missing, or corrupt. `verify --repair` still clears a dangerous manifest path and does not delete files; it then downloads only the missing or corrupt models and leaves the healthy ones in place. `run_verify_repair(model_ids, repair=True)` is the call an app makes. The same window is `run_window(start, mode="verify")`.
 
