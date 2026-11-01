@@ -30,7 +30,6 @@ _PLACEHOLDER = re.compile(r"\{[a-z_]+\}")
 _REQUIRED = {
     "en": {"one", "other"},
     "de": {"one", "other"},
-    "ru": {"one", "few", "many", "other"},
     "uk": {"one", "few", "many", "other"},
     "lv": {"zero", "one", "other"},
 }
@@ -56,14 +55,14 @@ def _flat(lang: str) -> dict[str, str]:
 
 def test_language_order(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("VOXPRINT_LANG", "de")
-    monkeypatch.setenv("LANG", "ru_RU.UTF-8")
+    monkeypatch.setenv("LANG", "uk_UA.UTF-8")
     monkeypatch.delenv("LC_ALL", raising=False)
     monkeypatch.delenv("LC_MESSAGES", raising=False)
     reset()
     assert detect_language() == "de"
-    set_ui_language("ru")
+    set_ui_language("uk")
     reset()
-    assert detect_language() == "ru"
+    assert detect_language() == "uk"
     reset()
 
 
@@ -83,8 +82,8 @@ def test_system_locale_when_nothing_is_set(monkeypatch: pytest.MonkeyPatch) -> N
     reset()
 
 
-def test_plurals_for_russian_ukrainian_and_latvian() -> None:
-    assert [plural_category(n, "ru") for n in (1, 2, 5, 11, 21, 22)] == [
+def test_plurals_for_ukrainian_and_latvian() -> None:
+    assert [plural_category(n, "uk") for n in (1, 2, 5, 11, 21, 22)] == [
         "one",
         "few",
         "many",
@@ -92,7 +91,6 @@ def test_plurals_for_russian_ukrainian_and_latvian() -> None:
         "one",
         "few",
     ]
-    assert plural_category(3, "uk") == "few"
     assert [plural_category(n, "lv") for n in (0, 1, 2, 10, 11, 21)] == [
         "zero",
         "one",
@@ -101,9 +99,6 @@ def test_plurals_for_russian_ukrainian_and_latvian() -> None:
         "zero",
         "one",
     ]
-    assert tr_lang("mdl.files", "ru", count=1) == "1 файл"
-    assert tr_lang("mdl.files", "ru", count=2) == "2 файла"
-    assert tr_lang("mdl.files", "ru", count=5) == "5 файлов"
     assert tr_lang("mdl.files", "lv", count=0) == "0 failu"
     assert tr_lang("mdl.files", "lv", count=1) == "1 fails"
     assert tr_lang("mdl.files", "lv", count=3) == "3 faili"
@@ -135,14 +130,13 @@ def test_catalogs_live_beside_tokens_and_fall_back_to_english(tmp_path: Path) ->
     folder.mkdir()
     (folder / "en.json").write_text(json.dumps({"only.english": "Hill"}), encoding="utf-8")
     add_catalogs(folder)
-    assert tr_lang("only.english", "ru") == "Hill"
+    assert tr_lang("only.english", "uk") == "Hill"
     assert tr_lang("missing.entirely", "de") == "missing.entirely"
     reset()
 
 
-def test_preset_and_descriptor_label_keys_exist_in_english_and_russian() -> None:
+def test_preset_and_descriptor_label_keys_exist_in_english() -> None:
     english = _flat("en")
-    russian = _flat("ru")
     keys: set[str] = set()
     preset_dir = tokens_path().parent / "presets"
     for path in preset_dir.glob("*.json"):
@@ -156,7 +150,7 @@ def test_preset_and_descriptor_label_keys_exist_in_english_and_russian() -> None
             keys.add(spec.label_key)
             for choice in spec.choices:
                 keys.add(choice.label_key)
-    missing = sorted(key for key in keys if key not in english or key not in russian)
+    missing = sorted(key for key in keys if key not in english)
     assert keys and missing == []
 
 
@@ -181,9 +175,6 @@ def test_catalogs_share_keys_and_placeholders() -> None:
                     english[f"{stem}.other"]
                 )
     assert _flat("de")["mdl.pause"] == "Pause"
-    assert _flat("ru")["mdl.retry"] == "Повторить"
-    assert _flat("ru")["mdl.cancel"] == "Отмена"
-    assert _flat("ru")["mdl.heading.all_set"] == "Всё готово"
     assert tr("mdl.retry")
 
 

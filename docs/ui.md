@@ -88,15 +88,11 @@ gate.canProceedChanged.connect(next_button.setEnabled)
 editor.textChanged.connect(gate.mark_dirty)
 ```
 
-The pictures below are the red stop, the running mark, and the passed arrow with deactivated items. English and Russian, at 100% and 150%.
+The pictures below are the red stop, the running mark, and the passed arrow with deactivated items, at 100% and 150%.
 
 ![Check gate, English](renders/check-gate-en.png)
 
 ![Check gate, English at 150%](renders/check-gate-en-150.png)
-
-![Check gate, Russian](renders/check-gate-ru.png)
-
-![Check gate, Russian at 150%](renders/check-gate-ru-150.png)
 
 ## Hardware baseline
 
@@ -204,41 +200,21 @@ Canvas, Enlarge, and the Lucent helper. Canvas and Lucent ask for a prompt and t
 
 ![English image screen, preset with changes](img/shell/image-modified.png)
 
-![Russian image screen](img/shell/ru-image-simple.png)
-
-![Russian image screen, Expert mode](img/shell/ru-image-expert.png)
-
 ![German image screen](img/shell/de-image-simple.png)
 
 ![German image screen, Expert mode](img/shell/de-image-expert.png)
 
 ### Audio
 
-Audiobook Builder and Movie Dubber share the audio surface. Audiobook Builder asks for a book and a voice. `set_voices` replaces Warm, Clear, and Low, and the selected id is stored with the other settings. A dropped or picked book keeps its absolute path: the drop shows the file name, and the tooltip shows the path. The action is Create audiobook. Before a file exists the result is painted sound bars. After it exists the result plays that audio: play, pause, seek, the chapters the app supplied, the full path, and Open folder. When Qt Multimedia is missing, those controls stay. Pause and Resume sit beside Cancel when the app supplies both callbacks. Movie Dubber asks for a video and leaves out that voice row, so the narrator names are not added to the prompt. The action is Dub video. Before a run the result previews the chosen video. After the dub it plays that video with the new audio: play, pause, seek, the full output path, and Open folder. When Qt Multimedia is missing, the same region keeps the poster and Open folder. History lists past jobs. The preset file is `presets/audio.json` (Pace). The expert panel shows sample rate, format, normalisation, and loudness. A setting can carry a unit such as %, dB, kHz, or px. The pictures below are Audiobook Builder, then Movie Dubber in Russian.
+Audiobook Builder and Movie Dubber share the audio surface. Audiobook Builder asks for a book and a voice. `set_voices` replaces Warm, Clear, and Low, and the selected id is stored with the other settings. A dropped or picked book keeps its absolute path: the drop shows the file name, and the tooltip shows the path. The action is Create audiobook. Before a file exists the result is painted sound bars. After it exists the result plays that audio: play, pause, seek, the chapters the app supplied, the full path, and Open folder. When Qt Multimedia is missing, those controls stay. Pause and Resume sit beside Cancel when the app supplies both callbacks. Movie Dubber asks for a video and leaves out that voice row, so the narrator names are not added to the prompt. The action is Dub video. Before a run the result previews the chosen video. After the dub it plays that video with the new audio: play, pause, seek, the full output path, and Open folder. When Qt Multimedia is missing, the same region keeps the poster and Open folder. History lists past jobs. The preset file is `presets/audio.json` (Pace). The expert panel shows sample rate, format, normalisation, and loudness. A setting can carry a unit such as %, dB, kHz, or px. The pictures below are Audiobook Builder.
 
 ![English audio screen](img/shell/audio-simple.png)
 
 ![English audio screen, Expert mode](img/shell/audio-expert.png)
 
-![Russian audio screen](img/shell/ru-audio-simple.png)
-
-![Russian audio screen, Expert mode](img/shell/ru-audio-expert.png)
-
 ![English audio screen, preset with changes](img/shell/audio-modified.png)
 
-![Russian movie dubber](img/shell/ru-dub-simple.png)
-
-![Russian movie dubber, Expert mode](img/shell/ru-dub-expert.png)
-
 Audiobook Builder can also open as sections. A single-section screen does not gain a tab row. Six sections fit the 960 px minimum, and any tab that does not fit goes to More instead of a scrollbar. Narration keeps the shared screen and adds Prepare text. Roles is a casting table: each row picks a voice, and that value is stored in the section's settings. Voices lists the voices and opens Train a voice, a three-step wizard whose last step shows progress and Cancel. A restart restores that step from the shared settings and a checkpoint the app provides. Expert fields for another section, or for a wizard step that is not open, stay out of the panel.
-
-![Russian sections](img/shell/ru-sections.png)
-
-![Russian casting table](img/shell/ru-casting.png)
-
-![Russian wizard](img/shell/ru-steps.png)
-
-![Russian wizard, running step](img/shell/ru-steps-running.png)
 
 ### Video
 
@@ -250,10 +226,6 @@ Clarity. The input is a dropped video. The action is Improve video. The result i
 
 ![English video screen, preset with changes](img/shell/video-modified.png)
 
-![Russian video screen](img/shell/ru-video-simple.png)
-
-![Russian video screen, Expert mode](img/shell/ru-video-expert.png)
-
 ### Text
 
 Plotweaver. The input is an idea or an outline. The action is Write. The result is a chapter document. The preset file is `presets/text.json` (Length). The expert panel shows the model, temperature, length target, and style.
@@ -263,10 +235,6 @@ Plotweaver. The input is an idea or an outline. The action is Write. The result 
 ![English text screen, Expert mode](img/shell/text-expert.png)
 
 ![English text screen, preset with changes](img/shell/text-modified.png)
-
-![Russian text screen](img/shell/ru-text-simple.png)
-
-![Russian text screen, Expert mode](img/shell/ru-text-expert.png)
 
 ### Tool
 
@@ -278,10 +246,6 @@ Model Forge. The input is a model. The action is Prepare model. The result is a 
 
 ![English tool screen, preset with changes](img/shell/tool-modified.png)
 
-![Russian tool screen](img/shell/ru-tool-simple.png)
-
-![Russian tool screen, Expert mode](img/shell/ru-tool-expert.png)
-
 ### Viewer
 
 The viewer has no input and no primary action. A thin toolbar offers Open, Save, previous, and next. Presets are Fit, 100%, and Enhance. Enhance stays grey until Enlarge is installed. History is a strip of 88 px thumbnails and can be hidden with `viewer.show_history`. The window minimum for this variant is 640 by 400. Other variants stay at 960 by 640. The first launch is 1200 by 900. Later launches restore `ui.geometry` from `suite.json`, including a maximized or fullscreen window. An older `ui.window` rectangle is copied into that key.
@@ -292,23 +256,15 @@ The viewer has no input and no primary action. A thin toolbar offers Open, Save,
 
 ![English viewer, preset with changes](img/shell/viewer-modified.png)
 
-![Russian viewer](img/shell/ru-viewer-simple.png)
-
-![Russian viewer, Expert mode](img/shell/ru-viewer-expert.png)
-
 ## Reference window
 
 `ReferenceShell` opens on the image-app screen. `full_layout=True` is the dock API: two side tab groups around a protected centre, a command palette, and the shell theme. Those pictures are separate from the image screen. Screenshots below are grabbed with `QT_QPA_PLATFORM=offscreen`.
 
 ![English reference shell](img/shell/en-shell.png)
 
-![Russian reference shell](img/shell/ru-shell.png)
-
 ![German reference shell](img/shell/de-shell.png)
 
 ![English command palette](img/shell/en-palette.png)
-
-![Russian command palette](img/shell/ru-palette.png)
 
 ![Splitter while dragging](img/shell/en-split.png)
 
@@ -319,8 +275,6 @@ Simple mode is the picture screen. Expert mode keeps that screen and adds the si
 ![English simple mode, before a picture](img/shell/en-simple-empty.png)
 
 ![English simple mode, with a picture](img/shell/en-simple-result.png)
-
-![Russian simple mode, with a picture](img/shell/ru-simple-result.png)
 
 ![English Expert mode](img/shell/en-expert.png)
 

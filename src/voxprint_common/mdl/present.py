@@ -388,7 +388,7 @@ def localized_name(names: dict[str, str], fallback: str, lang: str | None = None
     return fallback or code
 
 
-_COMMA_LANGS = frozenset({"de", "lv", "ru", "uk"})
+_COMMA_LANGS = frozenset({"de", "lv", "uk"})
 
 
 def _format_number(value: float, *, decimals: int, lang: str | None) -> str:
@@ -430,9 +430,9 @@ def display_path(path: Path | str) -> str:
 
 
 def format_size(amount: int, *, lang: str | None = None) -> str:
-    """Return a short size such as ``1.5 MB`` or ``457,8 МБ``.
+    """Return a short size such as ``1.5 MB`` or ``457,8 MB``.
 
-    German, Russian, Ukrainian, and Latvian use a decimal comma and a narrow
+    German, Ukrainian, and Latvian use a decimal comma and a narrow
     no-break space before the unit. English uses a dot and a normal space.
 
     Args:

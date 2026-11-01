@@ -228,7 +228,7 @@ def test_reader_keeps_the_last_good_suite_file(
     assert ui_theme() == "system"
     with pytest.raises(ValueError):
         set_ui_theme("glass-dark")
-    set_ui_language("ru")
+    set_ui_language("de")
     set_window_geometry(1100, 800, -4, 12, maximized=True)
     assert file() == tmp_path / "state" / "suite.json"
     assert window_geometry() == {"width": 1100, "height": 800, "x": -4, "y": 12}
@@ -243,7 +243,7 @@ def test_reader_keeps_the_last_good_suite_file(
     assert "ui.window" not in read()
     target = file()
     target.write_text("{", encoding="utf-8")
-    assert read()["ui_language"] == "ru"
+    assert read()["ui_language"] == "de"
     assert window_geometry() == {"width": 1100, "height": 800, "x": -4, "y": 12}
     assert ui_geometry() is not None and ui_geometry()["maximized"] is True
     target.write_text(json.dumps({"schema": 1, "gpu": "cuda:2"}) + "\n", encoding="utf-8")

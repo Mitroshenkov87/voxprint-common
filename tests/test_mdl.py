@@ -153,8 +153,8 @@ def test_display_name_is_one_constant() -> None:
     assert CLI_NAME == "voxprint-mdl"
     assert window_title() == DISPLAY_NAME
     assert "PySide6" not in sys.modules
-    assert RETRY_TEXT == "Повторить"
-    assert CANCEL_TEXT == "Отмена"
+    assert RETRY_TEXT == "Retry"
+    assert CANCEL_TEXT == "Cancel"
 
 
 def test_install_dirs_and_discovery(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -346,7 +346,7 @@ def test_status_file_is_utf8() -> None:
     assert "Ошибка: диск заполнен".encode() in raw
     assert b"\\u" not in raw
     assert load_status().error == "Ошибка: диск заполнен"
-    assert format_eta(90) == "1 мин 30 с"
+    assert format_eta(90) == "1 min 30 s"
 
 
 def test_cli_json_and_usage(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

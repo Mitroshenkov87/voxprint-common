@@ -44,10 +44,10 @@ def test_expert_mode_defaults_off_and_round_trips() -> None:
     assert seen == [True]
     payload = json.loads(file().read_text(encoding="utf-8"))
     assert payload["ui.expert_mode"] is True
-    set_ui_language("ru")
+    set_ui_language("de")
     kept = json.loads(file().read_text(encoding="utf-8"))
     assert kept["ui.expert_mode"] is True
-    assert kept["ui_language"] == "ru"
+    assert kept["ui_language"] == "de"
     assert mode.set_enabled(True) is True
     assert seen == [True]
     cancel()
@@ -217,7 +217,6 @@ def test_expert_keymap_context_runs_only_while_the_mode_is_on() -> None:
 
 def test_toggle_expert_mode_titles() -> None:
     assert tr_lang("command.view.toggle_expert_mode", "en") == "Expert mode"
-    assert tr_lang("command.view.toggle_expert_mode", "ru") == "Режим эксперта"
     assert tr_lang("command.view.toggle_expert_mode", "de") == "Expertenmodus"
     assert tr_lang("command.view.toggle_expert_mode", "uk") == "Режим експерта"
     assert tr_lang("command.view.toggle_expert_mode", "lv") == "Eksperta režīms"

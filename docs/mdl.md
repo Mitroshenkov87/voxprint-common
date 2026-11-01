@@ -42,7 +42,7 @@ voxprint-mdl cleanup --apply --mode link --app canvas --manifest "C:\Program Fil
 
 `download` uses the same blob. A finished `blobs\<sha256>` of the right size is not fetched again: the `.verified` marker is enough, and the digest is read only when that marker is missing. A fetch writes that marker when the file lands, and again when a hash confirms a blob that was already there.
 
-`--gui` opens the download window. It needs `voxprint-common[ui]`. Labels come from `voxprint_common.i18n` (English, German, Russian, Ukrainian, Latvian). Without `--gui` the job is headless and suitable for a silent install. A hook failure uses exit code 2. The window's Retry runs the job again.
+`--gui` opens the download window. It needs `voxprint-common[ui]`. Labels come from `voxprint_common.i18n` (English, German, Ukrainian, Latvian). Without `--gui` the job is headless and suitable for a silent install. A hook failure uses exit code 2. The window's Retry runs the job again.
 
 Apps keep a Manage models button and drop their own download screens. The button runs:
 
@@ -269,10 +269,6 @@ Manage models and the check-and-repair window open at a logical minimum of 760 b
 
 ![Repair phase](renders/mdl-repair-en.png)
 
-![Check phase in Russian](renders/mdl-verify-ru.png)
-
-![Repair phase in Russian](renders/mdl-repair-ru.png)
-
 The window reads the queue in `voxprint_common.mdl.queue`. It does not write a second queue file.
 
 ![Download queue in English](img/mdl-window/en-queue.png)
@@ -287,8 +283,6 @@ The window reads the queue in `voxprint_common.mdl.queue`. It does not write a s
 
 ![Manage models](img/mdl-window/en-manage.png)
 
-![The same queue in Russian](img/mdl-window/ru-queue.png)
-
 ![A long German error on a 720-wide window](img/mdl-window/de-error.png)
 
 ![A long Latvian queue on a 720-wide window](img/mdl-window/lv-queue.png)
@@ -301,13 +295,13 @@ A component path that is the suite home, the models root, the shared runtime, vo
 
 ## Languages
 
-`voxprint_common.i18n` loads one JSON file per language from `ui/locales/`, beside `tokens.json`. English is the source and the fallback. The package ships `en`, `de`, `ru`, `uk`, and `lv`. The active language is the `ui_language` key when that key is present in `suite.json`, then `VOXPRINT_LANG`, then the system UI locale, then English. `add_catalogs` lets an app point at its own `locales` directory. Later folders override the same key.
+`voxprint_common.i18n` loads one JSON file per language from `ui/locales/`, beside `tokens.json`. English is the source and the fallback. The package ships `en`, `de`, `uk`, and `lv`. The active language is the `ui_language` key when that key is present in `suite.json`, then `VOXPRINT_LANG`, then the system UI locale, then English. `add_catalogs` lets an app point at its own `locales` directory. Later folders override the same key.
 
 Apps check their own UI in CI:
 
 ```yaml
 - name: UI strings
-  run: python -m voxprint_common.i18n.check --src src/<pkg> --locales src/<pkg>/locales --langs en,ru,de,uk,lv
+  run: python -m voxprint_common.i18n.check --src src/<pkg> --locales src/<pkg>/locales --langs en,de,uk,lv
 ```
 
 The checker fails on a hard-coded user-facing string in a Qt call, a key missing from a shipped locale, or a `{placeholder}` sequence that differs between languages. An unused key is a warning. `# i18n: ignore` skips one call. Splash titles use `splash.app.<id>` and keep the same brand spelling in every language.

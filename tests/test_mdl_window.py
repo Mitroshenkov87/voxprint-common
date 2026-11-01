@@ -76,7 +76,7 @@ def _manifest(
                 "version": "1",
                 "vram_tier": tier,
                 "optional": optional,
-                "name": names or {"en": "Voice", "ru": "Голос", "de": "Stimme"},
+                "name": names or {"en": "Voice", "uk": "Голос", "de": "Stimme"},
                 "files": [
                     {
                         "path": "voice.bin",
@@ -299,7 +299,7 @@ def test_status_names_the_download_ahead_of_a_check() -> None:
     def row(key: str, title: str, state: ItemState) -> QueueItem:
         return QueueItem(
             key=key,
-            names={"en": title, "de": title, "ru": title},
+            names={"en": title, "de": title, "uk": title},
             fallback=title,
             size=100,
             received=10,
@@ -320,7 +320,6 @@ def test_status_names_the_download_ahead_of_a_check() -> None:
     snap.recompute()
     assert view_for(snap, lang="en").status == "Downloading 1 of 3 — Video enhancement model"
     assert view_for(snap, lang="de").status == "Download 1 von 3 — Video enhancement model"
-    assert view_for(snap, lang="ru").status == "Загрузка 1 из 3 — Video enhancement model"
     later = Snapshot(items=[verifying, downloading], apps=[AppSlot("clarity", "")])
     later.recompute()
     assert view_for(later, lang="en").status == "Downloading 2 of 2 — Video enhancement model"
@@ -353,13 +352,12 @@ def test_display_path_uses_windows_separators() -> None:
 
 def test_sizes_and_disk_copy_follow_the_locale() -> None:
     assert format_size(480_000_000, lang="en") == "457.8 MB"
-    assert format_size(480_000_000, lang="ru") == "457,8\u202fМБ"
     assert format_size(2_400_000, lang="de") == "2,3\u202fMB"
     assert format_size(5_200_000_000, lang="uk") == "4,8\u202fГБ"
     assert format_size(5_200_000_000, lang="lv") == "4,8\u202fGB"
     item = QueueItem(
         key="c" * 64,
-        names={"en": "Upscale model", "ru": "Модель увеличения"},
+        names={"en": "Upscale model", "uk": "Модель збільшення"},
         fallback="model",
         size=800_000_000,
         received=20_000_000,
@@ -381,17 +379,17 @@ def test_sizes_and_disk_copy_follow_the_locale() -> None:
         },
     )
     snap.recompute()
-    view = view_for(snap, focus_app="enlarge", lang="ru")
-    assert "папке моделей VOXPrint" in view.error_what
+    view = view_for(snap, focus_app="enlarge", lang="uk")
+    assert "папці моделей VOXPrint" in view.error_what
     assert "/home" not in view.error_what
     assert "/home/alex/.local/share/voxprint/models" in view.technical
-    assert "около 4,8\u202fГБ" in view.error_do
-    assert "приостановлена" in view.status
-    assert view.open_folder_label == "Открыть папку"
+    assert "близько 4,8\u202fГБ" in view.error_do
+    assert "призупинено" in view.status
+    assert view.open_folder_label == "Відкрити папку"
     assert view.show_open is False
     waiting = QueueItem(
         key="d" * 64,
-        names={"ru": "Цветовая модель"},
+        names={"uk": "Колірна модель"},
         fallback="colour",
         size=15_000_000,
         received=0,
@@ -403,7 +401,7 @@ def test_sizes_and_disk_copy_follow_the_locale() -> None:
     )
     quiet = Snapshot(items=[waiting], apps=[AppSlot("clarity", "")])
     quiet.recompute()
-    row = view_for(quiet, lang="ru").groups[0].rows[0]
-    assert row.meta == format_size(15_000_000, lang="ru")
+    row = view_for(quiet, lang="uk").groups[0].rows[0]
+    assert row.meta == format_size(15_000_000, lang="uk")
     assert "—" not in row.meta
-    assert "Загрузка" not in row.meta
+    assert "Завантаження" not in row.meta

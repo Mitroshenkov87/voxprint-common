@@ -8,7 +8,7 @@ writing them out as JSON: a flat ``{"menu.open": "Open"}`` table and a nested
 
 This module is that mechanism, so an app can adopt it instead of copying its
 own ``tr``. The languages shipped here are English (the source and the
-fallback), German, Russian, Ukrainian, and Latvian. The files are JSON in
+fallback), German, Ukrainian, and Latvian. The files are JSON in
 ``ui/locales``, beside ``tokens.json``, so a C++ reader uses the same copy.
 
 An app adds its own folder once, at startup. Files in that folder override
@@ -22,14 +22,13 @@ from voxprint_common.i18n import add_catalogs
 add_catalogs(Path(__file__).resolve().parent / "locales")
 ```
 
-The folder holds ``en.json``, ``ru.json``, ``de.json``, ``uk.json``, and
-``lv.json``. A missing line falls back to English, then to the key. ``tr``
+The folder holds ``en.json``, ``de.json``, ``uk.json``, and ``lv.json``. A missing line falls back to English, then to the key. ``tr``
 never raises.
 
 Plural forms are a nested object or dotted keys (``items.one``,
 ``items.few``, ``items.many``, ``items.other``, and ``items.zero`` for
 Latvian). ``tr("items", count=3)`` selects the form for the active language.
-Russian and Ukrainian use one, few, and many. Latvian uses zero, one, and
+Ukrainian uses one, few, and many. Latvian uses zero, one, and
 other. English and German use one and other. A missing form uses ``other``.
 
 The language is chosen in this order:
@@ -76,12 +75,11 @@ __all__ = [
 
 log = logging.getLogger(__name__)
 
-LANGS = ("en", "de", "ru", "uk", "lv")
+LANGS = ("en", "de", "uk", "lv")
 DEFAULT_LANG = "en"
 LANG_NAMES = {
     "en": "English",
     "de": "Deutsch",
-    "ru": "Русский",
     "uk": "Українська",
     "lv": "Latviešu",
 }
@@ -143,7 +141,7 @@ def load_catalog(lang: str) -> dict[str, str]:
     :func:`add_catalogs` or :func:`reset`.
 
     Args:
-        lang: A language code such as ``en`` or ``ru``.
+        lang: A language code such as ``en`` or ``de``.
     """
     code = normalize_code(lang) or DEFAULT_LANG
     token = (code, tuple(str(path) for path in _search_dirs()))
@@ -160,7 +158,7 @@ def load_catalog(lang: str) -> dict[str, str]:
 def normalize_code(value: object) -> str | None:
     """Return a supported language code, or None.
 
-    ``ru-RU``, ``de_AT.UTF-8``, and ``UK`` become ``ru``, ``de``, and ``uk``.
+    ``de_AT.UTF-8`` and ``UK`` become ``de`` and ``uk``.
     A language this process does not have a catalog for, including the raw
     tag ``C``, is None.
 
@@ -257,7 +255,7 @@ def reset() -> None:
 def plural_category(count: int, lang: str | None = None) -> str:
     """Return the CLDR plural category for an integer count.
 
-    Russian and Ukrainian: ``one`` (1, 21, 31…), ``few`` (2–4, 22–24…),
+    Ukrainian: ``one`` (1, 21, 31…), ``few`` (2–4, 22–24…),
     ``many`` (0, 5–20, 11–14…). Latvian: ``zero`` (0, 10, 11–19, 20…),
     ``one`` (1, 21…), otherwise ``other``. English and German: ``one`` when
     the count is 1, otherwise ``other``.
@@ -268,7 +266,7 @@ def plural_category(count: int, lang: str | None = None) -> str:
     """
     number = abs(int(count))
     code = normalize_code(lang) or (get_language() if lang is None else DEFAULT_LANG)
-    if code in {"ru", "uk"}:
+    if code == "uk":
         mod10 = number % 10
         mod100 = number % 100
         if mod10 == 1 and mod100 != 11:

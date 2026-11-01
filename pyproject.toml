@@ -71,7 +71,6 @@ packages = ["src/voxprint_common"]
 "src/voxprint_common/mdl/data/examples/pyannote-speaker-diarization-community-1.json" = "voxprint_common/mdl/data/examples/pyannote-speaker-diarization-community-1.json"
 "src/voxprint_common/ui/locales/en.json" = "voxprint_common/ui/locales/en.json"
 "src/voxprint_common/ui/locales/de.json" = "voxprint_common/ui/locales/de.json"
-"src/voxprint_common/ui/locales/ru.json" = "voxprint_common/ui/locales/ru.json"
 "src/voxprint_common/ui/locales/uk.json" = "voxprint_common/ui/locales/uk.json"
 "src/voxprint_common/ui/locales/lv.json" = "voxprint_common/ui/locales/lv.json"
 

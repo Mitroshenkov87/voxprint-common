@@ -1,4 +1,4 @@
-"""Paint the check gate at 100% and 150%, in English and Russian.
+"""Paint the check gate at 100% and 150%, in English.
 
 Run with ``QT_QPA_PLATFORM=offscreen``. The rows are scripted. The job does
 not run. A child process paints the same board at 150% (``QT_SCALE_FACTOR``).
@@ -89,8 +89,7 @@ def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     scaled = os.environ.get("CHECK_GATE_SCALE") == "150"
     suffix = "-150" if scaled else ""
-    for lang in ("en", "ru"):
-        _paint(lang, suffix)
+    _paint("en", suffix)
     if not scaled:
         env = os.environ.copy()
         env["CHECK_GATE_SCALE"] = "150"

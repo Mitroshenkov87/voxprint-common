@@ -10,6 +10,8 @@ Plain-text `voxprint-mdl verify` prints one summary line, for example `11 models
 
 The shared UI page states the check rule and the hardware baseline: stay responsive on 16 GB VRAM and 64 GB RAM, use `ModelPark.vram_limit()`, load one stage at a time, keep that work off the UI thread, and prove an optimization on the laptop before a full build.
 
+UI is English-only: removed the Russian display locale, RU docs and RU renders; Russian remains a content language.
+
 ## 0.5.2 - 2026-10-26
 
 `adopt` reports a source file whose hash matches a blob and whose inode does not. The text report and `--json` include each `duplicate` row (`path`, `bytes`, `blob`) and `reclaimable_bytes`. The adopted, reused, skipped, and would-adopt counts stay as they were. A dry run still does not hash. A source that is already the blob inode is not read again.

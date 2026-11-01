@@ -37,12 +37,6 @@ _NAMES = {
         "Face restoration",
         "Frame stabilizer",
     ),
-    "ru": (
-        "Студийный голос",
-        "Модель улучшения видео",
-        "Восстановление лиц",
-        "Стабилизация кадров",
-    ),
 }
 
 
@@ -101,10 +95,10 @@ def _rows(lang: str, phase: str) -> list[tuple[str, int, int, str]]:
 
 
 def main() -> None:
-    """Write the English and Russian check and repair renders."""
+    """Write the English check and repair renders."""
     OUT.mkdir(parents=True, exist_ok=True)
     counters = {"verify": (1, 4), "review": (4, 4), "repair": (1, 2)}
-    for lang in ("en", "ru"):
+    for lang in ("en",):
         for phase, stem in (
             ("verify", "mdl-verify"),
             ("review", "mdl-review"),

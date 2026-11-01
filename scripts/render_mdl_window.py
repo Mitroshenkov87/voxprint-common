@@ -56,7 +56,7 @@ def _item(
 ) -> QueueItem:
     return QueueItem(
         key=key,
-        names=names or {"en": title, "ru": title, "de": title, "uk": title, "lv": title},
+        names=names or {"en": title, "de": title, "uk": title, "lv": title},
         fallback=title,
         size=size,
         received=received,
@@ -69,41 +69,36 @@ def _item(
 
 
 def _named(table: dict[str, str]) -> dict[str, str]:
-    return {code: table[code] for code in ("en", "ru", "de", "uk", "lv")}
+    return {code: table[code] for code in ("en", "de", "uk", "lv")}
 
 
 _CLARITY = [
     {
         "en": "Video enhancement model",
-        "ru": "Модель улучшения видео",
         "de": "Videoverbesserungsmodell",
         "uk": "Модель покращення відео",
         "lv": "Video uzlabošanas modelis",
     },
     {
         "en": "Runtime ONNX + TensorRT",
-        "ru": "Runtime ONNX + TensorRT",
         "de": "Runtime ONNX + TensorRT",
         "uk": "Runtime ONNX + TensorRT",
         "lv": "Runtime ONNX + TensorRT",
     },
     {
         "en": "Face restoration",
-        "ru": "Восстановление лиц",
         "de": "Gesichtsrekonstruktion",
         "uk": "Відновлення облич",
         "lv": "Seju atjaunošana",
     },
     {
         "en": "Frame stabilizer",
-        "ru": "Стабилизация кадров",
         "de": "Bildstabilisierung",
         "uk": "Стабілізація кадрів",
         "lv": "Kadru stabilizācija",
     },
     {
         "en": "Colour model",
-        "ru": "Цветовая модель",
         "de": "Farbmodell",
         "uk": "Колірна модель",
         "lv": "Krāsu modelis",
@@ -112,7 +107,6 @@ _CLARITY = [
 
 _ENLARGE = {
     "en": "Upscale model",
-    "ru": "Модель увеличения",
     "de": "Vergrößerungsmodell",
     "uk": "Модель збільшення",
     "lv": "Palielināšanas modelis",
@@ -120,7 +114,6 @@ _ENLARGE = {
 
 _LEVI = {
     "en": "Levi narrator voice",
-    "ru": "Голос диктора Levi",
     "de": "Erzählerstimme Levi",
     "uk": "Голос диктора Levi",
     "lv": "Diktora balss Levi",
@@ -128,7 +121,6 @@ _LEVI = {
 
 _QWEN = {
     "en": "Qwen3-TTS speech model",
-    "ru": "Модель речи Qwen3-TTS",
     "de": "Sprachmodell Qwen3-TTS",
     "uk": "Модель мовлення Qwen3-TTS",
     "lv": "Runas modelis Qwen3-TTS",
@@ -157,7 +149,7 @@ def _queue(lang: str) -> Snapshot:
                 apps=["clarity"],
                 speed=speed,
                 eta=eta,
-                names={code: names[index] for code in ("en", "ru", "de", "uk", "lv")},
+                names={code: names[index] for code in ("en", "de", "uk", "lv")},
             )
         )
     snap = Snapshot(items=items, apps=[AppSlot("clarity", "")])
@@ -175,7 +167,7 @@ def _paused(lang: str) -> Snapshot:
         size=800_000_000,
         received=260_000_000,
         apps=["enlarge"],
-        names={code: title for code in ("en", "ru", "de", "uk", "lv")},
+        names={code: title for code in ("en", "de", "uk", "lv")},
     )
     snap = Snapshot(items=[item], apps=[AppSlot("enlarge", "")], paused=True)
     snap.recompute()
@@ -192,7 +184,7 @@ def _ready(lang: str) -> Snapshot:
         size=800_000_000,
         received=800_000_000,
         apps=["enlarge"],
-        names={code: title for code in ("en", "ru", "de", "uk", "lv")},
+        names={code: title for code in ("en", "de", "uk", "lv")},
     )
     snap = Snapshot(items=[item], apps=[AppSlot("enlarge", "")])
     snap.recompute()
@@ -209,7 +201,7 @@ def _error(lang: str) -> Snapshot:
         size=800_000_000,
         received=20_000_000,
         apps=["enlarge"],
-        names={code: title for code in ("en", "ru", "de", "uk", "lv")},
+        names={code: title for code in ("en", "de", "uk", "lv")},
     )
     item.error_code = "disk"
     snap = Snapshot(
@@ -357,21 +349,16 @@ def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     wide = (980, 720)
     narrow = (720, 640)
-    for lang in ("en", "ru", "uk", "lv"):
-        _paint(f"{lang}-queue", lang, _queue(lang), size=wide if lang in {"en", "ru"} else narrow)
+    for lang in ("en", "uk", "lv"):
+        _paint(f"{lang}-queue", lang, _queue(lang), size=wide if lang == "en" else narrow)
     _paint("en-paused", "en", _paused("en"), size=wide)
-    _paint("ru-paused", "ru", _paused("ru"), size=wide)
     _paint("en-all-set", "en", _ready("en"), size=wide)
-    _paint("ru-all-set", "ru", _ready("ru"), size=wide)
     _paint("en-error", "en", _error("en"), size=wide)
-    _paint("ru-error", "ru", _error("ru"), size=wide)
     _paint("de-error", "de", _error("de"), size=narrow)
     _paint("en-multi", "en", _multi(), size=wide)
-    _paint("ru-multi", "ru", _multi(), size=wide)
     _paint("de-multi", "de", _multi(), size=narrow)
     empty = Snapshot(apps=[AppSlot("clarity", "")])
     _paint("en-manage", "en", empty, mode="manage", size=wide)
-    _paint("ru-manage", "ru", empty, mode="manage", size=wide)
     _paint("de-manage", "de", empty, mode="manage", size=narrow)
     _paint(
         "en-background",

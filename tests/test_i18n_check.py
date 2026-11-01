@@ -98,10 +98,10 @@ def test_missing_key_and_placeholder_mismatch(tmp_path: Path) -> None:
         code: {"menu.greet": "Hello {name}"} for code in LANGS
     }
     payloads["de"] = {"menu.greet": "Hallo {person}"}
-    del payloads["ru"]["menu.greet"]
+    del payloads["uk"]["menu.greet"]
     result = check_tree(source, _catalogs(tmp_path / "locales", payloads), LANGS)
     text = "\n".join(result.errors)
-    assert "missing from ru" in text
+    assert "missing from uk" in text
     assert "placeholder mismatch" in text
     assert "menu.greet" in text
 
@@ -112,15 +112,7 @@ def test_plural_forms_and_placeholder_order(tmp_path: Path) -> None:
     payloads: dict[str, dict[str, object]] = {
         "en": {"items": {"one": "{count} item", "other": "{count} items"}},
         "de": {"items": {"one": "{count} Stück", "other": "{count} Stücke"}},
-        "ru": {"items": {"one": "{count} x", "other": "{count} x"}},
-        "uk": {
-            "items": {
-                "one": "{count} x",
-                "few": "{count} x",
-                "many": "{count} x",
-                "other": "{count} x",
-            }
-        },
+        "uk": {"items": {"one": "{count} x", "other": "{count} x"}},
         "lv": {
             "items": {
                 "zero": "{count} x",
@@ -130,8 +122,8 @@ def test_plural_forms_and_placeholder_order(tmp_path: Path) -> None:
         },
     }
     result = check_tree(source, _catalogs(tmp_path / "locales", payloads), LANGS)
-    assert any("items.few" in error and "missing from ru" in error for error in result.errors)
-    payloads["ru"] = {
+    assert any("items.few" in error and "missing from uk" in error for error in result.errors)
+    payloads["uk"] = {
         "items": {
             "one": "{count} x",
             "few": "{name} x",
@@ -153,7 +145,7 @@ def test_unused_key_warns_and_cli_exits_zero(tmp_path: Path, capsys: object) -> 
     result = check_tree(source, locales, LANGS)
     assert result.errors == ()
     assert result.warnings == ("unused key 'menu.old'",)
-    code = main(["--src", str(source), "--locales", str(locales), "--langs", "en,ru,de,uk,lv"])
+    code = main(["--src", str(source), "--locales", str(locales), "--langs", "en,de,uk,lv"])
     assert code == 0
     captured = capsys.readouterr()
     assert "unused key" in captured.err
@@ -213,7 +205,7 @@ def test_preset_json_keys_count_as_used(tmp_path: Path) -> None:
 
 
 def test_package_window_and_splash_pass() -> None:
-    result = check_tree(_ROOT, _LOCALES, ("en", "ru", "de", "uk", "lv"))
+    result = check_tree(_ROOT, _LOCALES, ("en", "de", "uk", "lv"))
     assert result.errors == ()
     assert result.warnings == ()
 

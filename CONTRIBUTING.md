@@ -18,7 +18,7 @@ python -m ruff check src tests
 python -m ruff format --check src tests
 python -m interrogate -c pyproject.toml src/voxprint_common
 python -m pytest
-python -m voxprint_common.i18n.check --src src/voxprint_common --locales src/voxprint_common/ui/locales --langs en,ru,de,uk,lv
+python -m voxprint_common.i18n.check --src src/voxprint_common --locales src/voxprint_common/ui/locales --langs en,de,uk,lv
 python -m mkdocs build --strict
 python -m build
 ```
@@ -35,7 +35,7 @@ Windows 11 and Linux are both supported. Prefer the standard library. Optional P
 
 ## Docs
 
-User-facing text goes through `voxprint_common.i18n`. English is the source catalog. German, Russian, Ukrainian, and Latvian ship beside it. The checker above fails when a Qt call hard-codes a sentence. The MkDocs site is built from `docs/` with mkdocstrings. Update `MIGRATION.md` when a replacement for per-app code changes.
+User-facing text goes through `voxprint_common.i18n`. English is the source catalog. German, Ukrainian, and Latvian ship beside it. The checker above fails when a Qt call hard-codes a sentence. The MkDocs site is built from `docs/` with mkdocstrings. Update `MIGRATION.md` when a replacement for per-app code changes.
 
 ## Licence
 

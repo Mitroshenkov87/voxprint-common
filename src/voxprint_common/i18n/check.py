@@ -2,7 +2,7 @@
 
 The CI command is::
 
-    python -m voxprint_common.i18n.check --src src/<pkg> --locales <dir> --langs en,ru,de,uk,lv
+    python -m voxprint_common.i18n.check --src src/<pkg> --locales <dir> --langs en,de,uk,lv
 
 It fails when a Qt or PySide6 call carries a hard-coded user-facing string,
 when a key is missing from any requested locale, or when ``{placeholder}``
@@ -15,7 +15,7 @@ allowed as a whole argument. An empty string, or a string with no letters,
 is not treated as copy.
 
 The first language in ``--langs`` is the source catalog. Plural objects use
-one and other in English and German, one, few, many, and other in Russian and
+one and other in English and German, one, few, many, and other in
 Ukrainian, and zero, one, and other in Latvian. Any other language is checked
 like English. A dynamic key such as ``f"mdl.source.{code}"`` counts as a use
 of every key under that prefix. A JSON file in the source tree counts
@@ -40,7 +40,6 @@ _PLURAL = frozenset({"zero", "one", "two", "few", "many", "other"})
 _REQUIRED = {
     "en": ("one", "other"),
     "de": ("one", "other"),
-    "ru": ("one", "few", "many", "other"),
     "uk": ("one", "few", "many", "other"),
     "lv": ("zero", "one", "other"),
 }

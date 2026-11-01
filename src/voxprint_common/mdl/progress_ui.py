@@ -3,7 +3,7 @@
 The window uses the suite stylesheet from :mod:`voxprint_common.ui.theme`.
 PySide6 is imported inside :func:`run_window` so this module can be imported
 on a headless installer without Qt. Download labels that predate the catalogs
-stay Russian. The check-and-repair window reads :mod:`voxprint_common.i18n`.
+are English. The check-and-repair window reads :mod:`voxprint_common.i18n`.
 """
 
 from __future__ import annotations
@@ -52,14 +52,14 @@ _ROW_HEIGHT = 36
 _ROW_BAR_HEIGHT = 17
 _CELL_PAD_LEFT = 8
 
-RETRY_TEXT = "Повторить"
-CANCEL_TEXT = "Отмена"
-CANCELLED_TEXT = "Отменено"
-READY_TEXT = "Готово"
-ERROR_PREFIX = "Ошибка"
-HEADING = "Загрузка моделей"
-OVERALL = "Общий прогресс"
-COLUMNS = ("Модель", "Размер", "Источник", "Скорость", "Осталось")
+RETRY_TEXT = "Retry"
+CANCEL_TEXT = "Cancel"
+CANCELLED_TEXT = "Cancelled"
+READY_TEXT = "Ready"
+ERROR_PREFIX = "Error"
+HEADING = "Downloading models"
+OVERALL = "Overall progress"
+COLUMNS = ("Model", "Size", "Source", "Speed", "Left")
 
 Starter = Callable[[threading.Event, Callable[[Status], None]], Outcome]
 _VERIFY_JOBS = 0
@@ -102,19 +102,19 @@ def window_title() -> str:
 
 
 def format_size(amount: int) -> str:
-    """Return a short Russian size, for example ``1.5 МБ``.
+    """Return a short size, for example ``1.5 MB``.
 
     Args:
         amount: Size in bytes.
     """
     value = float(max(0, amount))
-    for unit in ("Б", "КБ", "МБ", "ГБ"):
-        if value < 1024 or unit == "ГБ":
-            if unit == "Б":
+    for unit in ("B", "KB", "MB", "GB"):
+        if value < 1024 or unit == "GB":
+            if unit == "B":
                 return f"{int(value)} {unit}"
             return f"{value:.1f} {unit}"
         value /= 1024
-    return f"{value:.1f} ГБ"
+    return f"{value:.1f} GB"
 
 
 def format_speed(bps: float) -> str:
@@ -125,11 +125,11 @@ def format_speed(bps: float) -> str:
     """
     if bps <= 0 or math.isnan(bps):
         return "—"
-    return f"{format_size(int(bps))}/с"
+    return f"{format_size(int(bps))}/s"
 
 
 def format_eta(seconds: float | None) -> str:
-    """Return a Russian ETA, or an em dash when it is unknown.
+    """Return an ETA, or an em dash when it is unknown.
 
     Args:
         seconds: Remaining seconds.
@@ -140,10 +140,10 @@ def format_eta(seconds: float | None) -> str:
     hours, rem = divmod(total, 3600)
     minutes, secs = divmod(rem, 60)
     if hours:
-        return f"{hours} ч {minutes} мин"
+        return f"{hours} h {minutes} min"
     if minutes:
-        return f"{minutes} мин {secs} с"
-    return f"{secs} с"
+        return f"{minutes} min {secs} s"
+    return f"{secs} s"
 
 
 def run_window(start: Starter, *, mode: str = "download") -> int:
@@ -160,7 +160,7 @@ def run_window(start: Starter, *, mode: str = "download") -> int:
     Returns:
         The process exit code. A download success closes the window. A verify
         run stays open on the summary until Close. Failure of a download leaves
-        the window open until Повторить or the window is closed.
+        the window open until Retry or the window is closed.
     """
     detach_console()
     chosen = WindowMode(mode)
@@ -357,7 +357,7 @@ def _run_download_window(start: Starter) -> int:
 
     Returns:
         The process exit code. Success closes the window. Failure leaves it
-        open until Повторить or the window is closed.
+        open until Retry or the window is closed.
     """
     # Qt stays out of the module import so headless tests can format the labels.
     from PySide6.QtCore import QTimer

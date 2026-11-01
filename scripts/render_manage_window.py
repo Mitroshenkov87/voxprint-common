@@ -1,4 +1,4 @@
-"""Paint the manage-models window at 1280 px, in English and Russian.
+"""Paint the manage-models window at 1280 px, in English.
 
 Run with ``QT_QPA_PLATFORM=offscreen``. The rows are scripted. Nothing is
 hashed. A child process paints the same window at 150% (``QT_SCALE_FACTOR``).
@@ -44,19 +44,18 @@ OUT = ROOT / "docs" / "renders"
 ART = Path("/opt/cursor/artifacts/renders")
 
 _INSTALLED = (
-    ("Flux Schnell", "Flux Schnell"),
-    ("SDXL Base", "SDXL Base"),
-    ("Real-ESRGAN", "Real-ESRGAN"),
-    ("Whisper Large", "Whisper Large"),
-    ("Z-Image-Turbo", "Z-Image-Turbo"),
+    "Flux Schnell",
+    "SDXL Base",
+    "Real-ESRGAN",
+    "Whisper Large",
+    "Z-Image-Turbo",
 )
-_AVAILABLE = (("Extra detail", "Дополнительная детализация"),)
+_AVAILABLE = "Extra detail"
 
 
 def _page(lang: str) -> ManageView:
     installed = []
-    for names in _INSTALLED:
-        title = names[0] if lang == "en" else names[1]
+    for title in _INSTALLED:
         installed.append(
             ManageRow(
                 key=title,
@@ -73,10 +72,9 @@ def _page(lang: str) -> ManageView:
                 action_label=tr_lang("mdl.manage.remove", lang),
             )
         )
-    missing_name = _AVAILABLE[0][0] if lang == "en" else _AVAILABLE[0][1]
     available = ManageRow(
         key="extra",
-        title=missing_name,
+        title=_AVAILABLE,
         meta=format_size(640_000_000, lang=lang),
         state="pending",
         state_label=tr_lang("mdl.manage.status.missing", lang),
@@ -120,8 +118,7 @@ def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     scaled = os.environ.get("MDL_RENDER_SCALE") == "150"
     suffix = "-150" if scaled else ""
-    for lang in ("en", "ru"):
-        _paint(lang, suffix)
+    _paint("en", suffix)
     if not scaled:
         env = os.environ.copy()
         env["MDL_RENDER_SCALE"] = "150"

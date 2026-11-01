@@ -618,7 +618,7 @@ def _health_counts(status: Status) -> dict[str, int]:
 def verify_summary(counts: Mapping[str, int], lang: str | None = None) -> str:
     """Return the check-and-repair summary in ``lang``.
 
-    Each count selects a plural form, so Russian, Ukrainian, and Latvian
+    Each count selects a plural form, so Ukrainian and Latvian
     change the word with the number.
 
     Args:

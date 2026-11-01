@@ -171,7 +171,7 @@ def grab_shell(
 
     Args:
         path: Destination PNG. Parent directories are created.
-        language: Catalog language, for example ``en`` or ``ru``.
+        language: Catalog language, for example ``en`` or ``de``.
         show_palette: Open the command palette before the grab.
         glass: Use the translucent window background. Offscreen grabs use
             the plain background unless this is true.
