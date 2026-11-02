@@ -203,6 +203,7 @@ class _Child:
     def _run_job(self, command: Submit) -> None:
         self._current = command.job_id
         self._cancelled.discard(command.job_id)
+        self._emit(Beat(command.job_id))
         try:
             if not self._ensure_model(command):
                 return

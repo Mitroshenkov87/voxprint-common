@@ -71,6 +71,7 @@ class _Slot:
     last_beat: float
     cancel_at: float | None = None
     hang: bool = False
+    started: bool = False
 
 
 class WorkerHost:
@@ -516,6 +517,7 @@ class WorkerHost:
         if slot is None or slot.job_id != job_id:
             return
         slot.last_beat = self._clock()
+        slot.started = True
         if slot.hang:
             slot.hang = False
             slot.cancel_at = None
@@ -580,7 +582,9 @@ class WorkerHost:
             return
         now = self._clock()
         timeout = slot.spec.heartbeat_timeout or self._heartbeat_timeout
-        if slot.cancel_at is None and now - slot.last_beat > timeout:
+        # The hang clock starts at the first beat from the child. Spawning a
+        # worker and importing handlers can take longer than the timeout.
+        if slot.cancel_at is None and slot.started and now - slot.last_beat > timeout:
             self._send_cancel(slot.job_id)
             slot.cancel_at = now + self._cancel_timeout
             slot.hang = True
