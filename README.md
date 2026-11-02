@@ -5,7 +5,7 @@ Shared library used by all VOXPrint AI apps.
 > [!WARNING]
 > **Deep alpha.** This software is experimental, and nothing is guaranteed to work. Use at your own risk.
 
-- **Latest pre-release:** [v0.5.2](https://github.com/Mitroshenkov87/voxprint-common/releases/tag/v0.5.2)
+- **Latest pre-release:** [v0.6.0](https://github.com/Mitroshenkov87/voxprint-common/releases/tag/v0.6.0)
 - **Full documentation:** [docs/README-full.md](docs/README-full.md) and the [docs/](docs/) folder
 
 License: [Apache-2.0](LICENSE)
