@@ -345,3 +345,19 @@ def test_importing_the_worker_does_not_load_qt() -> None:
     )
     completed = subprocess.run([sys.executable, "-c", code], check=False)
     assert completed.returncode == 0
+
+
+def test_submit_after_a_crash_settles_the_lost_job(make_host: Callable[..., WorkerHost]) -> None:
+    host = make_host(backoff_initial=0)
+    lost = host.submit(JobSpec(JobKind.INFERENCE, {"op": "block", "seconds": 30}))
+    deadline = time.monotonic() + 15
+    while host.pid is None and time.monotonic() < deadline:
+        time.sleep(0.01)
+    pid = host.pid
+    host.kill_worker()
+    while host.pid == pid and time.monotonic() < deadline:
+        time.sleep(0.01)
+    follow = host.submit(JobSpec(JobKind.INFERENCE, {"op": "echo", "value": "up"}))
+    assert host.outcome(lost) is not None
+    assert host.outcome(lost).state is JobState.FAILED  # type: ignore[union-attr]
+    assert host.wait(follow, timeout=10).value["value"] == "up"  # type: ignore[index]

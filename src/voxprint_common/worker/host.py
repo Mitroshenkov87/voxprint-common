@@ -161,6 +161,11 @@ class WorkerHost:
             raise RuntimeError("Worker is shut down")
         if self._alive():
             return
+        if self._process is not None:
+            # The child died since the last poll. Read what it sent and run
+            # crash handling before the new process takes over the queue.
+            self._read(self._buffer)
+            self._check_process(self._buffer)
         self._restart_at = None
         self._expect_exit = False
         self._spawn()
