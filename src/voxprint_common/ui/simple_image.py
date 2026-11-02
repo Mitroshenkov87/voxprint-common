@@ -3633,9 +3633,42 @@ def _fit_chip(button: object) -> None:
 
     The width is that font's advance plus ``chip_pad_px`` and ``border_px`` on
     each side. Those are the same density tokens the stylesheet uses for
-    ``QPushButton#expertToggle`` and ``QPushButton[chip="true"]``.
+    ``QPushButton#expertToggle`` and ``QPushButton[chip="true"]``. A chip is
+    often sized before it joins the styled window, and an exclusive group
+    unchecks the previous chip on its own, so the chip is sized again when
+    its font, style, or checked state changes.
     """
-    button.setMinimumWidth(_chip_width(button))  # type: ignore[attr-defined]
+    _refit_chip(button)
+    if button.property("chipRefit") is None:  # type: ignore[attr-defined]
+        button.setProperty("chipRefit", True)  # type: ignore[attr-defined]
+        button.installEventFilter(_chip_refitter())  # type: ignore[attr-defined]
+        button.toggled.connect(lambda _checked=False: _refit_chip(button))  # type: ignore[attr-defined]
+
+
+def _refit_chip(button: object) -> None:
+    width = _chip_width(button)
+    if int(button.minimumWidth()) != width:  # type: ignore[attr-defined]
+        button.setMinimumWidth(width)  # type: ignore[attr-defined]
+
+
+_REFITTER: list[object] = []
+
+
+def _chip_refitter() -> object:
+    """Return the shared filter that sizes a chip again after a font change."""
+    if _REFITTER:
+        return _REFITTER[0]
+    core, _gui, _widgets = _qt()
+    watched = {core.QEvent.Type.FontChange, core.QEvent.Type.StyleChange}  # type: ignore[attr-defined]
+
+    class _Refit(core.QObject):  # type: ignore[name-defined, misc]
+        def eventFilter(self, obj: object, event: object) -> bool:
+            if event.type() in watched:  # type: ignore[attr-defined]
+                _refit_chip(obj)
+            return False
+
+    _REFITTER.append(_Refit(core.QCoreApplication.instance()))  # type: ignore[attr-defined]
+    return _REFITTER[0]
 
 
 def _chip_width(button: object) -> int:

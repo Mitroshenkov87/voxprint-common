@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+`voxprint_common.worker` runs model jobs in a spawned child process. The UI polls a pipe from a timer. A crash restarts the worker with backoff. Training can resume from a checkpoint. Inference fails fast. `voxprint_common.testing.gui_smoke` walks a window's buttons and menu actions under `QT_QPA_PLATFORM=offscreen`.
+
 ## 0.5.2 - 2026-10-26
 
 `adopt` reports a source file whose hash matches a blob and whose inode does not. The text report and `--json` include each `duplicate` row (`path`, `bytes`, `blob`) and `reclaimable_bytes`. The adopted, reused, skipped, and would-adopt counts stay as they were. A dry run still does not hash. A source that is already the blob inode is not read again.

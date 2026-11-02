@@ -33,6 +33,7 @@ dev = [
     "mkdocs-material>=9.5",
     "mkdocstrings[python]>=0.27",
     "pytest>=8.3",
+    "pytest-qt>=4.5",
     "ruff>=0.8",
 ]
 
@@ -78,6 +79,9 @@ packages = ["src/voxprint_common"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+# pytest-qt imports Qt at startup. The suite checks that a normal import does
+# not load PySide6, so the plugin stays off unless a smoke run enables it.
+addopts = "-p no:pytest-qt"
 markers = [
     "windows: Windows-only behaviour",
     "posix: POSIX-only behaviour",
