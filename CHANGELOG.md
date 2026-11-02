@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 - 2026-11-02
 
 `voxprint_common.worker` runs model jobs in a spawned child process. The UI polls a pipe from a timer. A crash restarts the worker with backoff. Training can resume from a checkpoint. Inference fails fast. `voxprint_common.testing.gui_smoke` walks a window's buttons and menu actions under `QT_QPA_PLATFORM=offscreen`.
 
