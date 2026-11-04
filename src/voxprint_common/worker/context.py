@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from voxprint_common.atomic import write_json
 from voxprint_common.worker.messages import JobKind
-from voxprint_common.worker.wire import Beat, Noted, Progress
+from voxprint_common.worker.wire import Beat, DidFinish, Noted, Progress
 
-__all__ = ["JobCancelled", "JobContext"]
+__all__ = ["EXIT_GPU_UNRECOVERABLE", "JobCancelled", "JobContext"]
+
+EXIT_GPU_UNRECOVERABLE = 75
 
 
 class JobCancelled(Exception):
@@ -41,6 +44,8 @@ class JobContext:
     :meth:`note_checkpoint` after the checkpoint file is on disk. Call
     :meth:`beat` during a long step that still runs Python. The child also
     sends heartbeats on its own while the interpreter can schedule a thread.
+    Call :meth:`reply_and_exit` when the job already has its result but the
+    GPU must be handed back at once.
     """
 
     def __init__(
@@ -56,6 +61,7 @@ class JobContext:
         state_dir: Path,
         emit: Callable[[object], None],
         poll_cancel: Callable[[], set[str]],
+        flush: Callable[[], None] | None = None,
     ) -> None:
         """Record the job the child is running.
 
@@ -70,6 +76,8 @@ class JobContext:
             state_dir: Directory for the checkpoint note.
             emit: Sends one wire message to the host.
             poll_cancel: Returns the set of job ids the host has cancelled.
+            flush: Pushes buffered pipe bytes out. Used by
+                :meth:`reply_and_exit` before the process leaves.
         """
         self.job_id = job_id
         self.kind = kind
@@ -81,6 +89,7 @@ class JobContext:
         self._state_dir = state_dir
         self._emit = emit
         self._poll_cancel = poll_cancel
+        self._flush = flush
         self._checkpoint_out: str | None = None
         self._saw_cancel = False
 
@@ -154,6 +163,30 @@ class JobContext:
         destination = self._state_dir / f"{self.job_id}.checkpoint.json"
         write_json(destination, {"checkpoint": self._checkpoint_out})
         self._emit(Noted(self.job_id, self._checkpoint_out))
+
+    def reply_and_exit(self, result: object, code: int = EXIT_GPU_UNRECOVERABLE) -> None:
+        """Send the final reply, then leave the process without any cleanup.
+
+        The reply is the ``DidFinish`` message a normal return sends, with
+        ``exiting`` set so the host dispatches nothing further to this
+        process. The host delivers ``result`` as a finished job. Use this
+        when the GPU is in a state the process cannot recover from, but the
+        job itself already produced its result: the host restarts the worker
+        without counting a crash or backing off. The process then exits with
+        ``code`` immediately. ``unload_model`` does not run, which is the
+        point: the operating system reclaims the CUDA context when the
+        process ends.
+
+        Args:
+            result: Picklable value the host records as the job result.
+            code: Process exit code. The default
+                :data:`EXIT_GPU_UNRECOVERABLE` is what the host expects after
+                a clean final reply. Any other code is read the same way.
+        """
+        self._emit(DidFinish(self.job_id, result, self._checkpoint_out, exiting=True))
+        if self._flush is not None:
+            self._flush()
+        os._exit(code)
 
     @property
     def checkpoint_out(self) -> str | None:

@@ -54,6 +54,8 @@ Restart policy is per job:
 
 `JobSpec.restart` overrides the default. `max_resumes` is how many times a resume policy may start the job again (default 1). When the limit is used up, the job fails and the message says resume stopped. A crash with no checkpoint yet resumes from the start for a training job. The message says so.
 
+A handler can also finish the job and leave the process at once. `ctx.reply_and_exit(result)` sends the same final reply a normal return sends, then exits the child with code 75 (`EXIT_GPU_UNRECOVERABLE`). Use it when the job already has its result but the GPU is in a state the process must not keep serving, such as after a CUDA error: the exit hands the VRAM back immediately. When the host has the clean final reply for the job, that exit is a planned restart. The job is delivered as finished, the worker starts again without a crash event and without backoff, and the GUI shows no crash InfoBar. Exit 75 without that reply is still a crash, with the usual fail-or-resume rules.
+
 `resume(job_id)` queues a cancelled or failed job again from the checkpoint it noted. Training crashes do not need this call. Cancel does not start the job again by itself. The checkpoint path is on the outcome.
 
 The child keeps one model loaded. A job names it with `model`. The next job with the same id reuses `load_model`'s return value. A different id unloads the previous model first. An empty queue unloads it too. `phase` is only a label on events, so a batch of caption jobs can share a model until the queue drains. Two heavy models at once are not supported. Load them as one object if a step needs both.
@@ -99,7 +101,7 @@ def run(ctx) -> object:
     return result
 ```
 
-`ctx.model_object` is the loaded model, or None. `ctx.checkpoint` is the resume path, or None on the first attempt. `ctx.kind` is the job kind. Return a picklable value.
+`ctx.model_object` is the loaded model, or None. `ctx.checkpoint` is the resume path, or None on the first attempt. `ctx.kind` is the job kind. Return a picklable value. `ctx.reply_and_exit(result)` sends the final reply and exits the process, for a GPU the job can no longer use. The host restarts the worker without a crash.
 
 ## Why this IPC
 

@@ -153,6 +153,14 @@ class _Child:
             except OSError, EOFError, BrokenPipeError:
                 self._stop.set()
 
+    def _flush_events(self) -> None:
+        # ``Connection.send`` already wrote the bytes, so this only covers a
+        # connection object that buffers of its own. It runs before a handler
+        # calls ``os._exit`` from ``JobContext.reply_and_exit``.
+        flush = getattr(self._events, "flush", None)
+        if callable(flush):
+            flush()
+
     def _beats(self) -> None:
         while not self._stop.wait(self._interval):
             job_id = self._current
@@ -219,6 +227,7 @@ class _Child:
                 state_dir=self._state,
                 emit=self._emit,
                 poll_cancel=self._poll_cancel,
+                flush=self._flush_events,
             )
             handler = self._check if kind is JobKind.CHECK else self._run
             try:

@@ -6,7 +6,7 @@ The Qt adapter is :mod:`voxprint_common.worker.qt`.
 
 from __future__ import annotations
 
-from voxprint_common.worker.context import JobCancelled, JobContext
+from voxprint_common.worker.context import EXIT_GPU_UNRECOVERABLE, JobCancelled, JobContext
 from voxprint_common.worker.host import CheckHook, WorkerHost
 from voxprint_common.worker.messages import (
     EventKind,
@@ -20,6 +20,7 @@ from voxprint_common.worker.messages import (
 )
 
 __all__ = [
+    "EXIT_GPU_UNRECOVERABLE",
     "CheckHook",
     "EventKind",
     "Handlers",

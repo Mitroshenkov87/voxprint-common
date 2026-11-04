@@ -227,6 +227,75 @@ def test_crash_fails_fast_and_the_next_job_runs(
     assert host.wait(follow).value["value"] == "after"
 
 
+def test_reply_and_exit_restarts_the_worker_without_a_crash(
+    make_host: Callable[..., WorkerHost],
+) -> None:
+    from voxprint_common.worker import EXIT_GPU_UNRECOVERABLE
+
+    assert EXIT_GPU_UNRECOVERABLE == 75
+    # A crash would wait out backoff_initial. The planned restart must not.
+    host = make_host(backoff_initial=8, heartbeat_timeout=30)
+    job = host.submit(JobSpec(JobKind.INFERENCE, {"op": "gpu-exit", "value": "done"}))
+    seen: list[object] = []
+    deadline = time.monotonic() + 15
+    while host.outcome(job) is None and time.monotonic() < deadline:
+        seen.extend(host.poll())
+        time.sleep(0.01)
+    outcome = host.outcome(job)
+    assert outcome is not None
+    assert outcome.state is JobState.FINISHED
+    assert outcome.value["value"] == "done"  # type: ignore[index]
+    restart_deadline = time.monotonic() + 3
+    while host.pid is None and time.monotonic() < restart_deadline:
+        seen.extend(host.poll())
+        time.sleep(0.01)
+    assert host.pid is not None
+    assert not any(event.kind is EventKind.CRASHED for event in seen)  # type: ignore[attr-defined]
+    follow = host.submit(JobSpec(JobKind.INFERENCE, {"op": "echo", "value": "after"}))
+    assert host.wait(follow, timeout=10).value["value"] == "after"  # type: ignore[index]
+    seen.extend(host.poll())
+    assert not any(event.kind is EventKind.CRASHED for event in seen)  # type: ignore[attr-defined]
+
+
+def test_job_queued_after_reply_and_exit_runs_on_the_restarted_worker(
+    make_host: Callable[..., WorkerHost],
+) -> None:
+    # A crash would wait out backoff_initial. The planned restart must not.
+    # The linger keeps the child alive after its exiting reply, so poll is
+    # sure to run before the exit and must not dispatch the queued job here.
+    host = make_host(backoff_initial=8, heartbeat_timeout=30)
+    gpu = host.submit(
+        JobSpec(JobKind.INFERENCE, {"op": "gpu-exit", "value": "done", "linger": 0.5})
+    )
+    echo = host.submit(JobSpec(JobKind.INFERENCE, {"op": "echo", "value": "after"}))
+    seen = _collect(host, {gpu, echo})
+    gpu_outcome = host.outcome(gpu)
+    echo_outcome = host.outcome(echo)
+    assert gpu_outcome is not None
+    assert echo_outcome is not None
+    assert gpu_outcome.state is JobState.FINISHED
+    assert echo_outcome.state is JobState.FINISHED
+    assert echo_outcome.value["value"] == "after"  # type: ignore[index]
+    assert echo_outcome.value["pid"] != gpu_outcome.value["pid"]  # type: ignore[index]
+    assert not any(event.kind is EventKind.CRASHED for event in seen)  # type: ignore[attr-defined]
+
+
+def test_exit_gpu_unrecoverable_without_a_reply_is_a_crash(
+    make_host: Callable[..., WorkerHost],
+) -> None:
+    host = make_host(backoff_initial=0, heartbeat_timeout=30)
+    job = host.submit(JobSpec(JobKind.INFERENCE, {"op": "crash", "code": 75}))
+    seen = _collect(host, {job})
+    outcome = host.outcome(job)
+    assert outcome is not None
+    assert outcome.state is JobState.FAILED
+    assert "exit 75" in outcome.message
+    assert any(
+        event.kind is EventKind.CRASHED and event.exit_code == 75  # type: ignore[attr-defined]
+        for event in seen
+    )
+
+
 def test_training_resumes_from_the_checkpoint(
     make_host: Callable[..., WorkerHost], tmp_path: Path
 ) -> None:
