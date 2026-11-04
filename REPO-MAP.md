@@ -10,10 +10,11 @@ One-page map of the repository, from the source itself (module docstrings; publi
 - `cli_protocol.py` — line protocol for `--json`: `progress`, `result`, `emit`, `iter_lines`, `Session`.
 - `download.py` — multi-source download with SHA-256, resume, disk check: `download`, `huggingface_url`, `modelscope_url`, `DownloadProgress`.
 - `gpu_probe.py` — NVIDIA probe and VRAM tiers: `query_gpus`, `assess`, `VramTier`; `ram_probe.py` — RAM tier and pin budget: `ram_tier`, `pin_budget_gib`, `RamTier`; `gpu_lock.py` — cross-process GPU lock: `try_acquire`, `gpu_job`, `Holder`, `Acquired`.
-- `image.py` — shared image saving and WebP metadata: `save_image`, `read_metadata`, `build_xmp`, `parse_xmp`; `provenance.py` — provenance embedding stub: `embed_image`, `finalize`, `detect`, `Report`.
+- `image.py` — shared image saving and metadata (WebP default, PNG/AVIF/JPEG; XMP, EXIF, PNG iTXt; off by default): `save_image`, `read_metadata`, `build_xmp`, `parse_xmp`, `default_quality`; `provenance.py` — provenance embedding stub: `embed_image`, `finalize`, `detect`, `Report`.
+- `models.py` — shared base model and quant selector (MOSS default, Z-Image optional; peak GB are placeholders): `list_models`, `default_model`, `select_quant`, `normalize_base`, `lora_base_matches`, `ModelSpec`.
 - `licence.py` — licence gate for code and weights: `check`, `is_allowed`, `is_noncommercial`, `is_copyleft`, `canonical`.
 - `model_park.py` — keep weights RAM-resident, move to GPU per stage: `ModelPark`, `StagingRing`, `for_process`; `model_users.py` — per-model `.users.json` registry: `load_users`, `add_user`, `remove_user`, `hold_users`.
-- `paths.py` — suite directories shared by every app: `home`, `shared_dir`, `runtime_dir`, `cache_dir`, `state_dir`, `models_dir`; `home_migration.py` — move an existing suite home to its final path (`migrate`); `suite_settings.py` — shared `suite.json` (schema 1): `read`, `values`, `set_value`, theme/GPU/RAM accessors.
+- `paths.py` — suite directories shared by every app: `home`, `shared_dir`, `runtime_dir`, `cache_dir`, `state_dir`, `models_dir`; `home_migration.py` — move an existing suite home to its final path (`migrate`); `suite_settings.py` — shared `suite.json` (schema 1): `read`, `values`, `set_value`, theme/GPU/RAM/image-format/model accessors.
 - `power.py` — block system sleep for a long job: `keep_awake`, `WakeLock`; `thermal.py` — suite thermal rule: `decide`, `wait_until_ready`, `Action`, `Decision`.
 
 ## `src/voxprint_common/i18n` — UI languages
