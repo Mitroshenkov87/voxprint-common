@@ -86,11 +86,11 @@ install_crash_bar(window, adapter, title=title, body=body)
 ### Handler
 
 ```python
-def load_model(model_id: str) -> object:
-    ...
+def load_model(model_id: str) -> object: ...
 
-def unload_model(model_id: str, loaded: object) -> None:
-    ...
+
+def unload_model(model_id: str, loaded: object) -> None: ...
+
 
 def run(ctx) -> object:
     if ctx.cancelled():
@@ -214,7 +214,7 @@ def _smi_free() -> int | None:
             text=True,
             timeout=10,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except OSError, subprocess.TimeoutExpired:
         return None
     if completed.returncode != 0:
         return None

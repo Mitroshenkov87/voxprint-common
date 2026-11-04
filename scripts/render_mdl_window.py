@@ -323,10 +323,22 @@ def _manage(lang: str) -> ManageView:
     )
 
 
-def _paint(name: str, lang: str, snap: Snapshot, *, mode: str = "queue", size: tuple[int, int], background: str = "") -> None:
+def _paint(
+    name: str,
+    lang: str,
+    snap: Snapshot,
+    *,
+    mode: str = "queue",
+    size: tuple[int, int],
+    background: str = "",
+) -> None:
     set_language(lang)
     manage = _manage(lang) if mode == "manage" else None
-    focus = "clarity" if mode == "manage" or any(slot.app_id == "clarity" for slot in snap.apps) else snap.apps[0].app_id
+    focus = (
+        "clarity"
+        if mode == "manage" or any(slot.app_id == "clarity" for slot in snap.apps)
+        else snap.apps[0].app_id
+    )
     if name.endswith("paused") or name.endswith("all-set") or name.endswith("error"):
         focus = "enlarge"
     view = view_for(
