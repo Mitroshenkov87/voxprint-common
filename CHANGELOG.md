@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.2 - 2026-11-04
+
+`voxprint_common.image` saves images with the shared `image.save_format` suite setting: lossless WebP by default, lossy WebP with a quality of 1-100, or PNG, AVIF, or JPEG. `save_image` encodes first and publishes the bytes atomically, and the written file carries the extension of the format. WebP files carry `prompt`, `seed`, and the LoRA list as XMP; `read_metadata` reads them back. Pillow is an optional extra, `voxprint-common[image]`, and the module never imports it at load.
+
 ## 0.6.0 - 2026-11-02
 
 `voxprint_common.worker` runs model jobs in a spawned child process. The UI polls a pipe from a timer. A crash restarts the worker with backoff. Training can resume from a checkpoint. Inference fails fast. `voxprint_common.testing.gui_smoke` walks a window's buttons and menu actions under `QT_QPA_PLATFORM=offscreen`.

@@ -52,10 +52,11 @@ The docs site is [mitroshenkov87.github.io/voxprint-common](https://mitroshenkov
 | `voxprint_common.i18n` | JSON catalogs. English, German, Russian, Ukrainian, Latvian |
 | `voxprint_common.mdl` | VOXPrint MDL. Shared model download, adopt, and cleanup. `voxprint-mdl` |
 | `voxprint_common.provenance` | Documented stub. Embedding arrives in a later version |
+| `voxprint_common.image` | Shared image save format: lossless WebP by default. WebP XMP metadata (prompt, seed, LoRAs) |
 
 ## Install
 
-Python 3.14. jeepney is the only required package. It is pure Python and speaks D-Bus so Linux can hold a sleep inhibit. PySide6 is an extra for the splash and for `voxprint-mdl download --gui`. `hf-xet` is optional; Hugging Face downloads fall back to HTTP Range when it is absent.
+Python 3.14. jeepney is the only required package. It is pure Python and speaks D-Bus so Linux can hold a sleep inhibit. PySide6 is an extra for the splash and for `voxprint-mdl download --gui`. `hf-xet` is optional; Hugging Face downloads fall back to HTTP Range when it is absent. Pillow is an extra for image saving, `voxprint-common[image]`; importing `voxprint_common.image` does not load it.
 
 ```bash
 python -m pip install voxprint-common
