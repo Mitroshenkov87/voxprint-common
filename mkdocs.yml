@@ -79,6 +79,7 @@ nav:
       - ui.shell: api/shell.md
       - ui.splash: api/splash.md
       - provenance: api/provenance.md
+      - image: api/image.md
 
 watch:
   - src/voxprint_common

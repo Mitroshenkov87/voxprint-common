@@ -21,6 +21,12 @@ key is preserved, so one app does not wipe another's settings.
   Missing means the app uses its first-launch size.
 * ``memory.ram_mode``: ``auto``, ``ram32``, ``ram64``, or ``ram96``. ``auto``,
   the default, follows the detected RAM tier.
+* ``image.save_format``: the shared image save format. Stored as
+  ``{"format": ..., "quality": ...}`` with the format ``webp``, ``png``,
+  ``avif``, or ``jpeg``. WebP without a quality is lossless; a quality of
+  1-100 makes it lossy. PNG takes no quality; AVIF and JPEG default to a
+  quality of 85. Missing or invalid values mean lossless WebP.
+  :mod:`voxprint_common.image` saves with it.
 
 Writers take ``suite.json.lock`` beside the file, read the latest object, and
 replace only the keys they changed. The publish is a temporary file in the
@@ -46,21 +52,26 @@ from voxprint_common.paths import suite_settings_file
 
 __all__ = [
     "DEFAULT_GPU",
+    "DEFAULT_IMAGE_QUALITY",
     "DEFAULT_THEME",
+    "IMAGE_SAVE_FORMATS",
     "KEYS",
     "SCHEMA",
     "expert_mode",
     "file",
     "gpu",
+    "image_save_format",
     "keep_awake_during_jobs",
     "keymap_document",
     "mdl_parallel_files",
     "models_dir",
     "normalize_gpu",
+    "normalize_image_save_format",
     "ram_mode",
     "read",
     "set_expert_mode",
     "set_gpu",
+    "set_image_save_format",
     "set_keep_awake_during_jobs",
     "set_keymap",
     "set_mdl_parallel_files",
@@ -92,6 +103,7 @@ KEYS = (
     "ui.window",
     "ui.geometry",
     "memory.ram_mode",
+    "image.save_format",
 )
 RAM_MODES = frozenset({"auto", "ram32", "ram64", "ram96"})
 DEFAULT_RAM_MODE = "auto"
@@ -101,6 +113,8 @@ THEMES = frozenset({DEFAULT_THEME})
 UI_THEMES = frozenset({"dark", "light", "system"})
 DEFAULT_UI_THEME = "dark"
 DEFAULT_GPU = "auto"
+IMAGE_SAVE_FORMATS = frozenset({"webp", "png", "avif", "jpeg"})
+DEFAULT_IMAGE_QUALITY = 85
 _GPU_RE = re.compile(r"^cuda:(\d{1,2})$")
 _LANG_RE = re.compile(r"^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$")
 _LOCK_TIMEOUT = 30.0
@@ -279,6 +293,37 @@ def set_mdl_parallel_files(count: int) -> int:
     return int(set_value("mdl_parallel_files", count))
 
 
+def image_save_format() -> dict[str, int | str | None]:
+    """Return the shared image save format.
+
+    A missing or invalid stored value is lossless WebP (``{"format": "webp",
+    "quality": None}``). The file is not created.
+    """
+    stored = normalize_image_save_format(read().get("image.save_format"))
+    if stored is not None:
+        return stored
+    return {"format": "webp", "quality": None}
+
+
+def set_image_save_format(value: Mapping[str, Any] | str) -> dict[str, int | str | None]:
+    """Store the shared image save format.
+
+    Args:
+        value: ``{"format": ..., "quality": ...}`` or a format name such as
+            ``"webp"``. WebP without a quality is lossless; a quality of 1-100
+            makes it lossy. PNG takes no quality; AVIF and JPEG get the
+            default quality of 85 when none is given.
+
+    Returns:
+        The stored ``{"format": ..., "quality": ...}``.
+
+    Raises:
+        ValueError: The format is unknown or the quality is not an integer
+            from 1 to 100.
+    """
+    return dict(set_value("image.save_format", value))
+
+
 def values() -> dict[str, Any]:
     """Return the shared values with defaults applied.
 
@@ -294,6 +339,7 @@ def values() -> dict[str, Any]:
         "mdl_parallel_files": mdl_parallel_files(),
         "ui.expert_mode": expert_mode(),
         "memory.ram_mode": ram_mode(),
+        "image.save_format": image_save_format(),
     }
 
 
@@ -611,6 +657,40 @@ def normalize_models_dir(value: object) -> Path | None:
     return folder
 
 
+def normalize_image_save_format(value: object) -> dict[str, int | str | None] | None:
+    """Return ``{"format": ..., "quality": ...}``, or None when ``value`` is invalid.
+
+    A bare format string means that format with its default quality: lossless
+    for WebP and PNG, :data:`DEFAULT_IMAGE_QUALITY` for AVIF and JPEG.
+
+    Args:
+        value: Stored save format, a ``format``/``quality`` mapping, or a
+            format name.
+    """
+    if isinstance(value, str):
+        value = {"format": value}
+    if not isinstance(value, Mapping):
+        return None
+    raw_format = value.get("format")
+    if not isinstance(raw_format, str):
+        return None
+    text = raw_format.strip().lower()
+    if text == "jpg":
+        text = "jpeg"
+    if text not in IMAGE_SAVE_FORMATS:
+        return None
+    quality = value.get("quality")
+    if isinstance(quality, bool) or not (quality is None or isinstance(quality, int)):
+        return None
+    if quality is not None and not 1 <= quality <= 100:
+        return None
+    if text == "png" and quality is not None:
+        return None
+    if text in ("avif", "jpeg") and quality is None:
+        quality = DEFAULT_IMAGE_QUALITY
+    return {"format": text, "quality": quality}
+
+
 def _validate(key: str, value: object) -> object:
     if key == "ui_language":
         stored = normalize_language(value)
@@ -665,6 +745,11 @@ def _validate(key: str, value: object) -> object:
         if not isinstance(value, str) or value not in RAM_MODES:
             raise ValueError(f"memory.ram_mode must be auto, ram32, ram64, or ram96, got {value!r}")
         return value
+    if key == "image.save_format":
+        stored = normalize_image_save_format(value)
+        if stored is None:
+            raise ValueError(f"image.save_format must be webp, png, avif, or jpeg, got {value!r}")
+        return stored
     raise ValueError(f"not a shared setting: {key!r}")
 
 
