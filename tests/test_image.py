@@ -93,6 +93,13 @@ def test_xmp_round_trip_through_webp(tmp_path: Path) -> None:
     assert read_metadata(target) == _METADATA
 
 
+def test_xmp_prompt_special_characters_round_trip_through_webp(tmp_path: Path) -> None:
+    prompt = "first & \"quoted\" <tag> 'single' >\r\nsecond line\nthird <&> 'line' \"end\""
+    image = Image.new("RGB", (16, 16), (1, 2, 3))
+    target = save_image(image, tmp_path / "special", metadata={"prompt": prompt})
+    assert read_metadata(target)["prompt"] == prompt
+
+
 def test_xmp_packet_round_trip() -> None:
     assert parse_xmp(build_xmp(_METADATA)) == _METADATA
     assert parse_xmp(build_xmp({})) == {"prompt": None, "seed": None, "loras": []}

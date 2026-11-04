@@ -40,7 +40,7 @@ _PIL_FORMATS = {"webp": "WEBP", "png": "PNG", "avif": "AVIF", "jpeg": "JPEG"}
 _PIL_FEATURES = {"avif": "avif", "jpeg": "jpg"}
 _XMP_NS = "https://voxprint.ai/ns/image/1.0/"
 _RDF_NS = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
-_QUOTE_ESCAPES = {'"': "&quot;"}
+_TEXT_ESCAPES = {'"': "&quot;", "'": "&apos;"}
 
 
 def save_image(
@@ -131,20 +131,23 @@ def build_xmp(metadata: Mapping[str, Any]) -> bytes:
     seed = metadata.get("seed")
     loras = metadata.get("loras")
     attributes = ""
-    if prompt is not None:
-        attributes += f' vp:prompt="{escape(str(prompt), _QUOTE_ESCAPES)}"'
     if seed is not None:
         attributes += f' vp:seed="{int(seed)}"'
-    items = ""
+    elements = ""
+    if prompt is not None:
+        # XML parsers normalize literal CR and CRLF to LF on parse; character
+        # references survive, so keep \r (and thus CRLF) out of the raw text.
+        text = escape(str(prompt), _TEXT_ESCAPES).replace("\r\n", "&#13;\n").replace("\r", "&#13;")
+        elements += f"<vp:prompt>{text}</vp:prompt>"
     if loras:
         names = "".join(f"<rdf:li>{escape(str(name))}</rdf:li>" for name in loras)
-        items = f"<vp:loras><rdf:Bag>{names}</rdf:Bag></vp:loras>"
+        elements += f"<vp:loras><rdf:Bag>{names}</rdf:Bag></vp:loras>"
     packet = (
         '<?xpacket begin="\ufeff" id="W5M0MpCehiHzreSzNTczkc9d"?>\n'
         '<x:xmpmeta xmlns:x="adobe:ns:meta/">\n'
         f'  <rdf:RDF xmlns:rdf="{_RDF_NS}">\n'
         f'    <rdf:Description rdf:about="" xmlns:vp="{_XMP_NS}"{attributes}>'
-        f"{items}</rdf:Description>\n"
+        f"{elements}</rdf:Description>\n"
         "  </rdf:RDF>\n"
         "</x:xmpmeta>\n"
         '<?xpacket end="w"?>'
@@ -169,9 +172,9 @@ def parse_xmp(packet: bytes | str) -> dict[str, Any]:
     description = root.find(f".//{{{_RDF_NS}}}Description")
     if description is None:
         return found
-    prompt = description.get(f"{{{_XMP_NS}}}prompt")
-    if prompt is not None:
-        found["prompt"] = prompt
+    prompt_element = description.find(f"{{{_XMP_NS}}}prompt")
+    if prompt_element is not None:
+        found["prompt"] = prompt_element.text or ""
     raw_seed = description.get(f"{{{_XMP_NS}}}seed")
     if raw_seed is not None:
         with contextlib.suppress(ValueError):
