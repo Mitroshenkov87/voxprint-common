@@ -76,6 +76,8 @@ def run(ctx: JobContext) -> object:
         raise JobCancelled(path)
     if op == "crash-always":
         os._exit(int(payload.get("code", 9)))
+    if op == "gpu-exit":
+        ctx.reply_and_exit({"value": payload.get("value"), "pid": os.getpid()})
     if op == "ignore-cancel" or op == "block":
         time.sleep(float(payload.get("seconds", 30)))
         return {"done": True}

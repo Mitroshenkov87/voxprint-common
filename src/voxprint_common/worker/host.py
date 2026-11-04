@@ -19,7 +19,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from voxprint_common.paths import state_dir
-from voxprint_common.worker.context import read_checkpoint_file
+from voxprint_common.worker.context import EXIT_GPU_UNRECOVERABLE, read_checkpoint_file
 from voxprint_common.worker.messages import (
     EventKind,
     Handlers,
@@ -80,9 +80,12 @@ class WorkerHost:
     ``start`` uses the ``spawn`` start method, so the child does not inherit
     the UI process memory. Cancel asks the handler to stop, then kills the
     process if it does not. A dead process is started again after a backoff.
-    Training jobs are queued again from the last checkpoint. Other jobs fail
-    immediately. Killing or shutting down the child exits that process, which
-    is what gives the GPU memory back.
+    An exit with code ``EXIT_GPU_UNRECOVERABLE`` that follows the job's clean
+    final reply is a planned restart instead: the result stands, no crash is
+    counted, and the worker starts again without backoff. Training jobs are
+    queued again from the last checkpoint. Other jobs fail immediately.
+    Killing or shutting down the child exits that process, which is what
+    gives the GPU memory back.
 
     ``poll`` is the only call the UI thread should make after a job is
     submitted. It uses non-blocking pipe reads.
@@ -147,6 +150,7 @@ class WorkerHost:
         self._restart_at: float | None = None
         self._streak = 0
         self._expect_exit = False
+        self._planned_gpu_exit = False
         self._stopping = False
         self._buffer: list[WorkerEvent] = []
         _HOSTS.add(self)
@@ -425,6 +429,7 @@ class WorkerHost:
         self._resident = None
         self._unload_sent = False
         self._restart_at = None
+        self._planned_gpu_exit = False
 
     def _close_pipes(self) -> None:
         for conn in (self._cmd, self._events, self._cancel):
@@ -465,6 +470,7 @@ class WorkerHost:
         slot = self._pending.popleft()
         slot.last_beat = self._clock()
         self._inflight = slot
+        self._planned_gpu_exit = False
         self._send(
             Submit(
                 slot.job_id,
@@ -540,6 +546,8 @@ class WorkerHost:
             return
         if message.checkpoint:
             slot.checkpoint = message.checkpoint
+        # Only a clean finish lets the next exit 75 read as a planned restart.
+        self._planned_gpu_exit = isinstance(message, DidFinish)
         if isinstance(message, DidFinish):
             self._finish(
                 slot,
@@ -620,6 +628,10 @@ class WorkerHost:
         if process is None or process.is_alive():
             return
         code = process.exitcode
+        if code == EXIT_GPU_UNRECOVERABLE:
+            # The child may have sent its final reply just before exiting.
+            # Drain the pipe before the exit is classified.
+            self._read(events)
         self._process = None
         self._close_pipes()
         self._resident = None
@@ -628,7 +640,23 @@ class WorkerHost:
             self._expect_exit = False
             self._schedule_restart()
             return
+        if code == EXIT_GPU_UNRECOVERABLE and self._planned_exit():
+            # The handler used JobContext.reply_and_exit. The job result was
+            # already delivered. Restart now, with no crash event and no
+            # backoff.
+            self._planned_gpu_exit = False
+            if not self._stopping:
+                self._restart_at = self._clock()
+            return
         self._unexpected(code, events)
+
+    def _planned_exit(self) -> bool:
+        """Return whether exit 75 follows a clean final reply for the job."""
+        slot = self._inflight
+        if slot is None:
+            return self._planned_gpu_exit
+        outcome = self._outcomes.get(slot.job_id)
+        return outcome is not None and outcome.state is JobState.FINISHED
 
     def _unexpected(self, code: int | None, events: list[WorkerEvent]) -> None:
         slot = self._inflight
