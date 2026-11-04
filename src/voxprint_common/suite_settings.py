@@ -22,11 +22,18 @@ key is preserved, so one app does not wipe another's settings.
 * ``memory.ram_mode``: ``auto``, ``ram32``, ``ram64``, or ``ram96``. ``auto``,
   the default, follows the detected RAM tier.
 * ``image.save_format``: the shared image save format. Stored as
-  ``{"format": ..., "quality": ...}`` with the format ``webp``, ``png``,
-  ``avif``, or ``jpeg``. WebP without a quality is lossless; a quality of
-  1-100 makes it lossy. PNG takes no quality; AVIF and JPEG default to a
-  quality of 85. Missing or invalid values mean lossless WebP.
+  ``{"format": ..., "quality": ..., "metadata": ...}`` with the format
+  ``webp``, ``png``, ``avif``, or ``jpeg``. WebP without a quality is
+  lossless; a quality of 1-100 makes it lossy. PNG takes no quality; AVIF and
+  JPEG default to a quality of 85. ``metadata`` is true or false, default
+  false: whether ``save_image`` writes the XMP/EXIF metadata mapping.
+  Missing or invalid values mean lossless WebP with metadata off.
   :mod:`voxprint_common.image` saves with it.
+* ``model.default``: the shared generation base model, ``moss`` (MOSS-Image,
+  the default) or ``z-image``. An unknown value reads as ``moss``.
+* ``model.quant``: the shared weight quant, ``auto`` (pick by the memory
+  budget) or one of ``bf16``, ``fp8``, ``int8``, ``nf4``. An unknown value
+  reads as ``auto``.
 
 Writers take ``suite.json.lock`` beside the file, read the latest object, and
 replace only the keys they changed. The publish is a temporary file in the
@@ -53,9 +60,12 @@ from voxprint_common.paths import suite_settings_file
 __all__ = [
     "DEFAULT_GPU",
     "DEFAULT_IMAGE_QUALITY",
+    "DEFAULT_MODEL",
+    "DEFAULT_MODEL_QUANT",
     "DEFAULT_THEME",
     "IMAGE_SAVE_FORMATS",
     "KEYS",
+    "MODEL_QUANT_MODES",
     "SCHEMA",
     "expert_mode",
     "file",
@@ -64,9 +74,13 @@ __all__ = [
     "keep_awake_during_jobs",
     "keymap_document",
     "mdl_parallel_files",
+    "model_default",
+    "model_quant",
     "models_dir",
     "normalize_gpu",
     "normalize_image_save_format",
+    "normalize_model_default",
+    "normalize_model_quant",
     "ram_mode",
     "read",
     "set_expert_mode",
@@ -75,6 +89,8 @@ __all__ = [
     "set_keep_awake_during_jobs",
     "set_keymap",
     "set_mdl_parallel_files",
+    "set_model_default",
+    "set_model_quant",
     "set_models_dir",
     "set_ram_mode",
     "set_theme",
@@ -104,6 +120,8 @@ KEYS = (
     "ui.geometry",
     "memory.ram_mode",
     "image.save_format",
+    "model.default",
+    "model.quant",
 )
 RAM_MODES = frozenset({"auto", "ram32", "ram64", "ram96"})
 DEFAULT_RAM_MODE = "auto"
@@ -115,6 +133,10 @@ DEFAULT_UI_THEME = "dark"
 DEFAULT_GPU = "auto"
 IMAGE_SAVE_FORMATS = frozenset({"webp", "png", "avif", "jpeg"})
 DEFAULT_IMAGE_QUALITY = 85
+MODEL_IDS = frozenset({"moss", "z-image"})
+DEFAULT_MODEL = "moss"
+MODEL_QUANT_MODES = frozenset({"auto", "bf16", "fp8", "int8", "nf4"})
+DEFAULT_MODEL_QUANT = "auto"
 _GPU_RE = re.compile(r"^cuda:(\d{1,2})$")
 _LANG_RE = re.compile(r"^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$")
 _LOCK_TIMEOUT = 30.0
@@ -293,35 +315,86 @@ def set_mdl_parallel_files(count: int) -> int:
     return int(set_value("mdl_parallel_files", count))
 
 
-def image_save_format() -> dict[str, int | str | None]:
+def image_save_format() -> dict[str, int | str | bool | None]:
     """Return the shared image save format.
 
-    A missing or invalid stored value is lossless WebP (``{"format": "webp",
-    "quality": None}``). The file is not created.
+    A missing or invalid stored value is lossless WebP with metadata off
+    (``{"format": "webp", "quality": None, "metadata": False}``). The file
+    is not created.
     """
     stored = normalize_image_save_format(read().get("image.save_format"))
     if stored is not None:
         return stored
-    return {"format": "webp", "quality": None}
+    return {"format": "webp", "quality": None, "metadata": False}
 
 
-def set_image_save_format(value: Mapping[str, Any] | str) -> dict[str, int | str | None]:
+def set_image_save_format(value: Mapping[str, Any] | str) -> dict[str, int | str | bool | None]:
     """Store the shared image save format.
 
     Args:
-        value: ``{"format": ..., "quality": ...}`` or a format name such as
-            ``"webp"``. WebP without a quality is lossless; a quality of 1-100
-            makes it lossy. PNG takes no quality; AVIF and JPEG get the
-            default quality of 85 when none is given.
+        value: ``{"format": ..., "quality": ..., "metadata": ...}`` or a
+            format name such as ``"webp"``. WebP without a quality is
+            lossless; a quality of 1-100 makes it lossy. PNG takes no
+            quality; AVIF and JPEG get the default quality of 85 when none is
+            given. ``metadata`` is true or false, default false: whether
+            ``save_image`` writes the metadata mapping.
 
     Returns:
-        The stored ``{"format": ..., "quality": ...}``.
+        The stored ``{"format": ..., "quality": ..., "metadata": ...}``.
 
     Raises:
-        ValueError: The format is unknown or the quality is not an integer
-            from 1 to 100.
+        ValueError: The format is unknown, the quality is not an integer
+            from 1 to 100, or ``metadata`` is not a bool.
     """
     return dict(set_value("image.save_format", value))
+
+
+def model_default() -> str:
+    """Return the shared generation base model, ``moss`` or ``z-image``.
+
+    A missing or invalid stored value is ``moss`` (MOSS-Image, the default).
+    The file is not created.
+    """
+    return normalize_model_default(read().get("model.default"))
+
+
+def set_model_default(value: str) -> str:
+    """Store the shared generation base model.
+
+    Args:
+        value: ``moss`` or ``z-image``.
+
+    Returns:
+        The stored model id.
+
+    Raises:
+        ValueError: ``value`` is not one of those two ids.
+    """
+    return str(set_value("model.default", value))
+
+
+def model_quant() -> str:
+    """Return the shared weight quant, ``auto`` by default.
+
+    A missing or invalid stored value is ``auto`` (pick by the memory
+    budget). The file is not created.
+    """
+    return normalize_model_quant(read().get("model.quant"))
+
+
+def set_model_quant(value: str) -> str:
+    """Store the shared weight quant.
+
+    Args:
+        value: ``auto``, ``bf16``, ``fp8``, ``int8``, or ``nf4``.
+
+    Returns:
+        The stored quant.
+
+    Raises:
+        ValueError: ``value`` is not one of those choices.
+    """
+    return str(set_value("model.quant", value))
 
 
 def values() -> dict[str, Any]:
@@ -340,6 +413,8 @@ def values() -> dict[str, Any]:
         "ui.expert_mode": expert_mode(),
         "memory.ram_mode": ram_mode(),
         "image.save_format": image_save_format(),
+        "model.default": model_default(),
+        "model.quant": model_quant(),
     }
 
 
@@ -657,15 +732,16 @@ def normalize_models_dir(value: object) -> Path | None:
     return folder
 
 
-def normalize_image_save_format(value: object) -> dict[str, int | str | None] | None:
-    """Return ``{"format": ..., "quality": ...}``, or None when ``value`` is invalid.
+def normalize_image_save_format(value: object) -> dict[str, int | str | bool | None] | None:
+    """Return ``{"format", "quality", "metadata"}``, or None when invalid.
 
     A bare format string means that format with its default quality: lossless
-    for WebP and PNG, :data:`DEFAULT_IMAGE_QUALITY` for AVIF and JPEG.
+    for WebP and PNG, :data:`DEFAULT_IMAGE_QUALITY` for AVIF and JPEG, and
+    metadata off.
 
     Args:
-        value: Stored save format, a ``format``/``quality`` mapping, or a
-            format name.
+        value: Stored save format, a ``format``/``quality``/``metadata``
+            mapping, or a format name.
     """
     if isinstance(value, str):
         value = {"format": value}
@@ -688,7 +764,32 @@ def normalize_image_save_format(value: object) -> dict[str, int | str | None] | 
         return None
     if text in ("avif", "jpeg") and quality is None:
         quality = DEFAULT_IMAGE_QUALITY
-    return {"format": text, "quality": quality}
+    metadata = value.get("metadata", False)
+    if not isinstance(metadata, bool):
+        return None
+    return {"format": text, "quality": quality, "metadata": metadata}
+
+
+def normalize_model_default(value: object) -> str:
+    """Return a known base model id, or :data:`DEFAULT_MODEL`.
+
+    Args:
+        value: Stored model id.
+    """
+    if isinstance(value, str) and value.strip().lower() in MODEL_IDS:
+        return value.strip().lower()
+    return DEFAULT_MODEL
+
+
+def normalize_model_quant(value: object) -> str:
+    """Return ``auto`` or a quant name, or :data:`DEFAULT_MODEL_QUANT`.
+
+    Args:
+        value: Stored quant choice.
+    """
+    if isinstance(value, str) and value.strip().lower() in MODEL_QUANT_MODES:
+        return value.strip().lower()
+    return DEFAULT_MODEL_QUANT
 
 
 def _validate(key: str, value: object) -> object:
@@ -750,6 +851,14 @@ def _validate(key: str, value: object) -> object:
         if stored is None:
             raise ValueError(f"image.save_format must be webp, png, avif, or jpeg, got {value!r}")
         return stored
+    if key == "model.default":
+        if not isinstance(value, str) or value.strip().lower() not in MODEL_IDS:
+            raise ValueError(f"model.default must be moss or z-image, got {value!r}")
+        return value.strip().lower()
+    if key == "model.quant":
+        if not isinstance(value, str) or value.strip().lower() not in MODEL_QUANT_MODES:
+            raise ValueError(f"model.quant must be auto, bf16, fp8, int8, or nf4, got {value!r}")
+        return value.strip().lower()
     raise ValueError(f"not a shared setting: {key!r}")
 
 

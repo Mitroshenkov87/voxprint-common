@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.3 - 2026-11-04
+
+`save_image` still defaults to lossless WebP. `purpose="picture"` with no explicit quality saves lossy WebP at quality 90 (`LOSSY_DEFAULT_QUALITY`, from `default_quality`); `purpose="master"` (the default) stays lossless for masters, series, and hand-offs. PNG, AVIF, and JPEG remain options. The written file is still published atomically and keeps the format's extension.
+
+Metadata is off unless `write_metadata=True` or the `metadata` key of `image.save_format` is true. A mapping passed while that switch is off is not written. The document is `prompt`, `seed`, `steps`, `base` (`base_model` is accepted on input and both are read back), `lora_strength`, and `loras` (a weight name, or `name` / `strength` / `sha256` / `base`). It is XMP on WebP, AVIF, and JPEG, with the same document as JSON in EXIF ImageDescription and UserComment, and a PNG iTXt chunk under `XML:com.adobe.xmp`. `read_metadata` reads the XMP from all four. LoRA entries come back as `{name, strength, sha256, base}`, and an untagged LoRA base is None. Multi-line prompts, including LF and CRLF, round-trip.
+
+`voxprint_common.models` is the shared model and quant selector. `moss` (MOSS-Image, Apache-2.0) is the default; `z-image` is an optional separate download. `select_quant` picks `bf16`, then `fp8`, `int8`, or `nf4`, the best whose placeholder peak fits `MEMORY_BUDGET_GB` (14 GB) for generation with a LoRA loaded or for training. Those peaks are placeholders pending VM calibration. `normalize_base` treats a missing or empty LoRA tag as `z-image`. Suite settings `model.default` (`moss`) and `model.quant` (`auto`) store the choice. Nothing is downloaded and torch is not imported.
+
 ## 0.6.2 - 2026-11-04
 
 `voxprint_common.image` saves images with the shared `image.save_format` suite setting: lossless WebP by default, lossy WebP with a quality of 1-100, or PNG, AVIF, or JPEG. `save_image` encodes first and publishes the bytes atomically, and the written file carries the extension of the format. WebP files carry `prompt`, `seed`, and the LoRA list as XMP; `read_metadata` reads them back. Pillow is an optional extra, `voxprint-common[image]`, and the module never imports it at load.

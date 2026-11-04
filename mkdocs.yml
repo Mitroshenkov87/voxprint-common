@@ -80,6 +80,7 @@ nav:
       - ui.splash: api/splash.md
       - provenance: api/provenance.md
       - image: api/image.md
+      - models: api/models.md
 
 watch:
   - src/voxprint_common
