@@ -461,7 +461,12 @@ class WorkerHost:
             return
 
     def _pump(self) -> None:
-        if self._stopping or self._inflight is not None or self._expect_exit:
+        if (
+            self._stopping
+            or self._inflight is not None
+            or self._expect_exit
+            or self._planned_gpu_exit
+        ):
             return
         if not self._alive():
             return
@@ -470,7 +475,6 @@ class WorkerHost:
         slot = self._pending.popleft()
         slot.last_beat = self._clock()
         self._inflight = slot
-        self._planned_gpu_exit = False
         self._send(
             Submit(
                 slot.job_id,
@@ -546,8 +550,9 @@ class WorkerHost:
             return
         if message.checkpoint:
             slot.checkpoint = message.checkpoint
-        # Only a clean finish lets the next exit 75 read as a planned restart.
-        self._planned_gpu_exit = isinstance(message, DidFinish)
+        # Only a reply that says the child is exiting lets the next exit 75
+        # read as a planned restart.
+        self._planned_gpu_exit = isinstance(message, DidFinish) and message.exiting
         if isinstance(message, DidFinish):
             self._finish(
                 slot,
@@ -640,7 +645,7 @@ class WorkerHost:
             self._expect_exit = False
             self._schedule_restart()
             return
-        if code == EXIT_GPU_UNRECOVERABLE and self._planned_exit():
+        if code == EXIT_GPU_UNRECOVERABLE and self._planned_gpu_exit:
             # The handler used JobContext.reply_and_exit. The job result was
             # already delivered. Restart now, with no crash event and no
             # backoff.
@@ -649,14 +654,6 @@ class WorkerHost:
                 self._restart_at = self._clock()
             return
         self._unexpected(code, events)
-
-    def _planned_exit(self) -> bool:
-        """Return whether exit 75 follows a clean final reply for the job."""
-        slot = self._inflight
-        if slot is None:
-            return self._planned_gpu_exit
-        outcome = self._outcomes.get(slot.job_id)
-        return outcome is not None and outcome.state is JobState.FINISHED
 
     def _unexpected(self, code: int | None, events: list[WorkerEvent]) -> None:
         slot = self._inflight

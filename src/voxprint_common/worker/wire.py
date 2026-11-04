@@ -86,11 +86,12 @@ class Progress:
 
 @dataclass(frozen=True)
 class DidFinish:
-    """The handler returned."""
+    """The handler returned. ``exiting`` marks a :meth:`JobContext.reply_and_exit` reply."""
 
     job_id: str
     value: object
     checkpoint: str | None
+    exiting: bool = False
 
 
 @dataclass(frozen=True)

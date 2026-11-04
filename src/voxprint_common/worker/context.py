@@ -167,13 +167,15 @@ class JobContext:
     def reply_and_exit(self, result: object, code: int = EXIT_GPU_UNRECOVERABLE) -> None:
         """Send the final reply, then leave the process without any cleanup.
 
-        The reply is the same ``DidFinish`` message a normal return sends, so
-        the host delivers ``result`` as a finished job. Use this when the GPU
-        is in a state the process cannot recover from, but the job itself
-        already produced its result: the host restarts the worker without
-        counting a crash or backing off. The process then exits with ``code``
-        immediately. ``unload_model`` does not run, which is the point: the
-        operating system reclaims the CUDA context when the process ends.
+        The reply is the ``DidFinish`` message a normal return sends, with
+        ``exiting`` set so the host dispatches nothing further to this
+        process. The host delivers ``result`` as a finished job. Use this
+        when the GPU is in a state the process cannot recover from, but the
+        job itself already produced its result: the host restarts the worker
+        without counting a crash or backing off. The process then exits with
+        ``code`` immediately. ``unload_model`` does not run, which is the
+        point: the operating system reclaims the CUDA context when the
+        process ends.
 
         Args:
             result: Picklable value the host records as the job result.
@@ -181,7 +183,7 @@ class JobContext:
                 :data:`EXIT_GPU_UNRECOVERABLE` is what the host expects after
                 a clean final reply. Any other code is read the same way.
         """
-        self._emit(DidFinish(self.job_id, result, self._checkpoint_out))
+        self._emit(DidFinish(self.job_id, result, self._checkpoint_out, exiting=True))
         if self._flush is not None:
             self._flush()
         os._exit(code)

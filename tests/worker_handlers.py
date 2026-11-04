@@ -77,6 +77,16 @@ def run(ctx: JobContext) -> object:
     if op == "crash-always":
         os._exit(int(payload.get("code", 9)))
     if op == "gpu-exit":
+        linger = float(payload.get("linger", 0))
+        if linger > 0:
+            real_flush = ctx._flush
+
+            def delayed_flush() -> None:
+                if real_flush is not None:
+                    real_flush()
+                time.sleep(linger)
+
+            ctx._flush = delayed_flush
         ctx.reply_and_exit({"value": payload.get("value"), "pid": os.getpid()})
     if op == "ignore-cancel" or op == "block":
         time.sleep(float(payload.get("seconds", 30)))

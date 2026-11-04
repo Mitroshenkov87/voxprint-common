@@ -257,6 +257,29 @@ def test_reply_and_exit_restarts_the_worker_without_a_crash(
     assert not any(event.kind is EventKind.CRASHED for event in seen)  # type: ignore[attr-defined]
 
 
+def test_job_queued_after_reply_and_exit_runs_on_the_restarted_worker(
+    make_host: Callable[..., WorkerHost],
+) -> None:
+    # A crash would wait out backoff_initial. The planned restart must not.
+    # The linger keeps the child alive after its exiting reply, so poll is
+    # sure to run before the exit and must not dispatch the queued job here.
+    host = make_host(backoff_initial=8, heartbeat_timeout=30)
+    gpu = host.submit(
+        JobSpec(JobKind.INFERENCE, {"op": "gpu-exit", "value": "done", "linger": 0.5})
+    )
+    echo = host.submit(JobSpec(JobKind.INFERENCE, {"op": "echo", "value": "after"}))
+    seen = _collect(host, {gpu, echo})
+    gpu_outcome = host.outcome(gpu)
+    echo_outcome = host.outcome(echo)
+    assert gpu_outcome is not None
+    assert echo_outcome is not None
+    assert gpu_outcome.state is JobState.FINISHED
+    assert echo_outcome.state is JobState.FINISHED
+    assert echo_outcome.value["value"] == "after"  # type: ignore[index]
+    assert echo_outcome.value["pid"] != gpu_outcome.value["pid"]  # type: ignore[index]
+    assert not any(event.kind is EventKind.CRASHED for event in seen)  # type: ignore[attr-defined]
+
+
 def test_exit_gpu_unrecoverable_without_a_reply_is_a_crash(
     make_host: Callable[..., WorkerHost],
 ) -> None:
