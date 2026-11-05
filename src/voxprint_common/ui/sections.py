@@ -608,7 +608,7 @@ class SectionDeck:
         path = self._state_dir / _CHECKPOINT
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
-        except OSError, UnicodeError, json.JSONDecodeError:
+        except (OSError, UnicodeError, json.JSONDecodeError):
             return None
         if not isinstance(payload, dict) or payload.get("schema") != _CHECKPOINT_SCHEMA:
             return None

@@ -339,7 +339,7 @@ def _referenced(manifests: Sequence[Path] | None) -> set[str]:
 def _marker_digests(path: Path) -> set[str]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except OSError, ValueError:
+    except (OSError, ValueError):
         return set()
     files = payload.get("files") if isinstance(payload, dict) else None
     if not isinstance(files, dict):

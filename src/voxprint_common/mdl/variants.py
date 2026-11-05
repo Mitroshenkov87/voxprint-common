@@ -26,7 +26,7 @@ def chosen_variants() -> dict[str, str]:
     """Return ``{model id: fallback id}`` for models that use a fallback."""
     try:
         payload = json.loads(_path().read_text(encoding="utf-8"))
-    except OSError, ValueError:
+    except (OSError, ValueError):
         return {}
     if not isinstance(payload, dict):
         return {}

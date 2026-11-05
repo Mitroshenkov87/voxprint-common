@@ -127,7 +127,7 @@ def _blobs_present(root: Path, files: Mapping[str, str]) -> bool:
 def _valid(root: Path, folder: Path, files: Mapping[str, str]) -> bool:
     try:
         marker = json.loads((folder / MARKER).read_text(encoding="utf-8"))
-    except OSError, ValueError:
+    except (OSError, ValueError):
         return False
     if not isinstance(marker, dict) or marker.get("schema") != MARKER_SCHEMA:
         return False

@@ -207,7 +207,7 @@ def _file_list(component: Component, root: Path) -> list[tuple[str, int]] | None
             continue
         try:
             payload = json.loads(candidate.read_text(encoding="utf-8-sig"))
-        except OSError, UnicodeError, ValueError:
+        except (OSError, UnicodeError, ValueError):
             return None
         rows = payload.get("files") if isinstance(payload, dict) else payload
         return _rows(rows)
@@ -234,7 +234,7 @@ def _rows(value: object) -> list[tuple[str, int]] | None:
 def _existing() -> Status:
     try:
         return load_status()
-    except OSError, ValueError:
+    except (OSError, ValueError):
         return Status(JobState.IDLE)
 
 

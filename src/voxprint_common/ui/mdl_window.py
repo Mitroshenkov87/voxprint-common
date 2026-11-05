@@ -389,7 +389,7 @@ def _builder(kind: str) -> object:
                 if code == 0:
                     widget.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
                     return True
-        except AttributeError, OSError:
+        except (AttributeError, OSError):
             return False
         return False
 

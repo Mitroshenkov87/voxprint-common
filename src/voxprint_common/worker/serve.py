@@ -84,7 +84,7 @@ def serve(
     except Exception as exc:
         try:
             events.send(DidFail("", f"{type(exc).__name__}: {exc}", None))
-        except OSError, EOFError, BrokenPipeError:
+        except (OSError, EOFError, BrokenPipeError):
             return
         return
     child.run()
@@ -150,7 +150,7 @@ class _Child:
         with self._lock:
             try:
                 self._events.send(message)
-            except OSError, EOFError, BrokenPipeError:
+            except (OSError, EOFError, BrokenPipeError):
                 self._stop.set()
 
     def _flush_events(self) -> None:

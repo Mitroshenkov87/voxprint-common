@@ -93,7 +93,7 @@ class Primary:
             with self._guard:
                 self._messages.append({str(key): value for key, value in payload.items()})
             client.sendall(b'{"ok": true}\n')
-        except OSError, UnicodeError, ValueError:
+        except (OSError, UnicodeError, ValueError):
             return
         finally:
             client.close()
@@ -158,7 +158,7 @@ def _read_info() -> dict[str, object] | None:
         return None
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except OSError, UnicodeError, ValueError:
+    except (OSError, UnicodeError, ValueError):
         return None
     if not isinstance(payload, dict):
         return None

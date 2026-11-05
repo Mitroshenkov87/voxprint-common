@@ -930,7 +930,7 @@ class SimpleImageLayout:
         path = self._state_dir / self._history_name
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
-        except OSError, UnicodeError, json.JSONDecodeError:
+        except (OSError, UnicodeError, json.JSONDecodeError):
             return
         if not isinstance(payload, dict) or payload.get("schema") != 1:
             return
@@ -2012,7 +2012,7 @@ class SimpleImageWidget:
             audio = audio_cls(page)
             player.setAudioOutput(audio)
             player.setVideoOutput(view)
-        except AttributeError, ImportError, RuntimeError:
+        except (AttributeError, ImportError, RuntimeError):
             return
         view.hide()
         stack.addWidget(view)  # type: ignore[attr-defined]
@@ -2858,7 +2858,7 @@ class SimpleImageWidget:
                 media.setSource(self._core.QUrl())  # type: ignore[attr-defined]
                 return
             media.setSource(self._core.QUrl.fromLocalFile(path))  # type: ignore[attr-defined]
-        except AttributeError, RuntimeError:
+        except (AttributeError, RuntimeError):
             self._show_poster()
 
     def _show_poster(self) -> None:
@@ -2928,7 +2928,7 @@ class SimpleImageWidget:
             player = player_cls(page)
             audio = audio_cls(page)
             player.setAudioOutput(audio)
-        except AttributeError, ImportError, RuntimeError:
+        except (AttributeError, ImportError, RuntimeError):
             return
         self._audio = player
         player.playbackStateChanged.connect(self._on_audio_state)

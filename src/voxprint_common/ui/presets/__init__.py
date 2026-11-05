@@ -428,7 +428,7 @@ class SettingState:
         path = self._state_dir / self._state_name
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
-        except OSError, UnicodeError, json.JSONDecodeError:
+        except (OSError, UnicodeError, json.JSONDecodeError):
             return
         if not isinstance(payload, dict) or payload.get("schema") != _STATE_SCHEMA:
             return

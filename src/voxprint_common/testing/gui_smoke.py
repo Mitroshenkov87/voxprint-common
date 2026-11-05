@@ -234,7 +234,7 @@ def _usable(widget: object) -> bool:
 def _menu(button: object) -> object | None:
     try:
         menu = button.menu()  # type: ignore[attr-defined]
-    except AttributeError, RuntimeError:
+    except (AttributeError, RuntimeError):
         return None
     return menu
 
@@ -256,7 +256,7 @@ def _action_signals(action: object) -> int:
 def _receivers(obj: object, signature: str) -> int:
     try:
         return int(obj.receivers(signature))  # type: ignore[attr-defined]
-    except RuntimeError, TypeError:
+    except (RuntimeError, TypeError):
         return 0
 
 
@@ -265,7 +265,7 @@ def _menu_owned(action: object) -> bool:
 
     try:
         objects = action.associatedObjects()  # type: ignore[attr-defined]
-    except AttributeError, RuntimeError:
+    except (AttributeError, RuntimeError):
         return False
     return any(isinstance(obj, QMenu) for obj in objects)
 
@@ -273,14 +273,14 @@ def _menu_owned(action: object) -> bool:
 def _action_menu(action: object) -> object | None:
     try:
         return action.menu()  # type: ignore[attr-defined]
-    except AttributeError, RuntimeError:
+    except (AttributeError, RuntimeError):
         return None
 
 
 def _is_separator(action: object) -> bool:
     try:
         return bool(action.isSeparator())  # type: ignore[attr-defined]
-    except AttributeError, RuntimeError:
+    except (AttributeError, RuntimeError):
         return False
 
 
@@ -366,7 +366,7 @@ def _has_size(widget: object) -> bool:
 def _label(widget: object) -> str:
     try:
         text = str(widget.text())  # type: ignore[attr-defined]
-    except AttributeError, RuntimeError:
+    except (AttributeError, RuntimeError):
         text = ""
     text = text.strip()
     if text:
@@ -384,7 +384,7 @@ def _path(widget: object) -> str:
         parts.append(_label(current) or type(current).__name__)
         try:
             current = current.parent()  # type: ignore[attr-defined]
-        except AttributeError, RuntimeError:
+        except (AttributeError, RuntimeError):
             break
     return " / ".join(reversed(parts))
 

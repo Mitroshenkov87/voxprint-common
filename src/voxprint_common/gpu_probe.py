@@ -115,7 +115,7 @@ def tier_for_gib(total_gib: float | None) -> VramTier:
         return VramTier.UNKNOWN
     try:
         size = float(total_gib)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return VramTier.UNKNOWN
     if math.isnan(size) or size <= 0:
         return VramTier.UNKNOWN
@@ -284,7 +284,7 @@ def query_gpus(runner: Runner | None = None) -> list[GpuDevice]:
             )
         else:
             completed = run(command, capture_output=True, text=True, timeout=15, check=False)
-    except OSError, subprocess.SubprocessError:
+    except (OSError, subprocess.SubprocessError):
         return []
     if completed.returncode != 0:
         return []

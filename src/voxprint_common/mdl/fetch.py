@@ -710,7 +710,7 @@ def _try_xet(
             )
         except TypeError:
             download_files([info], endpoint=offer.endpoint or None)
-    except KeyboardInterrupt, SystemExit, Cancelled:
+    except (KeyboardInterrupt, SystemExit, Cancelled):
         raise
     except Exception:
         return False
@@ -722,7 +722,7 @@ def _xet_offer(url: str, opener: Opener, timeout: float) -> _Offer | None:
     request = urllib.request.Request(url, headers=headers, method="HEAD")
     try:
         response = opener(request, timeout=timeout)
-    except OSError, urllib.error.URLError, TimeoutError:
+    except (OSError, urllib.error.URLError, TimeoutError):
         return None
     try:
         status = _status(response)

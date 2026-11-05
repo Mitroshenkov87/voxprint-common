@@ -424,7 +424,7 @@ def _outcome_for(job: QueueJob | None) -> Outcome:
 def _status_jobs() -> Status:
     try:
         status = load_status()
-    except OSError, ValueError:
+    except (OSError, ValueError):
         status = Status(JobState.FAILED)
     status.jobs = [job.to_dict() for job in load_queue()]
     return status
@@ -455,7 +455,7 @@ def _emit(session: TransferSession | None) -> None:
         return
     try:
         event = progress_event(load_status())
-    except OSError, ValueError:
+    except (OSError, ValueError):
         return
     session.publish(event)
 
@@ -653,7 +653,7 @@ def _already_installed(item: PlannedFile) -> bool:
         return True
     try:
         verify_hash(path, item.sha256)
-    except HashMismatch, OSError, ValueError:
+    except (HashMismatch, OSError, ValueError):
         return False
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text(item.sha256 + "\n", encoding="utf-8")

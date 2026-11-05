@@ -153,7 +153,7 @@ def _read_json(path: Path) -> dict[str, object]:
         return {}
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except OSError, UnicodeError, ValueError:
+    except (OSError, UnicodeError, ValueError):
         return {}
     if isinstance(payload, dict):
         return payload

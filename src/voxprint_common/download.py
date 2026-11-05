@@ -251,7 +251,7 @@ def _probe_size(urls: Sequence[str], opener: Opener, timeout: float) -> int | No
         request = urllib.request.Request(url, method="HEAD", headers={"User-Agent": _USER_AGENT})
         try:
             response = opener(request, timeout=timeout)
-        except OSError, urllib.error.URLError, TimeoutError:
+        except (OSError, urllib.error.URLError, TimeoutError):
             continue
         try:
             status = int(getattr(response, "status", 200) or 200)

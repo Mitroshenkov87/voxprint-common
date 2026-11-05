@@ -185,7 +185,7 @@ def _windows_ui_language() -> str | None:
         kernel = ctypes.windll.kernel32  # type: ignore[attr-defined]
         if kernel.GetUserDefaultLocaleName(buffer, len(buffer)):
             return normalize_code(buffer.value)
-    except AttributeError, OSError:
+    except (AttributeError, OSError):
         return None
     return None
 
@@ -201,7 +201,7 @@ def system_language() -> str | None:
             return code
     try:
         return normalize_code(locale.getlocale()[0])
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
 
 
@@ -324,7 +324,7 @@ def tr_lang(key: str, lang: str, **params: object) -> str:
         return text
     try:
         return text.format(**params)
-    except IndexError, KeyError, ValueError:
+    except (IndexError, KeyError, ValueError):
         return text
 
 

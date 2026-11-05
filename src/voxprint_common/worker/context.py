@@ -220,7 +220,7 @@ def read_checkpoint_file(state_dir: Path, job_id: str) -> str | None:
         return None
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except OSError, json.JSONDecodeError:
+    except (OSError, json.JSONDecodeError):
         return None
     if not isinstance(payload, dict):
         return None

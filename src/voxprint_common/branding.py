@@ -217,7 +217,7 @@ def detach_console() -> bool:
     try:
         kernel = ctypes.windll.kernel32  # type: ignore[attr-defined]
         return bool(kernel.FreeConsole())
-    except AttributeError, OSError:
+    except (AttributeError, OSError):
         return False
 
 
@@ -239,7 +239,7 @@ def set_app_user_model_id(app_id: str) -> bool:
     try:
         shell32 = ctypes.windll.shell32  # type: ignore[attr-defined]
         return shell32.SetCurrentProcessExplicitAppUserModelID(ctypes.c_wchar_p(app_id)) == 0
-    except AttributeError, OSError:
+    except (AttributeError, OSError):
         return False
 
 

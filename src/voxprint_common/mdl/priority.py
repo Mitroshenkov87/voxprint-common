@@ -104,7 +104,7 @@ def _ionice_idle() -> bool:
             capture_output=True,
             timeout=5,
         )
-    except OSError, subprocess.SubprocessError:
+    except (OSError, subprocess.SubprocessError):
         return False
     return completed.returncode == 0
 

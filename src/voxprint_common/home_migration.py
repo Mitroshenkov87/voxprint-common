@@ -289,7 +289,7 @@ def _write_marker(staging: Path, source: Path, destination: Path, count: int) ->
 def _read_marker(path: Path) -> dict[str, Any] | None:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except OSError, UnicodeError, ValueError:
+    except (OSError, UnicodeError, ValueError):
         return None
     if not isinstance(payload, dict) or payload.get("schema") != 1:
         return None
@@ -355,7 +355,7 @@ def _rewrite_manifest(destination: Path, legacy: Path) -> None:
         return
     try:
         payload = json.loads(path.read_text(encoding="utf-8-sig"))
-    except OSError, UnicodeError, ValueError:
+    except (OSError, UnicodeError, ValueError):
         logger.warning("suite manifest %s was not rewritten", path)
         return
     rewritten, changed = _rewrite_tree(payload, legacy, destination)

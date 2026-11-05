@@ -171,7 +171,7 @@ class StagingRing:
                     torch.empty(STAGING_BYTES, dtype=torch.uint8, pin_memory=True)
                     for _ in range(STAGING_SLOTS)
                 )
-            except ImportError, OSError, RuntimeError:
+            except (ImportError, OSError, RuntimeError):
                 self._failed = True
                 return None
         slot = self._slots[self._cursor % STAGING_SLOTS]
@@ -802,7 +802,7 @@ def _nbytes(tensor: object) -> int:
         value = value()
     try:
         return int(value)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return 0
 
 
@@ -830,7 +830,7 @@ def _copy_through(
             slot[:count].copy_(source[offset : offset + count])
             dest[offset : offset + count].copy_(slot[:count], non_blocking=non_blocking)
             offset += count
-    except AttributeError, RuntimeError, TypeError, ValueError:
+    except (AttributeError, RuntimeError, TypeError, ValueError):
         return None
     return out
 
@@ -849,14 +849,14 @@ def _as_pageable(tensor: object) -> object:
                 copy = torch.empty_like(tensor, device="cpu", pin_memory=False)
                 copy.copy_(tensor)
                 return copy
-        except ImportError, AttributeError, RuntimeError, TypeError, ValueError:
+        except (ImportError, AttributeError, RuntimeError, TypeError, ValueError):
             return tensor
     move = getattr(tensor, "to", None)
     if not callable(move):
         return tensor
     try:
         return move("cpu", non_blocking=False)
-    except RuntimeError, TypeError, ValueError:
+    except (RuntimeError, TypeError, ValueError):
         return tensor
 
 
@@ -900,7 +900,7 @@ def _load(path: Path) -> list[dict[str, object]]:
         return []
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except OSError, ValueError:
+    except (OSError, ValueError):
         return []
     rows = payload.get("holders") if isinstance(payload, dict) else None
     if not isinstance(rows, list):

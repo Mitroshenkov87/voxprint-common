@@ -264,7 +264,7 @@ def _absolute(text: str) -> Path | None:
 def _suite_models_dir() -> Path | None:
     try:
         payload = json.loads(suite_settings_file().read_text(encoding="utf-8-sig"))
-    except OSError, UnicodeError, ValueError:
+    except (OSError, UnicodeError, ValueError):
         return None
     if not isinstance(payload, dict):
         return None
@@ -278,7 +278,7 @@ def _legacy_models_dir() -> Path | None:
     """Read ``state/models_dir.txt`` written by older installers."""
     try:
         lines = (state_dir() / "models_dir.txt").read_text(encoding="utf-8-sig").splitlines()
-    except OSError, UnicodeError:
+    except (OSError, UnicodeError):
         return None
     for line in lines:
         if line.strip():

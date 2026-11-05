@@ -447,7 +447,7 @@ class WorkerHost:
             return False
         try:
             conn.send(message)  # type: ignore[attr-defined]
-        except OSError, EOFError, BrokenPipeError:
+        except (OSError, EOFError, BrokenPipeError):
             return False
         return True
 
@@ -457,7 +457,7 @@ class WorkerHost:
             return
         try:
             conn.send(Cancel(job_id))  # type: ignore[attr-defined]
-        except OSError, EOFError, BrokenPipeError:
+        except (OSError, EOFError, BrokenPipeError):
             return
 
     def _pump(self) -> None:
@@ -493,7 +493,7 @@ class WorkerHost:
         try:
             while conn.poll(0):  # type: ignore[attr-defined]
                 self._apply(conn.recv(), events)  # type: ignore[attr-defined]
-        except EOFError, OSError:
+        except (EOFError, OSError):
             return
 
     def _apply(self, message: object, events: list[WorkerEvent]) -> None:

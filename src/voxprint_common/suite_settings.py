@@ -177,7 +177,7 @@ def read() -> dict[str, Any]:
         return dict(_good)
     try:
         payload = json.loads(path.read_text(encoding="utf-8-sig"))
-    except OSError, UnicodeError, ValueError:
+    except (OSError, UnicodeError, ValueError):
         return dict(_good) if _good_path == key else {}
     if not isinstance(payload, dict):
         return dict(_good) if _good_path == key else {}

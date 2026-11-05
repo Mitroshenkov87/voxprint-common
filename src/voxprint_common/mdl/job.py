@@ -241,7 +241,7 @@ def download(
                 _fetch_all(files, status, publisher, options, cancel, session, workers)
             except Cancelled:
                 raise
-            except FetchError, CatalogError, ManifestError, OSError:
+            except (FetchError, CatalogError, ManifestError, OSError):
                 switched = _use_fallback(files, status)
                 if switched is None:
                     raise
@@ -905,7 +905,7 @@ def _hash_ok(item: PlannedFile) -> bool:
         except HashMismatch as exc:
             remember_digest(item.destination, exc.found)
             return False
-        except OSError, ValueError:
+        except (OSError, ValueError):
             return False
         remember_digest(item.destination, found)
         return True
@@ -1016,7 +1016,7 @@ def _fail(
 def _safe_load() -> Status:
     try:
         return load_status()
-    except OSError, ValueError:
+    except (OSError, ValueError):
         return Status(JobState.IDLE)
 
 

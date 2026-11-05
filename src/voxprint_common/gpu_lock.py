@@ -417,7 +417,7 @@ def _pid(value: object) -> int | None:
         return None
     try:
         number = int(value)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
     if number <= 0:
         return None
