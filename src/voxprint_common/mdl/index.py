@@ -1,6 +1,6 @@
 """Suite model index from ``Mitroshenkov87/voxprint-model-index``.
 
-The bundled snapshot is commit ``d2325ed``. A remote ``index.json`` is used
+The bundled snapshot is commit ``15edeab0``. A remote ``index.json`` is used
 only when the detached ``index.json.sig`` verifies under a bundled Ed25519
 public key and the document is not older than that pin. A missing signature,
 a bad signature, a fetch error, or an older serial or ``generated_at`` is

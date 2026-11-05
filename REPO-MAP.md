@@ -1,6 +1,6 @@
 # REPO-MAP
 
-One-page map of the repository, from the source itself (module docstrings; public `def`/`class` names). `src/voxprint_common` is the shared library of the Voxprint AI Media Suite.
+One-page map of the repository, from the source itself (module docstrings; public `def`/`class` names). `src/voxprint_common` is the shared library of the Voxprint AI Media Suite. It supports Python 3.14 and newer (`requires-python` is `>=3.14`). CI covers 3.14 and 3.15. The newest stable target is 3.15. The floor stays 3.14 for `onnxruntime-gpu` consumers (Clarity and Enlarge) until a 3.15 wheel ships.
 
 ## `src/voxprint_common` — top-level modules
 

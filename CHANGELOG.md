@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.4 - 2026-11-05
+
+The library supports Python 3.14 and newer. `requires-python` is `>=3.14`. The Trove classifiers list `Programming Language :: Python :: 3.14` and `Programming Language :: Python :: 3.15`. Ruff's `target-version` is `py314`, the minimum. CI tests 3.14 and 3.15 on Ubuntu and Windows. The docs job, `release.yml`, `pages.yml`, and `docs/ci/pin-check.yml` install 3.15. The newest stable target is 3.15. The floor stays 3.14 so Clarity and Enlarge can keep `onnxruntime-gpu` until that package ships a 3.15 wheel. This repository does not ship an installer or a bundled Python runtime.
+
+`remove_outputs` skips a hook-marker line whose JSON is not a list. A damaged marker (`TypeError` or `KeyError`) no longer aborts cleanup of the remaining lines.
+
+The module docstrings in `mdl/index.py` and `mdl/data/__init__.py` name the bundled index as commit `15edeab0`, serial 9, matching `model-index.pin.json`.
+
 ## 0.6.3 - 2026-11-04
 
 `save_image` still defaults to lossless WebP. `purpose="picture"` with no explicit quality saves lossy WebP at quality 90 (`LOSSY_DEFAULT_QUALITY`, from `default_quality`); `purpose="master"` (the default) stays lossless for masters, series, and hand-offs. PNG, AVIF, and JPEG remain options. The written file is still published atomically and keeps the format's extension.

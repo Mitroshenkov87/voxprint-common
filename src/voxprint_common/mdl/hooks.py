@@ -385,7 +385,7 @@ def remove_outputs(app: str, component_id: str) -> None:
             try:
                 relative = json.loads(line)[0]
                 _produced(folder, relative).unlink(missing_ok=True)
-            except ValueError, HookError, OSError, IndexError:
+            except TypeError, KeyError, ValueError, HookError, OSError, IndexError:
                 continue
         marker.unlink(missing_ok=True)
 

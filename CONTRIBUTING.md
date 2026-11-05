@@ -10,7 +10,7 @@ The library must stay usable when no other Voxprint app is installed. The consol
 
 ## Development
 
-Python 3.14. From a checkout:
+Python 3.14 or newer. CI tests 3.14 and 3.15. The newest stable target is 3.15. The floor stays 3.14 so Clarity and Enlarge can keep `onnxruntime-gpu` until that package ships a 3.15 wheel. From a checkout:
 
 ```bash
 python -m pip install -e ".[dev,ui]"

@@ -3,7 +3,7 @@
 
 <p align="center">
   <a href="https://github.com/Mitroshenkov87/voxprint-common/blob/main/LICENSE"><img alt="Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
-  <a href="https://www.python.org/"><img alt="Python 3.14" src="https://img.shields.io/badge/python-3.14-blue"></a>
+  <a href="https://www.python.org/"><img alt="Python 3.14+" src="https://img.shields.io/badge/python-3.14%2B-blue"></a>
   <a href="https://mitroshenkov87.github.io/voxprint-common/"><img alt="Docs" src="https://img.shields.io/badge/docs-mkdocs-lightgrey"></a>
 </p>
 
@@ -56,7 +56,7 @@ The docs site is [mitroshenkov87.github.io/voxprint-common](https://mitroshenkov
 
 ## Install
 
-Python 3.14. jeepney is the only required package. It is pure Python and speaks D-Bus so Linux can hold a sleep inhibit. PySide6 is an extra for the splash and for `voxprint-mdl download --gui`. `hf-xet` is optional; Hugging Face downloads fall back to HTTP Range when it is absent. Pillow is an extra for image saving, `voxprint-common[image]`; importing `voxprint_common.image` does not load it.
+Python 3.14 or newer. CI tests 3.14 and 3.15. The newest stable target is 3.15. The floor stays 3.14 so Clarity and Enlarge can keep `onnxruntime-gpu` until that package ships a 3.15 wheel. jeepney is the only required package. It is pure Python and speaks D-Bus so Linux can hold a sleep inhibit. PySide6 is an extra for the splash and for `voxprint-mdl download --gui`. `hf-xet` is optional; Hugging Face downloads fall back to HTTP Range when it is absent. Pillow is an extra for image saving, `voxprint-common[image]`; importing `voxprint_common.image` does not load it.
 
 ```bash
 python -m pip install voxprint-common
@@ -126,7 +126,7 @@ Maintainers moving an app off its private copy of this code should read [MIGRATI
 ## Requirements
 
 * Windows 11 or Linux.
-* Python 3.14.
+* Python 3.14 or newer. CI tests 3.14 and 3.15. The newest stable target is 3.15. The floor stays 3.14 for `onnxruntime-gpu` consumers.
 * A display and the `ui` extra, only for the splash, the reference shell, and `voxprint-mdl download --gui`. The download itself is headless. Tests grab the reference shell offscreen.
 
 **License:** Apache-2.0. See `LICENSE` and `NOTICE`.
