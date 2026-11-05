@@ -10,7 +10,7 @@ The library must stay usable when no other Voxprint app is installed. The consol
 
 ## Development
 
-Python 3.14. From a checkout:
+Python 3.15. From a checkout:
 
 ```bash
 python -m pip install -e ".[dev,ui]"

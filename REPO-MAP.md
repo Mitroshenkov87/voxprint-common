@@ -1,6 +1,6 @@
 # REPO-MAP
 
-One-page map of the repository, from the source itself (module docstrings; public `def`/`class` names). `src/voxprint_common` is the shared library of the Voxprint AI Media Suite.
+One-page map of the repository, from the source itself (module docstrings; public `def`/`class` names). `src/voxprint_common` is the shared library of the Voxprint AI Media Suite. It requires Python 3.15 (`requires-python` is `>=3.15`).
 
 ## `src/voxprint_common` — top-level modules
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+The library requires Python 3.15. `requires-python` is `>=3.15`, the Trove classifier is `Programming Language :: Python :: 3.15`, and Ruff's `target-version` is `py315`. CI, the docs job, `release.yml`, `pages.yml`, and `docs/ci/pin-check.yml` install `3.15`. The published version stays 0.6.3 until the suite release. This repository does not ship an installer or a bundled Python runtime.
+
+`remove_outputs` skips a hook-marker line whose JSON is not a list. A damaged marker (`TypeError` or `KeyError`) no longer aborts cleanup of the remaining lines.
+
+The module docstrings in `mdl/index.py` and `mdl/data/__init__.py` name the bundled index as commit `15edeab0`, serial 9, matching `model-index.pin.json`.
+
 ## 0.6.3 - 2026-11-04
 
 `save_image` still defaults to lossless WebP. `purpose="picture"` with no explicit quality saves lossy WebP at quality 90 (`LOSSY_DEFAULT_QUALITY`, from `default_quality`); `purpose="master"` (the default) stays lossless for masters, series, and hand-offs. PNG, AVIF, and JPEG remain options. The written file is still published atomically and keeps the format's extension.
