@@ -361,7 +361,7 @@ def hook_problems() -> dict[str, str]:
     """
     try:
         payload = json.loads(_problems_path().read_text(encoding="utf-8"))
-    except OSError, ValueError:
+    except (OSError, ValueError):
         return {}
     if not isinstance(payload, dict):
         return {}
@@ -385,7 +385,7 @@ def remove_outputs(app: str, component_id: str) -> None:
             try:
                 relative = json.loads(line)[0]
                 _produced(folder, relative).unlink(missing_ok=True)
-            except ValueError, HookError, OSError, IndexError:
+            except (TypeError, KeyError, ValueError, HookError, OSError, IndexError):
                 continue
         marker.unlink(missing_ok=True)
 
