@@ -6,6 +6,7 @@ Shared library used by all VOXPrint AI apps.
 > **Deep alpha.** This software is experimental, and nothing is guaranteed to work. Use at your own risk.
 
 - **Latest pre-release:** [v0.6.0](https://github.com/Mitroshenkov87/voxprint-common/releases/tag/v0.6.0)
+- **Python:** 3.14 or newer. CI tests 3.14 and 3.15. The newest stable target is 3.15. The floor stays 3.14 so Clarity and Enlarge can keep `onnxruntime-gpu` until a 3.15 wheel ships.
 - **Full documentation:** [docs/README-full.md](docs/README-full.md) and the [docs/](docs/) folder
 
 License: [Apache-2.0](LICENSE)
