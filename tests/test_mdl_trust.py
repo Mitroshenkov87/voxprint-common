@@ -34,7 +34,7 @@ from voxprint_common.mdl.variants import chosen_variants
 PAYLOAD = b"voxprint-mdl-bytes-0123456789abcdef"
 DIGEST = sha256_bytes(PAYLOAD)
 HEAD = "15edeab0f7a874c27d2b38ef6ecb69106ff94df8"
-INDEX_SHA = "4def1f530c9b580fb2ed292e4c03c2ac44ca4638a8dcd3645395e9b38f89a250"
+INDEX_SHA = "995a678b17dad62f49ee45929e3b935df245324765a3ffc18aae6dcab8f0c94d"
 _FIXTURES = Path(__file__).resolve().parent / "fixtures"
 _SEED = bytes(range(32))
 
@@ -156,23 +156,33 @@ def test_bundled_index_is_the_serial_9_snapshot() -> None:
     assert index.head == HEAD
     assert index.serial == 9
     assert index.generated_at == "2026-10-18T04:09:36Z"
-    assert len(index.entries) == 29
+    assert len(index.entries) == 30
     assert index.get("gemma4-31b") is not None
     assert index.get("huihui-qwen36-27b") is not None
 
 
-def test_bundled_index_has_z_image_default_and_optional_moss() -> None:
+def test_bundled_index_has_z_image_turbo_default_and_optional_full_models() -> None:
     index = load_index(remote=False)
     assert index.get("moss-image-compressed") is None
+    turbo = index.get("z-image-turbo")
+    assert turbo is not None
+    assert turbo.repo == "Mitroshenkov87/voxprint-mirror-z-image-turbo"
+    assert turbo.revision == "TODO-pending-upload"
+    assert turbo.sha256 == "fefa994cbef9d62201089f61d0bde2914ba0e826650f323816ec9b562965168e"
+    assert turbo.size == 11047
+    assert turbo.license == "Apache-2.0"
+    assert turbo.default is True
+    assert turbo.optional is False
+    assert turbo.note.startswith("TODO-pending-upload:")
     z_image = index.get("z-image")
     assert z_image is not None
     assert z_image.repo == "datasets/Mitroshenkov87/voxprint-model-index"
     assert z_image.revision == "5b7bdb4062d5bbc080b406c6bb3cb0a724438003"
     assert z_image.sha256 == "06c2c55b02c511a9b63a006e0847ad2e152b92cc4564809f1880f604f5d6d6c8"
     assert z_image.size == 4275
-    assert z_image.default is True
-    assert z_image.optional is False
-    assert z_image.note == "Default model."
+    assert z_image.default is False
+    assert z_image.optional is True
+    assert "training base" in z_image.note
     for moss_id, size in (
         ("moss-image-base", 20128),
         ("moss-image-sft", 20051),
@@ -271,7 +281,7 @@ def test_bad_or_missing_signature_falls_back(caplog: pytest.LogCaptureFixture) -
     assert unsigned.source == "bundled"
     assert unsigned.fallback == "remote index signature is missing"
     assert "remote index signature is missing" in caplog.text
-    assert len(unsigned.entries) == 29
+    assert len(unsigned.entries) == 30
 
     bad = bytearray(sign(body, _SEED))
     bad[-1] ^= 0x01

@@ -338,15 +338,15 @@ def test_app_manifest_skips_optional_and_checks_the_card(tmp_path: Path) -> None
 def test_unsigned_remote_index_falls_back_to_the_bundle() -> None:
     pinned = bundled_index_bytes()
     rows = json.loads(pinned)["models"]
-    assert len(rows) == 29
+    assert len(rows) == 30
     assert rows[0]["id"] == "dinov2-base"
     assert sha256_bytes(pinned) == (
-        "4def1f530c9b580fb2ed292e4c03c2ac44ca4638a8dcd3645395e9b38f89a250"
+        "995a678b17dad62f49ee45929e3b935df245324765a3ffc18aae6dcab8f0c94d"
     )
     bundled = load_index(remote=False)
     assert bundled.source == "bundled"
     assert bundled.fallback == ""
-    assert len(bundled.entries) == 29
+    assert len(bundled.entries) == 30
     assert bundled.get("gemma4-31b") is not None
     other = json.dumps(
         [{"id": "painter", "repo": "org/painter", "revision": "main", "sha256": "ab" * 32}]
@@ -359,7 +359,7 @@ def test_unsigned_remote_index_falls_back_to_the_bundle() -> None:
         server.server_close()
     assert unsigned.source == "bundled"
     assert unsigned.fallback
-    assert len(unsigned.entries) == 29
+    assert len(unsigned.entries) == 30
     with pytest.raises(Exception, match="duplicate"):
         parse_index(
             [

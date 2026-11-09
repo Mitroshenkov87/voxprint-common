@@ -185,9 +185,20 @@
       "revision": "5b7bdb4062d5bbc080b406c6bb3cb0a724438003",
       "sha256": "06c2c55b02c511a9b63a006e0847ad2e152b92cc4564809f1880f604f5d6d6c8",
       "size": 4275,
+      "default": false,
+      "optional": true,
+      "note": "Optional download, not the default model. Full Z-Image (Tongyi-MAI/Z-Image), the LoRA training base."
+    },
+    {
+      "id": "z-image-turbo",
+      "repo": "Mitroshenkov87/voxprint-mirror-z-image-turbo",
+      "revision": "TODO-pending-upload",
+      "sha256": "fefa994cbef9d62201089f61d0bde2914ba0e826650f323816ec9b562965168e",
+      "size": 11047,
+      "license": "Apache-2.0",
       "default": true,
       "optional": false,
-      "note": "Default model."
+      "note": "TODO-pending-upload: default model is Z-Image-Turbo (Tongyi-MAI/Z-Image-Turbo@f332072aa78be7aecdf3ee76d5c247082da564a6, Apache-2.0). Author weights already live on Mitroshenkov87/voxprint-mirror-z-image-turbo (HEAD 097de9bed91ab31e143aa0920c3c32c6a7eddbec); this row waits for the z-image-turbo descriptor JSON to be uploaded. sha256 and size are of the local descriptor."
     }
   ]
 }
