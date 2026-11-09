@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import importlib.util
+import os
+import subprocess
 import sys
 from collections.abc import Mapping
 from pathlib import Path
@@ -12,12 +15,16 @@ from voxprint_common.ui.presets import reference_presets
 from voxprint_common.ui.safety import ReviewedOutput
 from voxprint_common.ui.settings import reference_settings
 from voxprint_common.ui.simple_image import (
+    HISTORY_CELL_GAP,
+    HISTORY_CELL_SIZE,
     GalleryItem,
     Phase,
     PresetChoice,
     PresetRow,
     SimpleImageLayout,
+    SimpleImageWidget,
     image_presets,
+    snap_history_offset,
 )
 from voxprint_common.ui.variants import VariantId
 
@@ -36,6 +43,63 @@ _OUT = ReviewedOutput(data=b"png", mime="image/png")
 
 
 def test_import_does_not_load_qt() -> None:
+    assert "PySide6" not in sys.modules
+
+
+def test_history_cell_constants_and_snap() -> None:
+    assert HISTORY_CELL_SIZE == 88
+    assert HISTORY_CELL_GAP == 8
+    stride = HISTORY_CELL_SIZE + HISTORY_CELL_GAP
+    wide = {
+        "cell_size": HISTORY_CELL_SIZE,
+        "cell_gap": HISTORY_CELL_GAP,
+        "viewport": 300,
+        "content": 5 * HISTORY_CELL_SIZE + 4 * HISTORY_CELL_GAP,
+    }
+    assert snap_history_offset(0, **wide) == 0
+    assert snap_history_offset(stride // 2 - 1, **wide) == 0
+    assert snap_history_offset(stride // 2, **wide) == 0  # a tie goes lower
+    assert snap_history_offset(stride // 2 + 1, **wide) == stride
+    assert snap_history_offset(10**9, **wide) == wide["content"] - wide["viewport"]
+    for offset in (0, 50, 96, 120, stride * 2 + 7):
+        snapped = snap_history_offset(offset, **wide)
+        on_boundary = snapped == 0 or snapped % stride == 0
+        assert on_boundary or snapped == wide["content"] - wide["viewport"]
+    small = {"cell_size": 64, "cell_gap": 4, "viewport": 200, "content": 5 * 64 + 4 * 4}
+    assert snap_history_offset(37, **small) == 68
+    assert snap_history_offset(34, **small) == 0  # a tie goes lower
+    hidden = {"cell_size": 64, "cell_gap": 4, "viewport": 500, "content": 300}
+    assert snap_history_offset(10, **hidden) == 0
+
+
+def test_widget_rejects_non_positive_history_cells_without_qt() -> None:
+    layout = SimpleImageLayout(image_presets(), gate=_GATE)
+    settings = reference_settings()
+    with pytest.raises(ValueError):
+        SimpleImageWidget(layout, settings, cell_size=0)
+    with pytest.raises(ValueError):
+        SimpleImageWidget(layout, settings, cell_size=-1)
+    with pytest.raises(ValueError):
+        SimpleImageWidget(layout, settings, cell_gap=0)
+    with pytest.raises(ValueError):
+        SimpleImageWidget(layout, settings, cell_gap=-4)
+    assert "PySide6" not in sys.modules
+
+
+def test_history_cells_offscreen() -> None:
+    if importlib.util.find_spec("PySide6") is None:
+        pytest.skip("ui extra is not installed")
+    env = os.environ.copy()
+    env["QT_QPA_PLATFORM"] = "offscreen"
+    script = Path(__file__).with_name("simple_image_offscreen.py")
+    completed = subprocess.run(
+        [sys.executable, str(script)],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert completed.returncode == 0, completed.stdout + "\n" + completed.stderr
     assert "PySide6" not in sys.modules
 
 

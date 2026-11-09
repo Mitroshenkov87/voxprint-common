@@ -8,6 +8,8 @@ The bundled model index adds `moss-image-compressed`, the default compressed MOS
 
 The Lucent identity token is `#5ce1ff`. `MIGRATION-PLAN.md` describes how each app hosts the shared simple/Expert/Custom shell; the old UI stays frozen. `scripts/render_shell_variants.py` paints one sample window per app type (image, audio, video, text) at 100% and 150%.
 
+`ui.theme` adds `mark_compact`, which flags a `QPushButton` for the tighter `QPushButton[compact="true"]` rule (same 4 px button radius). `SimpleImageWidget` sizes and spaces its history strip through the `cell_size` / `cell_gap` constructor arguments and properties (defaults `HISTORY_CELL_SIZE` 88 and `HISTORY_CELL_GAP` 8 leave the strip unchanged), and `snap_history_offset` snaps the strip's scroll offset to whole-cell boundaries.
+
 ## 0.6.4 - 2026-11-05
 
 The library supports Python 3.14 and newer. `requires-python` is `>=3.14`. The Trove classifiers list `Programming Language :: Python :: 3.14` and `Programming Language :: Python :: 3.15`. Ruff's `target-version` is `py314`, the minimum. CI tests 3.14 and 3.15 on Ubuntu and Windows. The docs job, `release.yml`, `pages.yml`, and `docs/ci/pin-check.yml` install 3.15. The newest stable target is 3.15. The floor stays 3.14 so Clarity and Enlarge can keep `onnxruntime-gpu` until that package ships a 3.15 wheel. This repository does not ship an installer or a bundled Python runtime.

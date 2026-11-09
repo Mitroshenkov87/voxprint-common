@@ -10,7 +10,8 @@ translucent in the Acrylic stylesheet.
 shell uses :func:`build_shell_style` and the density block in the same file
 (13 px body, 28 px panel headers, 4 px control radius, 4 px button radius).
 Every push button, tool button, chip, and segment uses ``button_radius_px``. Both read one colour
-map.
+map. A push button opts into the tighter ``QPushButton[compact="true"]`` rule
+with :func:`mark_compact`; the same radius token still applies.
 
 The splash bar is not one of these tokens. Each app passes its own identity
 colour to :class:`voxprint_common.ui.splash.Splash`. Identity colours for the
@@ -70,6 +71,7 @@ __all__ = [
     "build_style",
     "contrast_ratio",
     "light_contrast_pairs",
+    "mark_compact",
     "palette_colors",
     "resolved_shell_light",
     "tokens_path",
@@ -107,6 +109,10 @@ QLabel#chip[state="ready"] {{
 QPushButton {{
     background: {control}; border: 1px solid {border};
     border-radius: {button_radius}px; padding: 8px 16px;
+}}
+QPushButton[compact="true"] {{
+    background: {control}; border: 1px solid {border};
+    border-radius: {button_radius}px; padding: 2px 8px; min-height: 24px;
 }}
 QToolButton {{ border-radius: {button_radius}px; }}
 QPushButton:hover {{ background: {hover}; }}
@@ -480,6 +486,10 @@ QPushButton {{
     background: {CONTROL_BG}; border: {density.border_px}px solid {CONTROL_BORDER};
     border-radius: {button}px; padding: 4px 12px; min-height: {density.panel_header_px}px;
 }}
+QPushButton[compact="true"] {{
+    background: {CONTROL_BG}; border: {density.border_px}px solid {CONTROL_BORDER};
+    border-radius: {button}px; padding: 2px 8px; min-height: 24px;
+}}
 QToolButton {{ border-radius: {button}px; }}
 QPushButton:hover {{ background: {CONTROL_HOVER}; }}
 QPushButton#primary {{
@@ -788,6 +798,28 @@ def build_style(glass: bool, *, more: bool = False) -> str:
         card_bg=card_bg,
         button_radius=load().density.button_radius_px,
     )
+
+
+def mark_compact(widget: object) -> object:
+    """Mark ``widget`` as a compact push button and repaint it with that rule.
+
+    Sets the dynamic ``compact`` property so ``QPushButton[compact="true"]``
+    applies, and re-polishes a widget that already has a style so the change
+    shows without waiting for the next style refresh. Qt is not imported; only
+    the widget's own methods are used, so a headless test double works.
+
+    Args:
+        widget: The widget to mark. It needs ``setProperty`` and ``style``.
+
+    Returns:
+        The same widget, for chaining.
+    """
+    widget.setProperty("compact", True)  # type: ignore[attr-defined]
+    style = widget.style()  # type: ignore[attr-defined]
+    if style is not None:
+        style.unpolish(widget)  # type: ignore[attr-defined]
+        style.polish(widget)  # type: ignore[attr-defined]
+    return widget
 
 
 def contrast_ratio(foreground: str, background: str) -> float:
