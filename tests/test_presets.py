@@ -262,6 +262,7 @@ def test_bad_preset_file_is_refused(tmp_path: Path) -> None:
             }
         )
 
+
 def test_image_presets_use_z_image_turbo_defaults() -> None:
     """Simple-mode quality chips match Z-Image Turbo when model.default is z-image-turbo."""
     from voxprint_common.suite_settings import DEFAULT_MODEL, model_default
@@ -283,4 +284,3 @@ def test_image_presets_use_z_image_turbo_defaults() -> None:
     assert state.get("shell.steps") == 16
     assert state.get("shell.guidance") == 0.0
     assert state.get("shell.sampler") == "euler"
-

@@ -185,9 +185,7 @@ def normalize_base(tag: Any) -> str:
         return "z-image"
     if text == "moss":
         return "moss"
-    raise ValueError(
-        f"unknown base tag {tag!r}; expected 'moss', 'z-image', or 'z-image-turbo'"
-    )
+    raise ValueError(f"unknown base tag {tag!r}; expected 'moss', 'z-image', or 'z-image-turbo'")
 
 
 def lora_base_matches(lora_base: Any, model: str) -> bool:
