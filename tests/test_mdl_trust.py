@@ -34,7 +34,7 @@ from voxprint_common.mdl.variants import chosen_variants
 PAYLOAD = b"voxprint-mdl-bytes-0123456789abcdef"
 DIGEST = sha256_bytes(PAYLOAD)
 HEAD = "15edeab0f7a874c27d2b38ef6ecb69106ff94df8"
-INDEX_SHA = "e4b34f22036d68cf20b01d24f0b8ab717c14d14a3369200dd74bcea87713c75b"
+INDEX_SHA = "4def1f530c9b580fb2ed292e4c03c2ac44ca4638a8dcd3645395e9b38f89a250"
 _FIXTURES = Path(__file__).resolve().parent / "fixtures"
 _SEED = bytes(range(32))
 
@@ -156,31 +156,34 @@ def test_bundled_index_is_the_serial_9_snapshot() -> None:
     assert index.head == HEAD
     assert index.serial == 9
     assert index.generated_at == "2026-10-18T04:09:36Z"
-    assert len(index.entries) == 30
+    assert len(index.entries) == 29
     assert index.get("gemma4-31b") is not None
     assert index.get("huihui-qwen36-27b") is not None
 
 
-def test_bundled_index_has_compressed_moss_default_and_optional_z_image() -> None:
+def test_bundled_index_has_z_image_default_and_optional_moss() -> None:
     index = load_index(remote=False)
-    compressed = index.get("moss-image-compressed")
-    assert compressed is not None
-    assert compressed.repo == "Mitroshenkov87/voxprint-mirror-moss-image-compressed"
-    assert compressed.revision == "TODO-pending-calibration"
-    assert compressed.sha256 == sha256_bytes(b"TODO-pending-calibration")
-    assert compressed.size == 0
-    assert compressed.license == "Apache-2.0"
-    assert compressed.default is True
-    assert compressed.optional is False
-    assert "TODO-pending-calibration" in compressed.note
+    assert index.get("moss-image-compressed") is None
     z_image = index.get("z-image")
     assert z_image is not None
-    assert z_image.optional is True
-    assert z_image.sha256 == "06c2c55b02c511a9b63a006e0847ad2e152b92cc4564809f1880f604f5d6d6c8"
     assert z_image.repo == "datasets/Mitroshenkov87/voxprint-model-index"
     assert z_image.revision == "5b7bdb4062d5bbc080b406c6bb3cb0a724438003"
-    assert index.get("moss-image-base") is not None
-    assert index.get("moss-image-sft") is not None
+    assert z_image.sha256 == "06c2c55b02c511a9b63a006e0847ad2e152b92cc4564809f1880f604f5d6d6c8"
+    assert z_image.size == 4275
+    assert z_image.default is True
+    assert z_image.optional is False
+    assert z_image.note == "Default model."
+    for moss_id, size in (
+        ("moss-image-base", 20128),
+        ("moss-image-sft", 20051),
+    ):
+        moss = index.get(moss_id)
+        assert moss is not None
+        assert moss.default is False
+        assert moss.optional is True
+        assert moss.size == size
+        assert moss.note == "Optional download, not the default model."
+    assert sum(1 for entry in index.entries if entry.default) == 1
 
 
 def test_index_entries_allow_documented_optional_keys() -> None:
@@ -268,7 +271,7 @@ def test_bad_or_missing_signature_falls_back(caplog: pytest.LogCaptureFixture) -
     assert unsigned.source == "bundled"
     assert unsigned.fallback == "remote index signature is missing"
     assert "remote index signature is missing" in caplog.text
-    assert len(unsigned.entries) == 30
+    assert len(unsigned.entries) == 29
 
     bad = bytearray(sign(body, _SEED))
     bad[-1] ^= 0x01

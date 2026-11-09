@@ -41,8 +41,8 @@ def test_reference_presets_write_canvas_values() -> None:
     settings = reference_settings()
     document = reference_presets(settings)
     state = SettingState(document, settings)
-    assert state.get("shell.steps") == 20
-    assert state.get("shell.guidance") == 7.0
+    assert state.get("shell.steps") == 8
+    assert state.get("shell.guidance") == 0.0
     assert state.get("shell.sampler") == "euler"
     assert state.get("shell.resolution") == "1024x1024"
     assert state.get("shell.output") == "standard"
@@ -52,13 +52,13 @@ def test_reference_presets_write_canvas_values() -> None:
     assert state.status("quality").kind is PresetMatch.EXACT
     assert state.status("quality").option_id == "balanced"
     state.choose("quality", "fast")
-    assert state.get("shell.steps") == 12
-    assert state.get("shell.guidance") == 5.0
+    assert state.get("shell.steps") == 4
+    assert state.get("shell.guidance") == 0.0
     assert state.get("shell.sampler") == "euler"
     assert state.get("shell.negative") == ""
     state.choose("size", "16:9")
     assert state.get("shell.resolution") == "1344x768"
-    assert state.get("shell.steps") == 12
+    assert state.get("shell.steps") == 4
     with pytest.raises(ValueError):
         state.choose("output", "4k")
     text = _CANVAS.read_text(encoding="utf-8")
@@ -88,8 +88,8 @@ def test_hand_edit_marks_one_group_and_reset_restores_it() -> None:
     assert custom is not None and custom.kind is PresetMatch.CUSTOM
     assert custom.option_id == "balanced"
     layout.reset_group("quality")
-    assert layout.get("shell.steps") == 20
-    assert layout.get("shell.guidance") == 7.0
+    assert layout.get("shell.steps") == 8
+    assert layout.get("shell.guidance") == 0.0
     assert layout.get("shell.sampler") == "euler"
     assert layout.get("shell.negative") == "full color"
     restored = layout.preset_status("quality")
@@ -215,7 +215,7 @@ def test_settings_state_round_trip(tmp_path: Path) -> None:
     )
     assert again.snapshot() == layout.snapshot()
     assert again.get("shell.steps") == 15
-    assert again.get("shell.guidance") == 5.0
+    assert again.get("shell.guidance") == 0.0
     assert again.get("shell.negative") == "realistic photo"
     assert again.presets["quality"] == "fast"
     status = again.preset_status("quality")
@@ -223,7 +223,7 @@ def test_settings_state_round_trip(tmp_path: Path) -> None:
     assert again.seed == 9
     (tmp_path / "image-settings.json").write_text("{", encoding="utf-8")
     broken = SettingState(document, settings, state_dir=tmp_path)
-    assert broken.get("shell.steps") == 20
+    assert broken.get("shell.steps") == 8
     assert broken.status("quality").option_id == "balanced"
 
 
@@ -261,3 +261,26 @@ def test_bad_preset_file_is_refused(tmp_path: Path) -> None:
                 ],
             }
         )
+
+def test_image_presets_use_z_image_turbo_defaults() -> None:
+    """Simple-mode quality chips match Z-Image Turbo when model.default is z-image."""
+    from voxprint_common.suite_settings import DEFAULT_MODEL, model_default
+
+    assert DEFAULT_MODEL == "z-image"
+    assert model_default() == "z-image"
+    settings = reference_settings()
+    assert settings.get("shell.steps").default == 8
+    assert settings.get("shell.guidance").default == 0.0
+    assert settings.get("shell.guidance").minimum == 0.0
+    state = SettingState(reference_presets(settings), settings)
+    assert state.get("shell.steps") == 8
+    assert state.get("shell.guidance") == 0.0
+    assert state.get("shell.sampler") == "euler"
+    state.choose("quality", "fast")
+    assert state.get("shell.steps") == 4
+    assert state.get("shell.guidance") == 0.0
+    state.choose("quality", "best")
+    assert state.get("shell.steps") == 16
+    assert state.get("shell.guidance") == 0.0
+    assert state.get("shell.sampler") == "euler"
+

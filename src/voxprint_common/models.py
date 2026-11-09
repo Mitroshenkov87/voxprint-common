@@ -1,8 +1,8 @@
 """Shared base-model registry, quant selection, and LoRA base tags.
 
 Two base models back the suite's image generation and LoRA training:
-MOSS-Image (``moss``, the default, Apache-2.0) and Z-Image (``z-image``, an
-optional separate download). Each model ships in one or more weight quants
+Z-Image (``z-image``, the default) and MOSS-Image (``moss``, an optional
+download, Apache-2.0). Each model ships in one or more weight quants
 (``bf16``, ``fp8``, ``int8``, ``nf4``); :func:`select_quant` picks the
 best-quality quant whose estimated peak VRAM fits the memory budget, for
 generation with a LoRA loaded or for training.
@@ -11,7 +11,7 @@ The peak figures in :data:`MODEL_PEAK_GB` are PLACEHOLDER estimates pending
 calibration on the PG test VM. The VM calibration cap equals
 :data:`MEMORY_BUDGET_GB`.
 
-The stored choice lives in the suite settings ``model.default`` (``moss``)
+The stored choice lives in the suite settings ``model.default`` (``z-image``)
 and ``model.quant`` (``auto`` calls :func:`select_quant`). This module does
 not download anything, does not touch the network, and does not import torch.
 """
@@ -69,18 +69,18 @@ class ModelSpec:
 
 MODELS = (
     ModelSpec(
-        id="moss",
-        title="MOSS-Image",
-        licence="Apache-2.0",
+        id="z-image",
+        title="Z-Image",
+        licence=None,
         default=True,
         summary="The default model for generation and LoRA training.",
     ),
     ModelSpec(
-        id="z-image",
-        title="Z-Image",
-        licence=None,
+        id="moss",
+        title="MOSS-Image",
+        licence="Apache-2.0",
         default=False,
-        summary="Optional, a separate download.",
+        summary="Optional download, not the default model.",
     ),
 )
 
@@ -93,8 +93,8 @@ def list_models() -> tuple[ModelSpec, ...]:
 
 
 def default_model() -> str:
-    """Return the shared base model id: ``moss`` (MOSS-Image)."""
-    return "moss"
+    """Return the shared base model id: ``z-image`` (Z-Image)."""
+    return "z-image"
 
 
 def select_quant(
@@ -146,7 +146,7 @@ def normalize_base(tag: Any) -> str:
         ValueError: ``tag`` names no known base.
     """
     # By design (moss-final-spec item 4): untagged legacy LoRAs, including
-    # Garnis, read as "z-image" even though the suite default model is moss.
+    # Garnis, read as "z-image". That matches the suite default model.
     if tag is None:
         return "z-image"
     if not isinstance(tag, str):

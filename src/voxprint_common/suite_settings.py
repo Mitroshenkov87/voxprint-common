@@ -31,8 +31,9 @@ key is preserved, so one app does not wipe another's settings.
   is true or false, default false: whether ``save_image`` writes the
   XMP/EXIF metadata mapping. Missing or invalid values mean lossless WebP
   with metadata off. :mod:`voxprint_common.image` saves with it.
-* ``model.default``: the shared generation base model, ``moss`` (MOSS-Image,
-  the default) or ``z-image``. An unknown value reads as ``moss``.
+* ``model.default``: the shared generation base model, ``z-image`` (the
+  default) or ``moss`` (MOSS-Image, optional). An unknown value reads as
+  ``z-image``.
 * ``model.quant``: the shared weight quant, ``auto`` (pick by the memory
   budget) or one of ``bf16``, ``fp8``, ``int8``, ``nf4``. An unknown value
   reads as ``auto``.
@@ -136,7 +137,7 @@ DEFAULT_GPU = "auto"
 IMAGE_SAVE_FORMATS = frozenset({"webp", "png", "avif", "jpeg"})
 DEFAULT_IMAGE_QUALITY = 85
 MODEL_IDS = frozenset({"moss", "z-image"})
-DEFAULT_MODEL = "moss"
+DEFAULT_MODEL = "z-image"
 MODEL_QUANT_MODES = frozenset({"auto", "bf16", "fp8", "int8", "nf4"})
 DEFAULT_MODEL_QUANT = "auto"
 _GPU_RE = re.compile(r"^cuda:(\d{1,2})$")
@@ -356,9 +357,9 @@ def set_image_save_format(value: Mapping[str, Any] | str) -> dict[str, int | str
 
 
 def model_default() -> str:
-    """Return the shared generation base model, ``moss`` or ``z-image``.
+    """Return the shared generation base model, ``z-image`` or ``moss``.
 
-    A missing or invalid stored value is ``moss`` (MOSS-Image, the default).
+    A missing or invalid stored value is ``z-image`` (the default).
     The file is not created.
     """
     return normalize_model_default(read().get("model.default"))
@@ -368,7 +369,7 @@ def set_model_default(value: str) -> str:
     """Store the shared generation base model.
 
     Args:
-        value: ``moss`` or ``z-image``.
+        value: ``z-image`` or ``moss``.
 
     Returns:
         The stored model id.
