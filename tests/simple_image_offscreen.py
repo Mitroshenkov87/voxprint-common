@@ -8,6 +8,8 @@ import sys
 
 def main() -> None:
     os.environ["QT_QPA_PLATFORM"] = "offscreen"
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtGui import QWheelEvent
     from PySide6.QtWidgets import QApplication, QPushButton
 
     from voxprint_common.ui.presets import reference_presets
@@ -106,9 +108,29 @@ def main() -> None:
     view._snap_history()
     assert bar.value() == 0
     stride = 64 + 4
+    # Mid-drag style: setValue must not snap on its own, so live scrolling
+    # can pass a cell. Snap runs when the drag ends or a wheel gesture does.
     bar.setValue(30)
     app.processEvents()
+    assert bar.value() == 30
+    view._snap_history()
     assert bar.value() == expected(30)
+    assert bar.value() % stride == 0
+    start = bar.value()
+    pos = QPointF(40, 10)
+    wheel = QWheelEvent(
+        pos,
+        view._history_scroll.mapToGlobal(pos.toPoint()),
+        QPoint(0, 0),
+        QPoint(0, 120),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.NoScrollPhase,
+        False,
+    )
+    app.sendEvent(view._history_scroll, wheel)
+    app.processEvents()
+    assert bar.value() == expected(start - stride)
     assert bar.value() % stride == 0
     bar.setValue(31 + bar.maximum())
     view._snap_history()

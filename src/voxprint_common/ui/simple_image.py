@@ -1219,6 +1219,8 @@ class SimpleImageWidget:
         self._cell_size = int(cell_size)
         self._cell_gap = int(cell_gap)
         self._snapping_history = False
+        self._history_wheel_angle = 0
+        self._history_wheel_pixels = 0
         self._on_generate = on_generate
         self._on_command = on_command
         self._on_improve = on_improve
@@ -1414,6 +1416,7 @@ class SimpleImageWidget:
             button.setFixedSize(self._cell_size, self._cell_size)  # type: ignore[attr-defined]
             button.setIconSize(icon)  # type: ignore[attr-defined]
         layout.setSpacing(self._cell_gap)  # type: ignore[attr-defined]
+        self._history_bar.setSingleStep(self._history_stride())  # type: ignore[attr-defined]
         self._apply_history()
         self._snap_history()
 
@@ -1440,6 +1443,69 @@ class SimpleImageWidget:
             bar.setValue(snapped)  # type: ignore[attr-defined]
         finally:
             self._snapping_history = False
+
+    def _history_stride(self) -> int:
+        """Return the history snap stride: cell size plus gap."""
+        return self._cell_size + self._cell_gap
+
+    def _nudge_history(self, delta: int) -> None:
+        """Move the history strip by ``delta`` pixels, then snap to a cell."""
+        bar = self._history_bar
+        scroll = self._history_scroll
+        viewport = int(scroll.viewport().width())  # type: ignore[attr-defined]
+        row = scroll.widget()  # type: ignore[attr-defined]
+        content = int(row.width()) if row is not None else 0  # type: ignore[attr-defined]
+        current = snap_history_offset(
+            int(bar.value()),  # type: ignore[attr-defined]
+            cell_size=self._cell_size,
+            cell_gap=self._cell_gap,
+            viewport=viewport,
+            content=content,
+        )
+        self._snapping_history = True
+        try:
+            bar.setValue(current + delta)  # type: ignore[attr-defined]
+        finally:
+            self._snapping_history = False
+        self._snap_history()
+
+    def _handle_history_wheel(self, strip: object, event: object) -> None:
+        """Scroll the history strip by whole cells, or snap when a trackpad gesture ends.
+
+        A phased trackpad gesture (``ScrollUpdate``) is left to Qt so the
+        strip can move freely. The offset snaps when the gesture ends. A
+        discrete mouse wheel (no phase) accumulates angle, and each 120
+        degree notch moves exactly one cell, so a small notch can advance
+        instead of being pulled back to the current cell.
+        """
+        widgets = self._widgets
+        qt = self._qt
+        phase = event.phase()  # type: ignore[attr-defined]
+        if phase != qt.ScrollPhase.NoScrollPhase:
+            widgets.QScrollArea.wheelEvent(strip, event)  # type: ignore[arg-type]
+            if phase == qt.ScrollPhase.ScrollEnd:
+                self._history_wheel_angle = 0
+                self._history_wheel_pixels = 0
+                self._snap_history()
+            return
+        angle = event.angleDelta()  # type: ignore[attr-defined]
+        pixel = event.pixelDelta()  # type: ignore[attr-defined]
+        angle_delta = int(angle.x() or angle.y())
+        pixel_delta = int(pixel.x() or pixel.y())
+        if angle_delta == 0 and pixel_delta == 0:
+            widgets.QScrollArea.wheelEvent(strip, event)  # type: ignore[arg-type]
+            return
+        stride = self._history_stride()
+        # Wheel up / positive delta scrolls toward the start of the row.
+        if angle_delta:
+            self._history_wheel_angle += angle_delta
+            steps, self._history_wheel_angle = divmod(self._history_wheel_angle, 120)
+        else:
+            self._history_wheel_pixels += pixel_delta
+            steps, self._history_wheel_pixels = divmod(self._history_wheel_pixels, stride)
+        if steps:
+            self._nudge_history(-steps * stride)
+        event.accept()  # type: ignore[attr-defined]
 
     def set_voices(self, voices: Iterable[tuple[str, str]]) -> None:
         """Replace the voice combo and store the selected id.
@@ -1798,12 +1864,11 @@ class SimpleImageWidget:
         self._history_scroll.setWidget(history)
         _darken(self._history_scroll, self._gui)
         self._history_bar = self._history_scroll.horizontalScrollBar()
+        self._history_bar.setSingleStep(self._history_stride())  # type: ignore[attr-defined]
         self._history_bar.actionTriggered.connect(self._snap_history)  # type: ignore[attr-defined]
+        # Snap when a drag ends, not on valueChanged: mid-drag and live
+        # trackpad updates must be able to pass a cell before they snap.
         self._history_bar.sliderReleased.connect(self._snap_history)  # type: ignore[attr-defined]
-        # valueChanged also covers mouse-wheel and trackpad scrolling, which
-        # never emit actionTriggered or sliderReleased. The re-entrancy flag
-        # in _snap_history stops the setValue from looping.
-        self._history_bar.valueChanged.connect(self._snap_history)  # type: ignore[attr-defined]
         root.addWidget(self._history_scroll)
         self._status_row = widgets.QWidget()
         self._status_row.setObjectName("statusRow")
@@ -1833,6 +1898,9 @@ class SimpleImageWidget:
             def resizeEvent(_self: object, event: object) -> None:
                 widgets.QScrollArea.resizeEvent(_self, event)  # type: ignore[arg-type]
                 widget._snap_history()
+
+            def wheelEvent(_self: object, event: object) -> None:
+                widget._handle_history_wheel(_self, event)
 
         strip = _Strip()
         strip.setObjectName("historyStrip")
