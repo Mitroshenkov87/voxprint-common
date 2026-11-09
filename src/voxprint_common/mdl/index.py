@@ -1,10 +1,13 @@
 """Suite model index from ``Mitroshenkov87/voxprint-model-index``.
 
-The bundled snapshot is commit ``15edeab0``. A remote ``index.json`` is used
-only when the detached ``index.json.sig`` verifies under a bundled Ed25519
+The bundled snapshot is serial 10 (head still ``15edeab0`` until Model
+Forge publishes a signed refresh). A remote ``index.json`` is used only
+when the detached ``index.json.sig`` verifies under a bundled Ed25519
 public key and the document is not older than that pin. A missing signature,
 a bad signature, a fetch error, or an older serial or ``generated_at`` is
-logged and the bundled snapshot is used.
+logged and the bundled snapshot is used. A live signed serial-9 remote is
+older than this pin, so the bundled Turbo default is used until a signed
+index at serial 10 or later is published.
 """
 
 from __future__ import annotations

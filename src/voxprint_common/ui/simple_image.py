@@ -1800,6 +1800,10 @@ class SimpleImageWidget:
         self._history_bar = self._history_scroll.horizontalScrollBar()
         self._history_bar.actionTriggered.connect(self._snap_history)  # type: ignore[attr-defined]
         self._history_bar.sliderReleased.connect(self._snap_history)  # type: ignore[attr-defined]
+        # valueChanged also covers mouse-wheel and trackpad scrolling, which
+        # never emit actionTriggered or sliderReleased. The re-entrancy flag
+        # in _snap_history stops the setValue from looping.
+        self._history_bar.valueChanged.connect(self._snap_history)  # type: ignore[attr-defined]
         root.addWidget(self._history_scroll)
         self._status_row = widgets.QWidget()
         self._status_row.setObjectName("statusRow")

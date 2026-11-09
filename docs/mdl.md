@@ -197,7 +197,7 @@ The older app-manifest form, `{"argv", "timeout_s", "produces"}`, still works an
 
 ## Model index
 
-The bundled index is the serial 9 snapshot of `Mitroshenkov87/voxprint-model-index` (head `15edeab0f7a874c27d2b38ef6ecb69106ff94df8`, 29 models, sha256 `8dd3a7852212d27900f3d568eefd61853e4dfcf9c5d306aa962d09503ecbe538`), signed with Model Forge's key. `model-index.pin.json` records the head, serial `9`, `generated_at` `2026-10-18T04:09:36Z`, and the sha256, which the bundled file must match. A remote index may be the object `{head, serial, generated_at, models}` or a plain list.
+The bundled index is serial 10 (29 models, sha256 `dab444f7d820b2611cb2aa1ec00ad8241a1ae41a4c68823aff793bfa0a72ce0e`). Head stays `15edeab0f7a874c27d2b38ef6ecb69106ff94df8` until Model Forge publishes a signed refresh. `model-index.pin.json` records the head, serial `10`, `generated_at` `2026-11-09T23:46:34Z`, and the sha256, which the bundled file must match. The bundle itself is pin-trusted and unsigned until that signed index arrives; serial 10 is newer than the live signed serial-9 remote, so the bundled Turbo default is used in the meantime. A remote index may be the object `{head, serial, generated_at, models}` or a plain list.
 
 A model document may list `prebuilt` alternatives. An entry with `role: "fallback"` and `replaces: "transformer/"` (a folder prefix, or one path) swaps those default files for its own `files` when a default file fails after the normal mirror rules, or when `choose_variant(model_id, fallback_id)` picks it. The choice is saved in `<home>/state/mdl-variants.json`.
 

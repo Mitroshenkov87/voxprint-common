@@ -34,7 +34,7 @@ from voxprint_common.mdl.variants import chosen_variants
 PAYLOAD = b"voxprint-mdl-bytes-0123456789abcdef"
 DIGEST = sha256_bytes(PAYLOAD)
 HEAD = "15edeab0f7a874c27d2b38ef6ecb69106ff94df8"
-INDEX_SHA = "8dd3a7852212d27900f3d568eefd61853e4dfcf9c5d306aa962d09503ecbe538"
+INDEX_SHA = "dab444f7d820b2611cb2aa1ec00ad8241a1ae41a4c68823aff793bfa0a72ce0e"
 _FIXTURES = Path(__file__).resolve().parent / "fixtures"
 _SEED = bytes(range(32))
 
@@ -147,15 +147,15 @@ def _load(site: _Site):
     )
 
 
-def test_bundled_index_is_the_serial_9_snapshot() -> None:
+def test_bundled_index_is_the_serial_10_snapshot() -> None:
     raw = bundled_index_bytes()
     assert sha256_bytes(raw) == INDEX_SHA
     index = load_index(remote=False)
     assert index.source == "bundled"
     assert index.fallback == ""
     assert index.head == HEAD
-    assert index.serial == 9
-    assert index.generated_at == "2026-10-18T04:09:36Z"
+    assert index.serial == 10
+    assert index.generated_at == "2026-11-09T23:46:34Z"
     assert len(index.entries) == 29
     assert index.get("gemma4-31b") is not None
     assert index.get("huihui-qwen36-27b") is not None
@@ -294,6 +294,23 @@ def test_bad_or_missing_signature_falls_back(caplog: pytest.LogCaptureFixture) -
     assert forged.source == "bundled"
     assert forged.fallback == "remote index signature is invalid"
     assert "remote index signature is invalid" in caplog.text
+
+
+def test_signed_serial_9_remote_does_not_hide_the_bundled_turbo_default(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A live signed serial-9 index must not replace the serial-10 bundle."""
+    body = _index_body(serial=9)
+    site = _signed_site(body, sign(body, _SEED))
+    with caplog.at_level(logging.WARNING):
+        index = _load(site)
+    assert index.source == "bundled"
+    assert "older than bundled pin" in index.fallback
+    assert index.fallback in caplog.text
+    turbo = index.get("z-image-turbo")
+    assert turbo is not None
+    assert turbo.default is True
+    assert index.get("mirror-z-image-turbo") is None
 
 
 def test_older_index_is_rejected(caplog: pytest.LogCaptureFixture) -> None:

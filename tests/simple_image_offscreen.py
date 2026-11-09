@@ -107,7 +107,7 @@ def main() -> None:
     assert bar.value() == 0
     stride = 64 + 4
     bar.setValue(30)
-    view._snap_history()
+    app.processEvents()
     assert bar.value() == expected(30)
     assert bar.value() % stride == 0
     bar.setValue(31 + bar.maximum())
