@@ -85,6 +85,7 @@ _IDENTITY = (
     "clarity",
     "canvas",
     "model-forge",
+    "lucent",
 )
 PALETTE_ROLES = (
     "Window",

@@ -87,6 +87,7 @@ def test_headless_layout_and_adoption() -> None:
     assert tokens.identity["movie-dubber"] == "#b98cff"
     assert tokens.identity["enlarge"] == "#ff6b8a"
     assert tokens.identity["clarity"] == "#2dd4bf"
+    assert tokens.identity["lucent"] == "#5ce1ff"
     assert "PySide6" not in sys.modules
 
 

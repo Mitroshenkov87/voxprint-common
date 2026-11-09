@@ -25,6 +25,7 @@ def _png(size: int) -> bytes:
 
 def test_model_forge_identity_colour_comes_from_tokens():
     assert branding.identity_colour("model-forge") == "#f58a3c"
+    assert branding.identity_colour("lucent") == "#5ce1ff"
     if os.name != "nt":
         assert branding.detach_console() is False
 
