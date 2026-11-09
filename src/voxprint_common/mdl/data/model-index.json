@@ -130,6 +130,17 @@
       "sha256": "d6fd691e4c4e0f1b9b6ee8852364686f3f11abcbd8adf1d13e8d4bf439e65549"
     },
     {
+      "id": "moss-image-compressed",
+      "repo": "Mitroshenkov87/voxprint-mirror-moss-image-compressed",
+      "revision": "TODO-pending-calibration",
+      "sha256": "44876c25d0a4ac8bb9a184b800b4c02daea6fe7a05531ad97443971cb93305ed",
+      "size": 0,
+      "license": "Apache-2.0",
+      "default": true,
+      "optional": false,
+      "note": "TODO-pending-calibration: sha256 and size are placeholders pending PG VM calibration; default compressed MOSS-Image mirror, upstream Apache-2.0; do not download until calibration."
+    },
+    {
       "id": "moss-image-sft",
       "repo": "Mitroshenkov87/voxprint-mirror-moss-image-sft",
       "revision": "6db2a69abfefb6ddba4dfb597bf340ee63eeafa6",
@@ -175,7 +186,9 @@
       "id": "z-image",
       "repo": "datasets/Mitroshenkov87/voxprint-model-index",
       "revision": "5b7bdb4062d5bbc080b406c6bb3cb0a724438003",
-      "sha256": "06c2c55b02c511a9b63a006e0847ad2e152b92cc4564809f1880f604f5d6d6c8"
+      "sha256": "06c2c55b02c511a9b63a006e0847ad2e152b92cc4564809f1880f604f5d6d6c8",
+      "optional": true,
+      "note": "Optional separate download; not the default model."
     }
   ]
 }

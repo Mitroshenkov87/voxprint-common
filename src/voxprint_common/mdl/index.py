@@ -46,7 +46,9 @@ INDEX_REPO = "Mitroshenkov87/voxprint-model-index"
 _INDEX_URL = (
     "https://huggingface.co/datasets/Mitroshenkov87/voxprint-model-index/resolve/main/index.json"
 )
-_ENTRY_KEYS = frozenset({"id", "repo", "revision", "sha256"})
+_REQUIRED_ENTRY_KEYS = frozenset({"id", "repo", "revision", "sha256"})
+_OPTIONAL_ENTRY_KEYS = frozenset({"note", "size", "license", "default", "optional"})
+_ENTRY_KEYS = _REQUIRED_ENTRY_KEYS | _OPTIONAL_ENTRY_KEYS
 _OBJECT_KEYS = frozenset({"head", "serial", "generated_at", "models"})
 _KEY_ENV = "VOXPRINT_MDL_INDEX_KEY"
 _KEY_FILE_ENV = "VOXPRINT_MDL_INDEX_KEY_FILE"
@@ -62,12 +64,24 @@ class SuiteIndexError(ValueError):
 
 @dataclass(frozen=True)
 class IndexEntry:
-    """One model in the suite index."""
+    """One model in the suite index.
+
+    ``id``, ``repo``, ``revision``, and ``sha256`` are required.
+    ``note`` is free text, ``size`` is the artifact size in bytes when
+    known, ``license`` is an SPDX-style identifier, ``default`` marks the
+    entry users download by default, and ``optional`` marks entries that
+    are separate, on-demand downloads.
+    """
 
     id: str
     repo: str
     revision: str
     sha256: str
+    note: str = ""
+    size: int | None = None
+    license: str = ""
+    default: bool = False
+    optional: bool = False
 
 
 @dataclass(frozen=True)
@@ -141,6 +155,11 @@ def parse_index(payload: object) -> tuple[IndexEntry, ...]:
 
     A document is either a list of entries, or an object with ``models``
     plus an optional ``head``, ``serial``, and ``generated_at``.
+
+    Each entry requires ``id``, ``repo``, ``revision``, and ``sha256``.
+    Optional keys are ``note`` (string), ``size`` (non-negative integer
+    bytes), ``license`` (SPDX-style string), ``default`` (bool), and
+    ``optional`` (bool). Any other key is rejected.
 
     Args:
         payload: A decoded JSON value.
@@ -354,12 +373,21 @@ def _entries(rows: object) -> tuple[IndexEntry, ...]:
     entries: list[IndexEntry] = []
     seen: set[str] = set()
     for row in rows:
-        if not isinstance(row, dict) or set(row) != _ENTRY_KEYS:
-            raise SuiteIndexError("index entries need id, repo, revision, and sha256")
+        keys = set(row) if isinstance(row, dict) else set()
+        if not isinstance(row, dict) or keys - _ENTRY_KEYS or _REQUIRED_ENTRY_KEYS - keys:
+            raise SuiteIndexError(
+                "index entries need id, repo, revision, and sha256, "
+                "plus only note, size, license, default, or optional"
+            )
         model_id = row.get("id")
         repo = row.get("repo")
         revision = row.get("revision")
         digest = row.get("sha256")
+        note = row.get("note", "")
+        size = row.get("size") if "size" in row else None
+        license_id = row.get("license", "")
+        default = row.get("default", False)
+        optional = row.get("optional", False)
         if not isinstance(model_id, str) or not model_id:
             raise SuiteIndexError("index id is required")
         if model_id in seen:
@@ -370,8 +398,30 @@ def _entries(rows: object) -> tuple[IndexEntry, ...]:
             raise SuiteIndexError("index revision is required")
         if not isinstance(digest, str) or HASH_RE.fullmatch(digest) is None:
             raise SuiteIndexError("index sha256 must be 64 hex characters")
+        if not isinstance(note, str):
+            raise SuiteIndexError("index note must be a string")
+        if size is not None and (isinstance(size, bool) or not isinstance(size, int) or size < 0):
+            raise SuiteIndexError("index size must be a non-negative integer")
+        if not isinstance(license_id, str):
+            raise SuiteIndexError("index license must be a string")
+        if not isinstance(default, bool):
+            raise SuiteIndexError("index default must be a boolean")
+        if not isinstance(optional, bool):
+            raise SuiteIndexError("index optional must be a boolean")
         seen.add(model_id)
-        entries.append(IndexEntry(model_id, repo, revision, digest.lower()))
+        entries.append(
+            IndexEntry(
+                model_id,
+                repo,
+                revision,
+                digest.lower(),
+                note,
+                size,
+                license_id,
+                default,
+                optional,
+            )
+        )
     return tuple(entries)
 
 

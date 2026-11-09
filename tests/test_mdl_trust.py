@@ -18,6 +18,7 @@ from voxprint_common.mdl.descriptor import parse_descriptor, schema_bytes
 from voxprint_common.mdl.ed25519 import public_key, sign, verify
 from voxprint_common.mdl.fetch import FetchError, fetch_file
 from voxprint_common.mdl.index import (
+    SuiteIndexError,
     _bundled_public_keys,
     bundled_index_bytes,
     load_index,
@@ -33,7 +34,7 @@ from voxprint_common.mdl.variants import chosen_variants
 PAYLOAD = b"voxprint-mdl-bytes-0123456789abcdef"
 DIGEST = sha256_bytes(PAYLOAD)
 HEAD = "15edeab0f7a874c27d2b38ef6ecb69106ff94df8"
-INDEX_SHA = "104742f9d8cc7c8f693f963dbd871471a3e57fda3d585d52b105b3855d49f45f"
+INDEX_SHA = "e4b34f22036d68cf20b01d24f0b8ab717c14d14a3369200dd74bcea87713c75b"
 _FIXTURES = Path(__file__).resolve().parent / "fixtures"
 _SEED = bytes(range(32))
 
@@ -155,9 +156,86 @@ def test_bundled_index_is_the_serial_9_snapshot() -> None:
     assert index.head == HEAD
     assert index.serial == 9
     assert index.generated_at == "2026-10-18T04:09:36Z"
-    assert len(index.entries) == 29
+    assert len(index.entries) == 30
     assert index.get("gemma4-31b") is not None
     assert index.get("huihui-qwen36-27b") is not None
+
+
+def test_bundled_index_has_compressed_moss_default_and_optional_z_image() -> None:
+    index = load_index(remote=False)
+    compressed = index.get("moss-image-compressed")
+    assert compressed is not None
+    assert compressed.repo == "Mitroshenkov87/voxprint-mirror-moss-image-compressed"
+    assert compressed.revision == "TODO-pending-calibration"
+    assert compressed.sha256 == sha256_bytes(b"TODO-pending-calibration")
+    assert compressed.size == 0
+    assert compressed.license == "Apache-2.0"
+    assert compressed.default is True
+    assert compressed.optional is False
+    assert "TODO-pending-calibration" in compressed.note
+    z_image = index.get("z-image")
+    assert z_image is not None
+    assert z_image.optional is True
+    assert z_image.sha256 == "06c2c55b02c511a9b63a006e0847ad2e152b92cc4564809f1880f604f5d6d6c8"
+    assert z_image.repo == "datasets/Mitroshenkov87/voxprint-model-index"
+    assert z_image.revision == "5b7bdb4062d5bbc080b406c6bb3cb0a724438003"
+    assert index.get("moss-image-base") is not None
+    assert index.get("moss-image-sft") is not None
+
+
+def test_index_entries_allow_documented_optional_keys() -> None:
+    rows = [
+        {"id": "plain", "repo": "org/plain", "revision": "main", "sha256": "ab" * 32},
+        {
+            "id": "rich",
+            "repo": "org/rich",
+            "revision": "main",
+            "sha256": "cd" * 32,
+            "note": "n",
+            "size": 3,
+            "license": "Apache-2.0",
+            "default": True,
+            "optional": False,
+        },
+    ]
+    plain, rich = parse_index(rows)
+    assert (plain.id, plain.repo, plain.revision, plain.sha256) == (
+        "plain",
+        "org/plain",
+        "main",
+        "ab" * 32,
+    )
+    assert plain.note == ""
+    assert plain.size is None
+    assert plain.license == ""
+    assert plain.default is False
+    assert plain.optional is False
+    assert rich.sha256 == "cd" * 32
+    assert rich.note == "n"
+    assert rich.size == 3
+    assert rich.license == "Apache-2.0"
+    assert rich.default is True
+    assert rich.optional is False
+
+
+def test_index_entries_reject_unknown_keys_and_bad_optional_values() -> None:
+    base = {"id": "a", "repo": "org/a", "revision": "main", "sha256": "ab" * 32}
+    with pytest.raises(SuiteIndexError):
+        parse_index([{**base, "mystery": "x"}])
+    with pytest.raises(SuiteIndexError):
+        parse_index([{key: value for key, value in base.items() if key != "sha256"}])
+    for bad_size in (-1, "1", 1.5, True):
+        with pytest.raises(SuiteIndexError):
+            parse_index([{**base, "size": bad_size}])
+    for bad_bool in ("yes", 1, 0):
+        with pytest.raises(SuiteIndexError):
+            parse_index([{**base, "default": bad_bool}])
+        with pytest.raises(SuiteIndexError):
+            parse_index([{**base, "optional": bad_bool}])
+    with pytest.raises(SuiteIndexError):
+        parse_index([{**base, "note": 3}])
+    with pytest.raises(SuiteIndexError):
+        parse_index([{**base, "license": 3}])
 
 
 def test_live_signed_index_verifies_with_the_bundled_key() -> None:
@@ -190,7 +268,7 @@ def test_bad_or_missing_signature_falls_back(caplog: pytest.LogCaptureFixture) -
     assert unsigned.source == "bundled"
     assert unsigned.fallback == "remote index signature is missing"
     assert "remote index signature is missing" in caplog.text
-    assert len(unsigned.entries) == 29
+    assert len(unsigned.entries) == 30
 
     bad = bytearray(sign(body, _SEED))
     bad[-1] ^= 0x01
