@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.0 - 2026-11-09
+
+`save_image` now distinguishes an unset WebP quality (`None`, purpose default: lossless for masters, series, and hand-offs; lossy quality 90 for pictures) from explicit lossless (`QUALITY_LOSSLESS`, the string `"lossless"`). `build_xmp` omits non-finite float strengths. `parse_xmp` returns empty metadata and logs a warning on a malformed packet instead of raising. `normalize_base` still reads an untagged LoRA as `z-image` (moss-final-spec item 4); that behaviour is pinned in a comment and a test.
+
+The bundled model index adds `moss-image-compressed`, the default compressed MOSS-Image mirror, with `sha256` and `size` marked `TODO-pending-calibration` (no artifact, no download, not signed; Model Forge holds the key). `z-image` is flagged as an optional separate download. Index entries may carry optional `note`, `size`, `license`, `default`, and `optional` fields. The pin sha256 is `e4b34f22036d68cf20b01d24f0b8ab717c14d14a3369200dd74bcea87713c75b`; serial and head stay at the signed snapshot. Pillow is already the newest release (`>=13.0`, 13.0.0). filelock is not a dependency (locking stays in `atomic.py`).
+
+The Lucent identity token is `#5ce1ff`. `MIGRATION-PLAN.md` describes how each app hosts the shared simple/Expert/Custom shell; the old UI stays frozen. `scripts/render_shell_variants.py` paints one sample window per app type (image, audio, video, text) at 100% and 150%.
+
 ## 0.6.4 - 2026-11-05
 
 The library supports Python 3.14 and newer. `requires-python` is `>=3.14`. The Trove classifiers list `Programming Language :: Python :: 3.14` and `Programming Language :: Python :: 3.15`. Ruff's `target-version` is `py314`, the minimum. CI tests 3.14 and 3.15 on Ubuntu and Windows. The docs job, `release.yml`, `pages.yml`, and `docs/ci/pin-check.yml` install 3.15. The newest stable target is 3.15. The floor stays 3.14 so Clarity and Enlarge can keep `onnxruntime-gpu` until that package ships a 3.15 wheel. This repository does not ship an installer or a bundled Python runtime.
