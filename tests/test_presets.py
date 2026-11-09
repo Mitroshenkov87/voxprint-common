@@ -170,6 +170,36 @@ def test_mode_switch_is_outside_the_image_state() -> None:
     assert layout.seed == 9
 
 
+def test_expert_toggle_round_trip_keeps_live_values() -> None:
+    """Simple and Expert are two views of one state.
+
+    The toggle only re-filters which descriptors render
+    (:meth:`Settings.visible`); it does not write the state. A value edited in
+    the Expert panel and a chip chosen in simple mode are still there after
+    the toggle leaves and returns.
+    """
+    settings = reference_settings()
+    layout = SimpleImageLayout(
+        presets=reference_presets(settings), settings=settings, gate=_Allow()
+    )
+    expert_ids = {spec.setting_id for spec in settings.visible(expert=True)}
+    assert "shell.steps" in expert_ids
+    assert "image.adult_content" in expert_ids
+    assert {spec.setting_id for spec in settings.visible(expert=False)} == set()
+    layout.choose("quality", "fast")
+    layout.set_value("shell.steps", 24)
+    layout.set_value("image.adult_content", True)
+    layout.seed = 9
+    held = layout.snapshot()
+    settings.visible(expert=False)
+    assert {spec.setting_id for spec in settings.visible(expert=True)} == expert_ids
+    assert layout.snapshot() == held
+    assert layout.get("shell.steps") == 24
+    assert layout.get("image.adult_content") is True
+    assert layout.presets["quality"] == "fast"
+    assert layout.seed == 9
+
+
 def test_settings_state_round_trip(tmp_path: Path) -> None:
     settings = reference_settings()
     document = reference_presets(settings)
