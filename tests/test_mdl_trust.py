@@ -34,7 +34,7 @@ from voxprint_common.mdl.variants import chosen_variants
 PAYLOAD = b"voxprint-mdl-bytes-0123456789abcdef"
 DIGEST = sha256_bytes(PAYLOAD)
 HEAD = "15edeab0f7a874c27d2b38ef6ecb69106ff94df8"
-INDEX_SHA = "995a678b17dad62f49ee45929e3b935df245324765a3ffc18aae6dcab8f0c94d"
+INDEX_SHA = "8dd3a7852212d27900f3d568eefd61853e4dfcf9c5d306aa962d09503ecbe538"
 _FIXTURES = Path(__file__).resolve().parent / "fixtures"
 _SEED = bytes(range(32))
 
@@ -156,7 +156,7 @@ def test_bundled_index_is_the_serial_9_snapshot() -> None:
     assert index.head == HEAD
     assert index.serial == 9
     assert index.generated_at == "2026-10-18T04:09:36Z"
-    assert len(index.entries) == 30
+    assert len(index.entries) == 29
     assert index.get("gemma4-31b") is not None
     assert index.get("huihui-qwen36-27b") is not None
 
@@ -167,13 +167,15 @@ def test_bundled_index_has_z_image_turbo_default_and_optional_full_models() -> N
     turbo = index.get("z-image-turbo")
     assert turbo is not None
     assert turbo.repo == "Mitroshenkov87/voxprint-mirror-z-image-turbo"
-    assert turbo.revision == "TODO-pending-upload"
+    assert turbo.revision == "a853c26eb946b9010b4bd142a2ad1439d83e7896"
     assert turbo.sha256 == "fefa994cbef9d62201089f61d0bde2914ba0e826650f323816ec9b562965168e"
     assert turbo.size == 11047
     assert turbo.license == "Apache-2.0"
     assert turbo.default is True
     assert turbo.optional is False
-    assert turbo.note.startswith("TODO-pending-upload:")
+    assert turbo.note.startswith("Default generation model: Z-Image-Turbo")
+    assert index.get("mirror-z-image-turbo") is None
+    assert index.get("mirror-z-image-turbo-controlnet-union-2.1") is not None
     z_image = index.get("z-image")
     assert z_image is not None
     assert z_image.repo == "datasets/Mitroshenkov87/voxprint-model-index"
@@ -281,7 +283,7 @@ def test_bad_or_missing_signature_falls_back(caplog: pytest.LogCaptureFixture) -
     assert unsigned.source == "bundled"
     assert unsigned.fallback == "remote index signature is missing"
     assert "remote index signature is missing" in caplog.text
-    assert len(unsigned.entries) == 30
+    assert len(unsigned.entries) == 29
 
     bad = bytearray(sign(body, _SEED))
     bad[-1] ^= 0x01

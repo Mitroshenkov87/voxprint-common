@@ -106,12 +106,6 @@
       "sha256": "f7827c5f9c1843a9d4677a62636ead0545ccb4b557c677df75dd0718dad70127"
     },
     {
-      "id": "mirror-z-image-turbo",
-      "repo": "Mitroshenkov87/voxprint-mirror-z-image-turbo",
-      "revision": "b74ab2e157465ba2cb432ebf39ab9ff5e5919c8b",
-      "sha256": "80cece369bb34fd3741e7033688913ef8da37ce62276ea5bcf774aadeee5c640"
-    },
-    {
       "id": "mirror-z-image-turbo-controlnet-union-2.1",
       "repo": "Mitroshenkov87/voxprint-mirror-z-image-turbo-controlnet-union-2.1",
       "revision": "a00c5bea0cd05548c88680bef88ce41414a31307",
@@ -192,13 +186,13 @@
     {
       "id": "z-image-turbo",
       "repo": "Mitroshenkov87/voxprint-mirror-z-image-turbo",
-      "revision": "TODO-pending-upload",
+      "revision": "a853c26eb946b9010b4bd142a2ad1439d83e7896",
       "sha256": "fefa994cbef9d62201089f61d0bde2914ba0e826650f323816ec9b562965168e",
       "size": 11047,
       "license": "Apache-2.0",
       "default": true,
       "optional": false,
-      "note": "TODO-pending-upload: default model is Z-Image-Turbo (Tongyi-MAI/Z-Image-Turbo@f332072aa78be7aecdf3ee76d5c247082da564a6, Apache-2.0). Author weights already live on Mitroshenkov87/voxprint-mirror-z-image-turbo (HEAD 097de9bed91ab31e143aa0920c3c32c6a7eddbec); this row waits for the z-image-turbo descriptor JSON to be uploaded. sha256 and size are of the local descriptor."
+      "note": "Default generation model: Z-Image-Turbo (Tongyi-MAI/Z-Image-Turbo@f332072aa78be7aecdf3ee76d5c247082da564a6, Apache-2.0). Descriptor is voxprint-model.json on Mitroshenkov87/voxprint-mirror-z-image-turbo @a853c26eb946b9010b4bd142a2ad1439d83e7896; author weights are already on that mirror. sha256 and size are of the descriptor."
     }
   ]
 }

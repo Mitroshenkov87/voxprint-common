@@ -197,7 +197,7 @@ The older app-manifest form, `{"argv", "timeout_s", "produces"}`, still works an
 
 ## Model index
 
-The bundled index is the serial 9 snapshot of `Mitroshenkov87/voxprint-model-index` (head `15edeab0f7a874c27d2b38ef6ecb69106ff94df8`, 30 models, sha256 `995a678b17dad62f49ee45929e3b935df245324765a3ffc18aae6dcab8f0c94d`), signed with Model Forge's key. `model-index.pin.json` records the head, serial `9`, `generated_at` `2026-10-18T04:09:36Z`, and the sha256, which the bundled file must match. A remote index may be the object `{head, serial, generated_at, models}` or a plain list.
+The bundled index is the serial 9 snapshot of `Mitroshenkov87/voxprint-model-index` (head `15edeab0f7a874c27d2b38ef6ecb69106ff94df8`, 29 models, sha256 `8dd3a7852212d27900f3d568eefd61853e4dfcf9c5d306aa962d09503ecbe538`), signed with Model Forge's key. `model-index.pin.json` records the head, serial `9`, `generated_at` `2026-10-18T04:09:36Z`, and the sha256, which the bundled file must match. A remote index may be the object `{head, serial, generated_at, models}` or a plain list.
 
 A model document may list `prebuilt` alternatives. An entry with `role: "fallback"` and `replaces: "transformer/"` (a folder prefix, or one path) swaps those default files for its own `files` when a default file fails after the normal mirror rules, or when `choose_variant(model_id, fallback_id)` picks it. The choice is saved in `<home>/state/mdl-variants.json`.
 
