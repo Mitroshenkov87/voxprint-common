@@ -145,6 +145,8 @@ def normalize_base(tag: Any) -> str:
     Raises:
         ValueError: ``tag`` names no known base.
     """
+    # By design (moss-final-spec item 4): untagged legacy LoRAs, including
+    # Garnis, read as "z-image" even though the suite default model is moss.
     if tag is None:
         return "z-image"
     if not isinstance(tag, str):
@@ -160,7 +162,8 @@ def normalize_base(tag: Any) -> str:
 def lora_base_matches(lora_base: Any, model: str) -> bool:
     """Return whether a LoRA tagged ``lora_base`` belongs on ``model``.
 
-    Untagged (legacy) LoRAs are treated as Z-Image LoRAs.
+    Untagged (legacy) LoRAs are treated as Z-Image LoRAs, by design
+    (moss-final-spec item 4).
 
     Args:
         lora_base: The LoRA's base tag, or None when untagged.

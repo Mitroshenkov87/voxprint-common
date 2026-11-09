@@ -96,6 +96,8 @@ def test_select_quant_rejects_unknown_model_and_mode() -> None:
     ],
 )
 def test_normalize_base(tag: object, model_id: str) -> None:
+    # PIN (moss-final-spec item 4): untagged legacy LoRAs, including Garnis,
+    # read as "z-image" by design even though the suite default model is moss.
     assert normalize_base(tag) == model_id
 
 

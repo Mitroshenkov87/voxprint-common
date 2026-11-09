@@ -23,12 +23,14 @@ key is preserved, so one app does not wipe another's settings.
   the default, follows the detected RAM tier.
 * ``image.save_format``: the shared image save format. Stored as
   ``{"format": ..., "quality": ..., "metadata": ...}`` with the format
-  ``webp``, ``png``, ``avif``, or ``jpeg``. WebP without a quality is
-  lossless; a quality of 1-100 makes it lossy. PNG takes no quality; AVIF and
-  JPEG default to a quality of 85. ``metadata`` is true or false, default
-  false: whether ``save_image`` writes the XMP/EXIF metadata mapping.
-  Missing or invalid values mean lossless WebP with metadata off.
-  :mod:`voxprint_common.image` saves with it.
+  ``webp``, ``png``, ``avif``, or ``jpeg``. A WebP quality of None is unset:
+  the save purpose default applies (lossless for masters, series, and
+  hand-offs; 90 for regular pictures). The string ``"lossless"`` forces
+  lossless WebP even for pictures; a quality of 1-100 makes it lossy. PNG
+  takes no quality; AVIF and JPEG default to a quality of 85. ``metadata``
+  is true or false, default false: whether ``save_image`` writes the
+  XMP/EXIF metadata mapping. Missing or invalid values mean lossless WebP
+  with metadata off. :mod:`voxprint_common.image` saves with it.
 * ``model.default``: the shared generation base model, ``moss`` (MOSS-Image,
   the default) or ``z-image``. An unknown value reads as ``moss``.
 * ``model.quant``: the shared weight quant, ``auto`` (pick by the memory
@@ -333,18 +335,22 @@ def set_image_save_format(value: Mapping[str, Any] | str) -> dict[str, int | str
 
     Args:
         value: ``{"format": ..., "quality": ..., "metadata": ...}`` or a
-            format name such as ``"webp"``. WebP without a quality is
-            lossless; a quality of 1-100 makes it lossy. PNG takes no
-            quality; AVIF and JPEG get the default quality of 85 when none is
-            given. ``metadata`` is true or false, default false: whether
-            ``save_image`` writes the metadata mapping.
+            format name such as ``"webp"``. A WebP quality of None is unset
+            (the save purpose default: lossless for masters, series, and
+            hand-offs; 90 for regular pictures). The string ``"lossless"``
+            forces lossless WebP even for pictures; a quality of 1-100 makes
+            it lossy. PNG takes no quality; AVIF and JPEG get the default
+            quality of 85 when none is given. ``metadata`` is true or false,
+            default false: whether ``save_image`` writes the metadata
+            mapping.
 
     Returns:
         The stored ``{"format": ..., "quality": ..., "metadata": ...}``.
 
     Raises:
-        ValueError: The format is unknown, the quality is not an integer
-            from 1 to 100, or ``metadata`` is not a bool.
+        ValueError: The format is unknown, the quality is not None,
+            ``"lossless"``, or an integer from 1 to 100, or ``metadata`` is
+            not a bool.
     """
     return dict(set_value("image.save_format", value))
 
@@ -739,6 +745,11 @@ def normalize_image_save_format(value: object) -> dict[str, int | str | bool | N
     for WebP and PNG, :data:`DEFAULT_IMAGE_QUALITY` for AVIF and JPEG, and
     metadata off.
 
+    The quality is None (unset, so the save purpose default applies), the
+    string ``"lossless"`` (explicit lossless, WebP only; it must match
+    :data:`voxprint_common.image.QUALITY_LOSSLESS`), or an integer from 1 to
+    100. Any other string is rejected.
+
     Args:
         value: Stored save format, a ``format``/``quality``/``metadata``
             mapping, or a format name.
@@ -756,9 +767,14 @@ def normalize_image_save_format(value: object) -> dict[str, int | str | bool | N
     if text not in IMAGE_SAVE_FORMATS:
         return None
     quality = value.get("quality")
-    if isinstance(quality, bool) or not (quality is None or isinstance(quality, int)):
+    if isinstance(quality, str):
+        # Duplicated literal: voxprint_common.image imports this module, so
+        # the constant cannot be imported here. Only WebP stores it.
+        if quality != "lossless" or text != "webp":
+            return None
+    elif isinstance(quality, bool) or not (quality is None or isinstance(quality, int)):
         return None
-    if quality is not None and not 1 <= quality <= 100:
+    if isinstance(quality, int) and not 1 <= quality <= 100:
         return None
     if text == "png" and quality is not None:
         return None
