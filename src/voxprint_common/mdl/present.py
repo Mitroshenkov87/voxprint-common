@@ -10,11 +10,13 @@ from __future__ import annotations
 import math
 import os
 import urllib.parse
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path, PureWindowsPath
 
 from voxprint_common.branding import identity_colour
+from voxprint_common.gpu_probe import VramTier
 from voxprint_common.i18n import get_language, tr, tr_lang
 from voxprint_common.mdl.catalog import DiskShort
 from voxprint_common.mdl.fetch import Cancelled, FetchError
@@ -23,6 +25,8 @@ from voxprint_common.ui.splash import identity
 __all__ = [
     "CONCURRENCY",
     "ERROR_KEYS",
+    "GROUP_ORDER",
+    "PROTECTED_GROUPS",
     "SOURCE_IDS",
     "STATE_KEYS",
     "AppSlot",
@@ -30,19 +34,24 @@ __all__ = [
     "Explanation",
     "GroupView",
     "ItemState",
+    "ManageGroup",
     "ManageRow",
     "ManageView",
     "QueueItem",
     "RowView",
     "SmoothedProgress",
     "Snapshot",
+    "TierSection",
     "WindowView",
+    "can_remove",
     "display_path",
     "explain",
     "format_eta",
     "format_size",
     "format_speed",
+    "group_manage_rows",
     "localized_name",
+    "normalize_group",
     "source_id",
     "source_label",
     "view_for",
@@ -255,7 +264,14 @@ class GroupView:
 
 @dataclass(frozen=True)
 class ManageRow:
-    """One model on the manage-models page."""
+    """One model on the manage-models page.
+
+    ``key`` is the raw model id and becomes the row tooltip. ``group`` is
+    the normalized task group id. ``badge`` is the VRAM tier (``8gb``,
+    ``16gb``, or ``24gb``); an empty string means tier ``any`` and paints
+    no badge. ``removable`` is false for the protected ``safety`` and
+    ``internal`` groups, which paint no Remove button.
+    """
 
     key: str
     title: str
@@ -265,17 +281,186 @@ class ManageRow:
     action: str
     action_label: str
     note: str = ""
+    purpose: str = ""
+    group: str = "other"
+    badge: str = ""
+    removable: bool = True
+
+
+@dataclass(frozen=True)
+class TierSection:
+    """One half of a VRAM-split task group.
+
+    ``key`` is ``compact`` (8 GB and 16 GB rows) or ``full`` (24 GB rows).
+    ``open`` says whether the section starts expanded; the closed half sits
+    under a "models for other cards" disclosure in the window.
+    """
+
+    key: str
+    title: str
+    rows: tuple[ManageRow, ...]
+    open: bool
+
+
+@dataclass(frozen=True)
+class ManageGroup:
+    """Rows for one task group on the manage-models page.
+
+    A group with ``sections`` is VRAM-split and keeps ``rows`` empty. A
+    group with ``rows`` paints a flat list. ``collapsed`` groups (safety
+    and internal) start folded behind their title.
+    """
+
+    key: str
+    title: str
+    rows: tuple[ManageRow, ...] = ()
+    sections: tuple[TierSection, ...] = ()
+    collapsed: bool = False
 
 
 @dataclass(frozen=True)
 class ManageView:
-    """Installed models and the extras this graphics card can run."""
+    """Installed models and the extras this graphics card can run.
+
+    ``groups`` is the task-grouped organisation the window paints. The
+    ``installed`` and ``available`` tuples stay for callers that built the
+    old flat page and for the fallback layout when ``groups`` is empty.
+    """
 
     installed: tuple[ManageRow, ...]
     available: tuple[ManageRow, ...]
     disk: str
     empty_installed: str
     empty_available: str
+    groups: tuple[ManageGroup, ...] = ()
+
+
+GROUP_ORDER = (
+    "generate",
+    "edit",
+    "upscale",
+    "restore",
+    "voice",
+    "transcribe",
+    "translate",
+    "writer",
+    "other",
+    "safety",
+    "internal",
+)
+GROUP_TITLE_KEYS = {
+    "generate": "mdl.manage.group.generate",
+    "edit": "mdl.manage.group.edit",
+    "upscale": "mdl.manage.group.upscale",
+    "restore": "mdl.manage.group.restore",
+    "voice": "mdl.manage.group.voice",
+    "transcribe": "mdl.manage.group.transcribe",
+    "translate": "mdl.manage.group.translate",
+    "writer": "mdl.manage.group.writer",
+    # not ".other": the catalog test reads a ".other" suffix as a plural form
+    "other": "mdl.manage.group.others",
+    "safety": "mdl.manage.group.safety",
+    "internal": "mdl.manage.group.internal",
+}
+PROTECTED_GROUPS = frozenset({"safety", "internal"})
+_SPLIT_GROUPS = frozenset({"generate", "edit", "upscale", "restore"})
+_COMPACT_BADGES = frozenset({"8gb", "16gb"})
+
+
+def normalize_group(value: str) -> str:
+    """Return the task group id for a manifest ``group`` value.
+
+    A missing, empty, or unknown value becomes ``other`` so old manifests
+    keep loading; the load never fails on a bad group.
+    """
+    text = value.strip().lower()
+    if text in GROUP_ORDER:
+        return text
+    return "other"
+
+
+def can_remove(group: str) -> bool:
+    """Return whether a model in ``group`` may be removed.
+
+    ``safety`` and ``internal`` models are required for the checks the
+    suite runs before and after generation, so removing them is refused
+    here and the row paints no Remove button.
+    """
+    return normalize_group(group) not in PROTECTED_GROUPS
+
+
+def group_manage_rows(
+    rows: Sequence[ManageRow],
+    *,
+    tier: VramTier,
+    lang: str | None = None,
+) -> tuple[ManageGroup, ...]:
+    """Arrange manage rows into titled task groups, ordered for display.
+
+    Empty groups are hidden. Inside generate, edit, upscale, and restore a
+    group that holds both a compact (8 GB or 16 GB) and a full-size
+    (24 GB) row splits into two sections; the section matching the
+    detected card starts open, the other stays under its disclosure. An
+    unknown or missing GPU reads as 16 GB for that choice, so the compact
+    section opens. Tier ``any`` rows join the open section without a
+    badge. A group without both halves paints a flat list with badges.
+
+    Args:
+        rows: The manage rows, each already carrying its normalized group.
+        tier: The detected VRAM tier of the largest card.
+        lang: Language code. Defaults to the active UI language.
+    """
+    by_group: dict[str, list[ManageRow]] = {key: [] for key in GROUP_ORDER}
+    for row in rows:
+        by_group[normalize_group(row.group)].append(row)
+    open_full = tier is VramTier.GB24
+    groups: list[ManageGroup] = []
+    for key in GROUP_ORDER:
+        items = by_group[key]
+        if not items:
+            continue
+        if key in _SPLIT_GROUPS and _has_two_tiers(items):
+            compact_fit = tuple(row for row in items if row.badge in _COMPACT_BADGES)
+            full_fit = tuple(row for row in items if row.badge == "24gb")
+            loose = tuple(
+                row for row in items if row.badge not in _COMPACT_BADGES and row.badge != "24gb"
+            )
+            # Tier ``any`` rows follow the detected card into the open half.
+            if open_full:
+                compact, full = compact_fit, (*full_fit, *loose)
+            else:
+                compact, full = (*compact_fit, *loose), full_fit
+            groups.append(
+                ManageGroup(
+                    key,
+                    _t(GROUP_TITLE_KEYS[key], lang),
+                    sections=(
+                        TierSection(
+                            "compact",
+                            _t("mdl.manage.section.compact", lang),
+                            compact,
+                            not open_full,
+                        ),
+                        TierSection("full", _t("mdl.manage.section.full", lang), full, open_full),
+                    ),
+                )
+            )
+            continue
+        groups.append(
+            ManageGroup(
+                key,
+                _t(GROUP_TITLE_KEYS[key], lang),
+                rows=tuple(items),
+                collapsed=key in PROTECTED_GROUPS,
+            )
+        )
+    return tuple(groups)
+
+
+def _has_two_tiers(rows: Sequence[ManageRow]) -> bool:
+    """Return whether ``rows`` holds a compact tier and a full-size tier."""
+    badges = {row.badge for row in rows}
+    return bool(badges & _COMPACT_BADGES) and "24gb" in badges
 
 
 @dataclass(frozen=True)

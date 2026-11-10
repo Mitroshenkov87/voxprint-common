@@ -132,6 +132,8 @@ Schema 1. One file per app, named `mdl.json`.
 
 `vram_tier` is `any`, `8gb`, `16gb`, or `24gb`. Several objects may share an `id` and differ by tier. The plan keeps the highest tier that fits the card, so a 24 GB machine does not also pull the 8 GB and 16 GB copies of that id. The 24 GB check is about 23.5 GiB, because cards report a little under the label. An unknown GPU is planned as 8 GB. `any` is used when no larger variant fits.
 
+A model may set `label`, `purpose`, and `group`, optional display strings for the manage page: the row title (`label`, then `display_name`, then the id), a one-line description, and the task group. `group` is `generate`, `edit`, `upscale`, `restore`, `voice`, `transcribe`, `translate`, `writer`, `safety`, or `internal`; a missing or unknown value sorts into "Other" and never fails the load. The same fields exist on `voxprint-app-models/1` tier entries and `optional[]` entries. See [mdl-fields](mdl-fields.md) for the full spec.
+
 A mirror may also be an `http` or `https` URL string, or `{"source": "url", "url": "https://..."}`. `..` in a file path is rejected.
 
 A model may set `mirror_policy` to `race` or `strict-priority`. A file may set `mirror_policy` and `sources`. `sources` uses the same objects as `mirrors` and replaces them for that file. A model may also set `file_groups`: each group has `paths` and may set `mirror_policy` and `sources`. The file wins, then the group, then the model. A missing policy means `race`. The same fields exist on `voxprint-model/1`.
@@ -257,7 +259,7 @@ There is one window for the whole queue. Each app is a group with that app's spl
 
 Pause and Resume talk to the worker's `TransferSession`. Cancel asks for confirmation and says the download can resume later. Errors are a short "What happened" and "What to do", with Retry. The traceback stays behind Details and in the log file.
 
-Manage models lists installed files with size and status, and optional models this GPU tier can run. A model whose minimum VRAM is above the card is hidden. Add enqueues that model. Remove drops this app's ref and deletes the file only when no other app still uses it. Verify re-hashes the plan.
+Manage models lists installed files with size and status, and optional models this GPU tier can run, grouped by task (Generate, Edit & structure, and so on; see [mdl-fields](mdl-fields.md)). A group with both compact and full-size variants folds the half that does not match the card under "Show models for other cards"; the page alone lists models above the card's tier, so they stay addable there. A model whose minimum VRAM is above the card is hidden from `listing()`. Add enqueues that model. Remove drops this app's ref and deletes the file only when no other app still uses it; the `safety` and `internal` groups have no Remove and are refused in logic. Verify re-hashes the plan.
 
 `voxprint-mdl verify --gui` opens the check-and-repair window. The first phase hashes each model. The rows then read OK, missing, or corrupt. `verify --repair` still clears a dangerous manifest path and does not delete files; it then downloads only the missing or corrupt models and leaves the healthy ones in place. `run_verify_repair(model_ids, repair=True)` is the call an app makes. The same window is `run_window(start, mode="verify")`.
 

@@ -68,5 +68,5 @@ One-page map of the repository, from the source itself (module docstrings; publi
 
 ## `docs/` — MkDocs site
 
-- MkDocs sources: CLI/installer/memory/pin/migration/UI/worker-host guides, `mdl.md` and the 0.2.0 review, `api/` and `ci/` references, `img/` and `renders/` assets.
+- MkDocs sources: CLI/installer/memory/pin/migration/UI/worker-host guides, `mdl.md`, `mdl-fields.md`, and the 0.2.0 review, `api/` and `ci/` references, `img/` and `renders/` assets.
 - Repo root also has `MIGRATION-PLAN.md` (how each app hosts the shared shell; the old UI stays frozen) and this `REPO-MAP.md`.

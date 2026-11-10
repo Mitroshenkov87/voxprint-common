@@ -245,21 +245,33 @@ class TierRef:
     ``files`` are globs and ``file_groups`` are names of descriptor groups.
     ``constrained`` is false when the entry is a bare id, which keeps every
     file. An explicit ``files`` or ``file_groups`` list, even an empty one,
-    keeps only the matches.
+    keeps only the matches. ``label``, ``purpose``, and ``group`` are
+    optional display fields for the manage page; empty strings mean the
+    entry carries no value.
     """
 
     id: str
     files: tuple[str, ...] = ()
     file_groups: tuple[str, ...] = ()
     constrained: bool = False
+    label: str = ""
+    purpose: str = ""
+    group: str = ""
 
 
 @dataclass(frozen=True)
 class OptionalRef:
-    """A model the app can name, and the VRAM floor for that request."""
+    """A model the app can name, and the VRAM floor for that request.
+
+    ``label``, ``purpose``, and ``group`` mirror the tier-entry display
+    fields and default to empty strings.
+    """
 
     id: str
     min_vram_gib: float | None
+    label: str = ""
+    purpose: str = ""
+    group: str = ""
 
 
 @dataclass(frozen=True)
@@ -327,6 +339,32 @@ class AppModels:
         if ids is None:
             return None
         return tuple(TierRef(model_id) for model_id in ids)
+
+    def display_meta(self, model_id: str) -> tuple[str, str, str]:
+        """Return the first non-empty label, purpose, and group for one id.
+
+        Tier entries are scanned in document order, then ``optional``
+        entries. An id listed more than once keeps the first non-empty
+        value per field. Unknown ``group`` values are kept; the manage
+        page sorts them into "other" instead of failing the load.
+        """
+        rows: list[tuple[str, str, str]] = [
+            (ref.label, ref.purpose, ref.group)
+            for _name, refs in self.selections
+            for ref in refs
+            if ref.id == model_id
+        ]
+        rows.extend(
+            (item.label, item.purpose, item.group) for item in self.optional if item.id == model_id
+        )
+        label = purpose = group = ""
+        for cand_label, cand_purpose, cand_group in rows:
+            label = label or cand_label
+            purpose = purpose or cand_purpose
+            group = group or cand_group
+            if label and purpose and group:
+                break
+        return label, purpose, group
 
 
 def schema_bytes() -> bytes:
@@ -632,10 +670,31 @@ def _tiers(value: object) -> tuple[tuple[str, tuple[TierRef, ...]], ...]:
     return tuple(rows)
 
 
+_DISPLAY_FIELDS = ("label", "purpose", "group")
+
+
+def _display_fields(value: dict[str, Any], label: str) -> tuple[str, str, str]:
+    """Return ``label``, ``purpose``, and ``group`` from one entry.
+
+    Every field is optional and an empty string when absent. A non-string
+    value is refused. An unknown ``group`` is kept: the manage page sorts
+    it into "other" instead of failing the load.
+    """
+    found: list[str] = []
+    for name in _DISPLAY_FIELDS:
+        item = value.get(name, "")
+        if not isinstance(item, str):
+            raise DescriptorError(f"{label} {name} must be a string")
+        found.append(item.strip())
+    label_text, purpose, group = found
+    return label_text, purpose, group
+
+
 def _tier_ref(value: object, label: str) -> TierRef:
     if isinstance(value, str):
         return TierRef(_ident(value, label))
-    if not isinstance(value, dict) or not {"id"} <= set(value) <= {"id", "files", "file_groups"}:
+    allowed = {"id", "files", "file_groups", *_DISPLAY_FIELDS}
+    if not isinstance(value, dict) or not {"id"} <= set(value) <= allowed:
         raise DescriptorError(f"{label} entry must be an id or an object with id")
     model_id = _ident(value.get("id"), f"{label}.id")
     globs: tuple[str, ...] = ()
@@ -647,7 +706,8 @@ def _tier_ref(value: object, label: str) -> TierRef:
     if "file_groups" in value:
         listed_groups = _list(value.get("file_groups"), f"{label}.file_groups", minimum=0)
         groups = tuple(_ident(item, f"{label}.file_groups") for item in listed_groups)
-    return TierRef(model_id, globs, groups, constrained)
+    label_text, purpose, group = _display_fields(value, f"{label}.{model_id}")
+    return TierRef(model_id, globs, groups, constrained, label_text, purpose, group)
 
 
 def _glob(value: object, label: str) -> str:
@@ -873,12 +933,15 @@ def _hooks(value: object) -> tuple[PostInstall, ...]:
 def _optional(value: object) -> tuple[OptionalRef, ...]:
     rows = _list(value, "optional", minimum=0)
     found: list[OptionalRef] = []
+    allowed = {"id", "min_vram_gib", *_DISPLAY_FIELDS}
     for row in rows:
-        if not isinstance(row, dict) or set(row) != {"id", "min_vram_gib"}:
+        if not isinstance(row, dict) or not {"id", "min_vram_gib"} <= set(row) <= allowed:
             raise DescriptorError("optional entries need id and min_vram_gib")
+        model_id = _ident(row.get("id"), "optional.id")
         floor = row.get("min_vram_gib")
         gib = None if floor is None else _number(floor, "min_vram_gib")
-        found.append(OptionalRef(_ident(row.get("id"), "optional.id"), gib))
+        label, purpose, group = _display_fields(row, f"optional.{model_id}")
+        found.append(OptionalRef(model_id, gib, label, purpose, group))
     return tuple(found)
 
 

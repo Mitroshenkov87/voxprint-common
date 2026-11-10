@@ -219,7 +219,7 @@ def test_vendored_schema_accepts_the_forge_shape() -> None:
     assert sha256_bytes(raw) == ("e46ae56a06516ff127d6d7c45669873ad268e60a8b2c3a96c1b3e1f3919f5138")
     app_raw = app_schema_bytes()
     assert sha256_bytes(app_raw) == (
-        "ed451b995e39ebba061f4604fcfc05d13a4000909769e931e700bb3f35c1c420"
+        "ff18ac6c00a8dbd7c9b038fd50c445c91e72b2235639baf23335ac71b3fa120a"
     )
     schema = json.loads(raw)
     validator = jsonschema.Draft202012Validator(schema)
