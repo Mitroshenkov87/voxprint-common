@@ -1447,13 +1447,20 @@ def _ids_to_resolve(
 ) -> list[str]:
     """Return the ids whose descriptors must be fetched, including group rows.
 
-    Optional ids declared with an ``include_groups`` group are resolved along
-    with the tier list (or the ``only`` ids), so an included safety row can be
-    planned even though it is neither in the tier list nor requested by name.
+    Ids whose group is in ``include_groups`` — on an ``optional`` row or on a
+    tier entry (``selections`` / ``TierRef.group``) — are resolved along with
+    the tier list (or the ``only`` ids), so an included safety row can be
+    planned even when it is not requested by name.
     """
     blocked = {model_id for model_id, _reason in document.unavailable}
     keep = {group.strip().lower() for group in include_groups}
     grouped = [item.id for item in document.optional if item.group.strip().lower() in keep]
+    grouped.extend(
+        ref.id
+        for _name, refs in document.selections
+        for ref in refs
+        if ref.group.strip().lower() in keep
+    )
     if only is None:
         resolved = [model_id for model_id in _listed_ids(document, tier) if model_id not in blocked]
     else:
