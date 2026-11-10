@@ -25,6 +25,7 @@ from voxprint_common.ui.simple_image import (
     SimpleImageWidget,
     image_presets,
     snap_history_offset,
+    wheel_notch_steps,
 )
 from voxprint_common.ui.variants import VariantId
 
@@ -487,3 +488,18 @@ def test_voices_chapters_and_input_path(tmp_path: Path) -> None:
         layout.set_voices(())
     with pytest.raises(ValueError):
         layout.set_chapters(((" ", 0),))
+
+
+def test_wheel_notch_steps_truncate_toward_zero() -> None:
+    assert wheel_notch_steps(0, 120) == (0, 0)
+    assert wheel_notch_steps(50, 120) == (0, 50)
+    assert wheel_notch_steps(-50, 120) == (0, -50)
+    assert wheel_notch_steps(119, 120) == (0, 119)
+    assert wheel_notch_steps(-119, 120) == (0, -119)
+    assert wheel_notch_steps(120, 120) == (1, 0)
+    assert wheel_notch_steps(-120, 120) == (-1, 0)
+    assert wheel_notch_steps(250, 120) == (2, 10)
+    assert wheel_notch_steps(-250, 120) == (-2, -10)
+    assert wheel_notch_steps(-70, 68) == (-1, -2)
+    with pytest.raises(ValueError):
+        wheel_notch_steps(10, 0)

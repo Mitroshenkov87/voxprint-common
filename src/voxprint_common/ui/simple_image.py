@@ -67,6 +67,7 @@ __all__ = [
     "SimpleWidget",
     "image_presets",
     "snap_history_offset",
+    "wheel_notch_steps",
 ]
 
 
@@ -1092,6 +1093,29 @@ def _builtin_voices() -> tuple[tuple[str, str], ...]:
     )
 
 
+def wheel_notch_steps(accumulated: int, notch: int) -> tuple[int, int]:
+    """Split accumulated wheel motion into whole notches, truncating toward zero.
+
+    Python's ``divmod`` floors toward negative infinity, so a tiny negative
+    remainder would jump a whole cell. This waits for a full ``notch`` in
+    either direction before emitting a step.
+
+    Args:
+        accumulated: Signed remaining motion (angle or pixels).
+        notch: Size of one step. Must be at least 1.
+
+    Returns:
+        ``(steps, remainder)`` with ``remainder`` in ``(-(notch - 1), notch)``.
+
+    Raises:
+        ValueError: ``notch`` is below 1.
+    """
+    if notch < 1:
+        raise ValueError("notch must be at least 1")
+    steps = int(accumulated / notch)
+    return steps, accumulated - steps * notch
+
+
 def _right_edge_cuts_cell(right: int, *, cell_size: int, stride: int, content: int) -> bool:
     """Return whether a viewport right edge at ``right`` cuts into a cell."""
     phase = right % stride
@@ -1499,10 +1523,12 @@ class SimpleImageWidget:
         # Wheel up / positive delta scrolls toward the start of the row.
         if angle_delta:
             self._history_wheel_angle += angle_delta
-            steps, self._history_wheel_angle = divmod(self._history_wheel_angle, 120)
+            steps, self._history_wheel_angle = wheel_notch_steps(self._history_wheel_angle, 120)
         else:
             self._history_wheel_pixels += pixel_delta
-            steps, self._history_wheel_pixels = divmod(self._history_wheel_pixels, stride)
+            steps, self._history_wheel_pixels = wheel_notch_steps(
+                self._history_wheel_pixels, stride
+            )
         if steps:
             self._nudge_history(-steps * stride)
         event.accept()  # type: ignore[attr-defined]
