@@ -265,10 +265,15 @@ class Controller:
         manifest: Path,
         *,
         devices: list[GpuDevice] | None = None,
+        all_tiers: bool = False,
     ) -> list[ManagedFile]:
-        """Return models this card can run, including optional ones."""
+        """Return models this card can run, including optional ones.
+
+        Pass ``all_tiers=True`` to include models above this card's VRAM
+        tier, which the manage page shows under "models for other cards".
+        """
         parsed = load_manifest(manifest)
-        return _visible(parsed, self._gpus(devices))
+        return _visible(parsed, self._gpus(devices), all_tiers=all_tiers)
 
     def manage_page(
         self,

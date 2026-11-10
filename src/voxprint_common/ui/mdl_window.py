@@ -1554,7 +1554,7 @@ def _builder(kind: str) -> object:
             ):
                 return
             component = f"model-{key}" if not key.startswith("model-") else key
-            listing = controller.listing(window._focus, window._manifest)
+            listing = controller.listing(window._focus, window._manifest, all_tiers=True)
             for item in listing:
                 if item.model_id == key:
                     component = item.component_id

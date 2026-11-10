@@ -279,6 +279,8 @@ def test_manage_page_lists_other_tiers_while_listing_hides_them(tmp_path: Path) 
     assert compact.open and [row.key for row in compact.rows] == ["gen-16"]
     assert not full.open and [row.key for row in full.rows] == ["gen-24"]
     assert not page.installed and len(page.available) == 2  # old tuples stay populated
+    visible = controller.listing("canvas", path, devices=[_gpu(16384)], all_tiers=True)
+    assert [row.model_id for row in visible] == ["gen-16", "gen-24"]
     no_gpu = controller.manage_page("canvas", path, devices=[], lang="en")
     compact, full = no_gpu.groups[0].sections
     assert compact.open and not full.open
