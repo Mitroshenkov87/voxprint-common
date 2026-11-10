@@ -341,7 +341,7 @@ def test_unsigned_remote_index_falls_back_to_the_bundle() -> None:
     assert len(rows) == 29
     assert rows[0]["id"] == "dinov2-base"
     assert sha256_bytes(pinned) == (
-        "104742f9d8cc7c8f693f963dbd871471a3e57fda3d585d52b105b3855d49f45f"
+        "dab444f7d820b2611cb2aa1ec00ad8241a1ae41a4c68823aff793bfa0a72ce0e"
     )
     bundled = load_index(remote=False)
     assert bundled.source == "bundled"

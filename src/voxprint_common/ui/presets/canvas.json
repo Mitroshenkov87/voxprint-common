@@ -10,8 +10,8 @@
           "id": "fast",
           "label_key": "simple.quality.fast",
           "values": {
-            "shell.steps": 12,
-            "shell.guidance": 5.0,
+            "shell.steps": 4,
+            "shell.guidance": 0.0,
             "shell.sampler": "euler"
           }
         },
@@ -19,8 +19,8 @@
           "id": "balanced",
           "label_key": "simple.quality.balanced",
           "values": {
-            "shell.steps": 20,
-            "shell.guidance": 7.0,
+            "shell.steps": 8,
+            "shell.guidance": 0.0,
             "shell.sampler": "euler"
           }
         },
@@ -28,9 +28,9 @@
           "id": "best",
           "label_key": "simple.quality.best",
           "values": {
-            "shell.steps": 40,
-            "shell.guidance": 9.0,
-            "shell.sampler": "dpm"
+            "shell.steps": 16,
+            "shell.guidance": 0.0,
+            "shell.sampler": "euler"
           }
         }
       ]

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.0 - 2026-11-09
+
+`save_image` now distinguishes an unset WebP quality (`None`, purpose default: lossless for masters, series, and hand-offs; lossy quality 90 for pictures) from explicit lossless (`QUALITY_LOSSLESS`, the string `"lossless"`). `build_xmp` omits non-finite float strengths. `parse_xmp` returns empty metadata and logs a warning on a malformed packet instead of raising. `normalize_base` still reads an untagged LoRA as `z-image` (moss-final-spec item 4), the Z-Image family / LoRA training base; `z-image-turbo` maps to that family too. That behaviour is pinned in a comment and a test.
+
+Z-Image-Turbo is the suite default generation model. `DEFAULT_MODEL` / `default_model` / `model.default` read as `z-image-turbo`; unknown values fall back to `z-image-turbo`. The setting value `z-image` stays the full Z-Image model (optional download, LoRA training base) and is not remapped to Turbo. MOSS-Image (`moss`) is an optional download. The bundled index drops `moss-image-compressed` (no compact build yet) and retires the old BF16 mirror id `mirror-z-image-turbo` (descriptor history remains on the HF repo at `b74ab2e…`; use `z-image-turbo` instead). `mirror-z-image-turbo-controlnet-union-2.1` stays. The `z-image-turbo` row is `default: true` with descriptor `size` 11047 and revision `a853c26eb946b9010b4bd142a2ad1439d83e7896` (`voxprint-model.json` on `Mitroshenkov87/voxprint-mirror-z-image-turbo`); `z-image` and every `moss-image*` row are `optional: true`. Index entries may carry optional `note`, `size`, `license`, `default`, and `optional` fields. The pin is serial 10, sha256 `dab444f7d820b2611cb2aa1ec00ad8241a1ae41a4c68823aff793bfa0a72ce0e`, generated `2026-11-09T23:46:34Z`. Head stays `15edeab0…` until Model Forge publishes a signed index. Serial 10 is newer than the live signed serial-9 remote, so the bundled Turbo default is used until that signed index arrives. Pillow is already the newest release (`>=13.0`, 13.0.0). filelock is not a dependency (locking stays in `atomic.py`).
+
+Shared image Quality presets use Z-Image Turbo values: fast 4 / balanced 8 / best 16 steps, guidance 0.0, Euler. `shell.guidance` allows 0.0.
+
+The Lucent identity token is `#5ce1ff`. `MIGRATION-PLAN.md` describes how each app hosts the shared simple/Expert/Custom shell; the old UI stays frozen. `scripts/render_shell_variants.py` paints one sample window per app type (image, audio, video, text) at 100% and 150%.
+
+`ui.theme` adds `mark_compact`, which flags a `QPushButton` for the tighter `QPushButton[compact="true"]` rule (same 4 px button radius). `SimpleImageWidget` sizes and spaces its history strip through the `cell_size` / `cell_gap` constructor arguments and properties (defaults `HISTORY_CELL_SIZE` 88 and `HISTORY_CELL_GAP` 8 leave the strip unchanged), and `snap_history_offset` snaps the strip's scroll offset to whole-cell boundaries.
+
 ## 0.6.4 - 2026-11-05
 
 The library supports Python 3.14 and newer. `requires-python` is `>=3.14`. The Trove classifiers list `Programming Language :: Python :: 3.14` and `Programming Language :: Python :: 3.15`. Ruff's `target-version` is `py314`, the minimum. CI tests 3.14 and 3.15 on Ubuntu and Windows. The docs job, `release.yml`, `pages.yml`, and `docs/ci/pin-check.yml` install 3.15. The newest stable target is 3.15. The floor stays 3.14 so Clarity and Enlarge can keep `onnxruntime-gpu` until that package ships a 3.15 wheel. This repository does not ship an installer or a bundled Python runtime.

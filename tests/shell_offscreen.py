@@ -866,22 +866,22 @@ def _check_simple(app: object, qt: object, test: object) -> None:
     guidance = shell.find("QDoubleSpinBox", "shell.guidance")
     sampler = shell.find("QComboBox", "shell.sampler")
     resolution = shell.find("QPlainTextEdit", "shell.resolution")
-    assert steps is not None and steps.value() == 20  # type: ignore[attr-defined]
-    assert guidance is not None and guidance.value() == 7.0  # type: ignore[attr-defined]
+    assert steps is not None and steps.value() == 8  # type: ignore[attr-defined]
+    assert guidance is not None and guidance.value() == 0.0  # type: ignore[attr-defined]
     assert sampler is not None and sampler.currentData() == "euler"  # type: ignore[attr-defined]
     assert resolution is not None and resolution.toPlainText() == "1024x1024"  # type: ignore[attr-defined]
     negative = shell.image.get("shell.negative")
     shell.find("QPushButton", "chip-quality-fast").click()  # type: ignore[attr-defined]
     app.processEvents()  # type: ignore[attr-defined]
-    assert shell.image.get("shell.steps") == 12
-    assert shell.image.get("shell.guidance") == 5.0
+    assert shell.image.get("shell.steps") == 4
+    assert shell.image.get("shell.guidance") == 0.0
     assert shell.image.get("shell.sampler") == "euler"
-    assert steps.value() == 12  # type: ignore[attr-defined]
-    assert guidance.value() == 5.0  # type: ignore[attr-defined]
+    assert steps.value() == 4  # type: ignore[attr-defined]
+    assert guidance.value() == 0.0  # type: ignore[attr-defined]
     assert shell.image.get("shell.negative") == negative
     shell.find("QPushButton", "chip-quality-balanced").click()  # type: ignore[attr-defined]
     app.processEvents()  # type: ignore[attr-defined]
-    assert steps.value() == 20  # type: ignore[attr-defined]
+    assert steps.value() == 8  # type: ignore[attr-defined]
     steps.setValue(24)  # type: ignore[attr-defined]
     app.processEvents()  # type: ignore[attr-defined]
     changed = tr("simple.preset.changed", name=tr("simple.quality.balanced"))
@@ -891,7 +891,7 @@ def _check_simple(app: object, qt: object, test: object) -> None:
     assert reset.text() == tr("simple.preset.reset", name=tr("simple.quality.balanced"))  # type: ignore[attr-defined]
     reset.click()  # type: ignore[attr-defined]
     app.processEvents()  # type: ignore[attr-defined]
-    assert steps.value() == 20  # type: ignore[attr-defined]
+    assert steps.value() == 8  # type: ignore[attr-defined]
     assert shell.image.get("shell.negative") == negative
     assert balanced.text() == tr("simple.quality.balanced")  # type: ignore[attr-defined]
     assert reset.isVisible() is False  # type: ignore[attr-defined]
@@ -906,7 +906,7 @@ def _check_simple(app: object, qt: object, test: object) -> None:
     app.processEvents()  # type: ignore[attr-defined]
     assert custom.isVisible() is False  # type: ignore[attr-defined]
     assert balanced.isChecked() is True  # type: ignore[attr-defined]
-    assert steps.value() == 20  # type: ignore[attr-defined]
+    assert steps.value() == 8  # type: ignore[attr-defined]
     shell.find("QSpinBox", "shell.seed").setValue(11)  # type: ignore[attr-defined]
     prompt.setPlainText("seeded hill")  # type: ignore[attr-defined]
     test.keyClick(prompt, qt.Key_Return)  # type: ignore[attr-defined]
@@ -986,7 +986,7 @@ def _check_expert(app: object) -> None:
     sampler = shell.find("QComboBox", "shell.sampler")
     assert adult is not None and adult.isChecked() is False  # type: ignore[attr-defined]
     assert adult.toolTip() == tr("setting.image.adult_content.help")  # type: ignore[attr-defined]
-    assert steps is not None and steps.value() == 20  # type: ignore[attr-defined]
+    assert steps is not None and steps.value() == 8  # type: ignore[attr-defined]
     assert steps.toolTip() == tr("setting.shell.steps.help")  # type: ignore[attr-defined]
     assert sampler is not None and sampler.currentText() == tr("setting.shell.sampler.euler")  # type: ignore[attr-defined]
     count = shell.find("QPushButton", "chip-count-1")

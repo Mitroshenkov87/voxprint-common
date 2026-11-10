@@ -2,10 +2,13 @@
 
 The save format is the shared ``image.save_format`` suite setting: lossless
 WebP by default, lossy WebP with a quality of 1-100, or PNG, AVIF, or JPEG.
-:func:`default_quality` is lossless for masters, series, and hand-offs, and
-lossy WebP at :data:`LOSSY_DEFAULT_QUALITY` for regular pictures.
-:func:`save_image` encodes first and publishes the bytes atomically, and the
-written file carries the extension of the chosen format.
+A quality of None means unset: :func:`save_image` applies
+:func:`default_quality` for the save purpose. :data:`QUALITY_LOSSLESS` (the
+string ``"lossless"``) is explicit lossless, even for a regular picture.
+:func:`default_quality` is :data:`QUALITY_LOSSLESS` for masters, series, and
+hand-offs, and lossy WebP at :data:`LOSSY_DEFAULT_QUALITY` for regular
+pictures. :func:`save_image` encodes first and publishes the bytes
+atomically, and the written file carries the extension of the chosen format.
 
 Metadata (``prompt``, ``seed``, ``steps``, ``base``, the LoRA list, and the
 single-LoRA strength) is written as XMP on WebP, AVIF, and JPEG, and as an
@@ -24,6 +27,8 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import logging
+import math
 from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -36,8 +41,11 @@ from voxprint_common.suite_settings import image_save_format, normalize_image_sa
 if TYPE_CHECKING:
     from PIL import Image
 
+logger = logging.getLogger(__name__)
+
 __all__ = [
     "LOSSY_DEFAULT_QUALITY",
+    "QUALITY_LOSSLESS",
     "build_xmp",
     "default_quality",
     "parse_xmp",
@@ -57,6 +65,10 @@ _TEXT_ESCAPES = {'"': "&quot;", "'": "&apos;"}
 _EXIF_FORMATS = frozenset({"webp", "avif", "jpeg"})
 #: Lossy quality for regular pictures when nothing else says what to use.
 LOSSY_DEFAULT_QUALITY = 90
+#: Explicit-lossless quality marker. None means the quality is unset and the
+#: save purpose default applies; ``"lossless"`` forces lossless WebP even for
+#: a regular picture.
+QUALITY_LOSSLESS = "lossless"
 _PURPOSES = frozenset({None, "master", "picture"})
 
 # Metadata keys read back with None/[] when missing.
@@ -71,18 +83,19 @@ _METADATA_KEYS = (
 )
 
 
-def default_quality(kind: str | None = None) -> int | None:
+def default_quality(kind: str | None = None) -> int | str:
     """Return the WebP quality for a save purpose.
 
     Masters, series, and hand-offs (``"master"`` or None) are lossless, so
-    the quality is None. Regular pictures (``"picture"``) are lossy WebP at
-    :data:`LOSSY_DEFAULT_QUALITY`.
+    the quality is :data:`QUALITY_LOSSLESS`. Regular pictures (``"picture"``)
+    are lossy WebP at :data:`LOSSY_DEFAULT_QUALITY`.
 
     Args:
         kind: ``"master"``, ``"picture"``, or None.
 
     Returns:
-        ``90`` for a picture, or None for a lossless master.
+        :data:`LOSSY_DEFAULT_QUALITY` for a picture, or
+        :data:`QUALITY_LOSSLESS` for a lossless master.
 
     Raises:
         ValueError: ``kind`` is not ``"master"``, ``"picture"``, or None.
@@ -91,7 +104,7 @@ def default_quality(kind: str | None = None) -> int | None:
         raise ValueError(f"purpose must be 'master' or 'picture', got {kind!r}")
     if kind == "picture":
         return LOSSY_DEFAULT_QUALITY
-    return None
+    return QUALITY_LOSSLESS
 
 
 def save_image(
@@ -115,6 +128,9 @@ def save_image(
         path: Destination. A suffix that does not match the format is replaced.
         setting: ``{"format": ..., "quality": ...}``, a format name such as
             ``"webp"``, or None for the shared ``image.save_format`` setting.
+            The quality is None (unset: the save purpose default applies),
+            :data:`QUALITY_LOSSLESS` (explicit lossless WebP), or an integer
+            from 1 to 100 (lossy WebP at that quality).
         metadata: ``prompt``, ``seed``, ``steps``, ``base`` (or its alias
             ``base_model``), ``lora_strength``, and ``loras``. LoRA entries
             are weight names or mappings with ``name``, ``strength``,
@@ -123,11 +139,12 @@ def save_image(
         write_metadata: True writes the metadata, False or leaving it None
             with the ``metadata`` setting off silently skips it. None uses
             the ``metadata`` key of the save format setting (default False).
-        purpose: ``"picture"`` saves a regular picture: with no explicit
-            quality the WebP default becomes lossy at
-            :func:`default_quality` instead of lossless. ``"master"`` (the
-            default) keeps the setting as stored: lossless WebP for masters,
-            series, and hand-offs.
+        purpose: ``"picture"`` saves a regular picture: with the quality
+            unset (None) the WebP default becomes lossy at
+            :func:`default_quality` instead of lossless. An explicit
+            :data:`QUALITY_LOSSLESS` quality stays lossless even here.
+            ``"master"`` (the default) keeps the setting as stored: lossless
+            WebP for masters, series, and hand-offs.
 
     Returns:
         The path that was written.
@@ -152,8 +169,8 @@ def save_image(
     target = Path(path).with_suffix(_EXTENSIONS[fmt])
     kwargs: dict[str, Any] = {}
     if fmt == "webp":
-        kwargs["lossless"] = quality is None
-        if quality is not None:
+        kwargs["lossless"] = quality == QUALITY_LOSSLESS or quality is None
+        if quality is not None and quality != QUALITY_LOSSLESS:
             kwargs["quality"] = quality
     elif fmt != "png":
         kwargs["quality"] = quality
@@ -205,7 +222,8 @@ def build_xmp(metadata: Mapping[str, Any]) -> bytes:
             (integer), ``base`` or its alias ``base_model`` (a base model
             tag), ``lora_strength`` (float, the single-LoRA case), and
             ``loras`` (an iterable of LoRA weight names or mappings with
-            ``name``, ``strength``, ``sha256``, and ``base``).
+            ``name``, ``strength``, ``sha256``, and ``base``). A strength
+            that is not a finite float (``inf`` or ``nan``) is omitted.
 
     Returns:
         The packet as UTF-8 bytes, ready for Pillow's ``xmp`` save argument
@@ -250,7 +268,8 @@ def build_xmp(metadata: Mapping[str, Any]) -> bytes:
 def parse_xmp(packet: bytes | str) -> dict[str, Any]:
     """Read the Voxprint metadata keys from an XMP packet.
 
-    A packet without the Voxprint namespace yields empty values.
+    A packet without the Voxprint namespace yields empty values. A malformed
+    packet logs a warning and yields the same empty values instead of raising.
 
     Args:
         packet: XMP bytes, for example Pillow's ``image.info["xmp"]`` or the
@@ -262,7 +281,11 @@ def parse_xmp(packet: bytes | str) -> dict[str, Any]:
     """
     text = packet.decode("utf-8", "replace") if isinstance(packet, bytes) else packet
     found: dict[str, Any] = {key: ([] if key == "loras" else None) for key in _METADATA_KEYS}
-    root = ElementTree.fromstring(text)
+    try:
+        root = ElementTree.fromstring(text)
+    except (ElementTree.ParseError, SyntaxError) as exc:
+        logger.warning("discarding malformed XMP packet: %s", exc)
+        return found
     description = root.find(f".//{{{_RDF_NS}}}Description")
     if description is None:
         return found
@@ -315,7 +338,9 @@ def _metadata_document(metadata: Mapping[str, Any]) -> dict[str, Any]:
         document["base"] = str(base)
     strength = metadata.get("lora_strength")
     if strength is not None:
-        document["lora_strength"] = float(strength)
+        value = float(strength)
+        if math.isfinite(value):
+            document["lora_strength"] = value
     loras = metadata.get("loras")
     if loras:
         document["loras"] = [_normalize_lora(lora) for lora in loras]
@@ -343,7 +368,9 @@ def _as_float(value: Any) -> float | None:
     if value is None or isinstance(value, bool):
         return None
     with contextlib.suppress(TypeError, ValueError):
-        return float(value)
+        result = float(value)
+        if math.isfinite(result):
+            return result
     return None
 
 

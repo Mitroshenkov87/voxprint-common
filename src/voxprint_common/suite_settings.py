@@ -23,14 +23,18 @@ key is preserved, so one app does not wipe another's settings.
   the default, follows the detected RAM tier.
 * ``image.save_format``: the shared image save format. Stored as
   ``{"format": ..., "quality": ..., "metadata": ...}`` with the format
-  ``webp``, ``png``, ``avif``, or ``jpeg``. WebP without a quality is
-  lossless; a quality of 1-100 makes it lossy. PNG takes no quality; AVIF and
-  JPEG default to a quality of 85. ``metadata`` is true or false, default
-  false: whether ``save_image`` writes the XMP/EXIF metadata mapping.
-  Missing or invalid values mean lossless WebP with metadata off.
-  :mod:`voxprint_common.image` saves with it.
-* ``model.default``: the shared generation base model, ``moss`` (MOSS-Image,
-  the default) or ``z-image``. An unknown value reads as ``moss``.
+  ``webp``, ``png``, ``avif``, or ``jpeg``. A WebP quality of None is unset:
+  the save purpose default applies (lossless for masters, series, and
+  hand-offs; 90 for regular pictures). The string ``"lossless"`` forces
+  lossless WebP even for pictures; a quality of 1-100 makes it lossy. PNG
+  takes no quality; AVIF and JPEG default to a quality of 85. ``metadata``
+  is true or false, default false: whether ``save_image`` writes the
+  XMP/EXIF metadata mapping. Missing or invalid values mean lossless WebP
+  with metadata off. :mod:`voxprint_common.image` saves with it.
+* ``model.default``: the shared generation base model, ``z-image-turbo``
+  (the default), ``z-image`` (full Z-Image, optional; the LoRA training
+  base), or ``moss`` (MOSS-Image, optional). ``z-image`` is not an alias
+  of Turbo. An unknown value reads as ``z-image-turbo``.
 * ``model.quant``: the shared weight quant, ``auto`` (pick by the memory
   budget) or one of ``bf16``, ``fp8``, ``int8``, ``nf4``. An unknown value
   reads as ``auto``.
@@ -133,8 +137,8 @@ DEFAULT_UI_THEME = "dark"
 DEFAULT_GPU = "auto"
 IMAGE_SAVE_FORMATS = frozenset({"webp", "png", "avif", "jpeg"})
 DEFAULT_IMAGE_QUALITY = 85
-MODEL_IDS = frozenset({"moss", "z-image"})
-DEFAULT_MODEL = "moss"
+MODEL_IDS = frozenset({"moss", "z-image", "z-image-turbo"})
+DEFAULT_MODEL = "z-image-turbo"
 MODEL_QUANT_MODES = frozenset({"auto", "bf16", "fp8", "int8", "nf4"})
 DEFAULT_MODEL_QUANT = "auto"
 _GPU_RE = re.compile(r"^cuda:(\d{1,2})$")
@@ -333,26 +337,31 @@ def set_image_save_format(value: Mapping[str, Any] | str) -> dict[str, int | str
 
     Args:
         value: ``{"format": ..., "quality": ..., "metadata": ...}`` or a
-            format name such as ``"webp"``. WebP without a quality is
-            lossless; a quality of 1-100 makes it lossy. PNG takes no
-            quality; AVIF and JPEG get the default quality of 85 when none is
-            given. ``metadata`` is true or false, default false: whether
-            ``save_image`` writes the metadata mapping.
+            format name such as ``"webp"``. A WebP quality of None is unset
+            (the save purpose default: lossless for masters, series, and
+            hand-offs; 90 for regular pictures). The string ``"lossless"``
+            forces lossless WebP even for pictures; a quality of 1-100 makes
+            it lossy. PNG takes no quality; AVIF and JPEG get the default
+            quality of 85 when none is given. ``metadata`` is true or false,
+            default false: whether ``save_image`` writes the metadata
+            mapping.
 
     Returns:
         The stored ``{"format": ..., "quality": ..., "metadata": ...}``.
 
     Raises:
-        ValueError: The format is unknown, the quality is not an integer
-            from 1 to 100, or ``metadata`` is not a bool.
+        ValueError: The format is unknown, the quality is not None,
+            ``"lossless"``, or an integer from 1 to 100, or ``metadata`` is
+            not a bool.
     """
     return dict(set_value("image.save_format", value))
 
 
 def model_default() -> str:
-    """Return the shared generation base model, ``moss`` or ``z-image``.
+    """Return the shared generation base model.
 
-    A missing or invalid stored value is ``moss`` (MOSS-Image, the default).
+    One of ``z-image-turbo`` (the default), ``z-image``, or ``moss``.
+    A missing or invalid stored value is ``z-image-turbo``.
     The file is not created.
     """
     return normalize_model_default(read().get("model.default"))
@@ -362,7 +371,7 @@ def set_model_default(value: str) -> str:
     """Store the shared generation base model.
 
     Args:
-        value: ``moss`` or ``z-image``.
+        value: ``z-image-turbo``, ``z-image``, or ``moss``.
 
     Returns:
         The stored model id.
@@ -739,6 +748,11 @@ def normalize_image_save_format(value: object) -> dict[str, int | str | bool | N
     for WebP and PNG, :data:`DEFAULT_IMAGE_QUALITY` for AVIF and JPEG, and
     metadata off.
 
+    The quality is None (unset, so the save purpose default applies), the
+    string ``"lossless"`` (explicit lossless, WebP only; it must match
+    :data:`voxprint_common.image.QUALITY_LOSSLESS`), or an integer from 1 to
+    100. Any other string is rejected.
+
     Args:
         value: Stored save format, a ``format``/``quality``/``metadata``
             mapping, or a format name.
@@ -756,9 +770,14 @@ def normalize_image_save_format(value: object) -> dict[str, int | str | bool | N
     if text not in IMAGE_SAVE_FORMATS:
         return None
     quality = value.get("quality")
-    if isinstance(quality, bool) or not (quality is None or isinstance(quality, int)):
+    if isinstance(quality, str):
+        # Duplicated literal: voxprint_common.image imports this module, so
+        # the constant cannot be imported here. Only WebP stores it.
+        if quality != "lossless" or text != "webp":
+            return None
+    elif isinstance(quality, bool) or not (quality is None or isinstance(quality, int)):
         return None
-    if quality is not None and not 1 <= quality <= 100:
+    if isinstance(quality, int) and not 1 <= quality <= 100:
         return None
     if text == "png" and quality is not None:
         return None
@@ -853,7 +872,9 @@ def _validate(key: str, value: object) -> object:
         return stored
     if key == "model.default":
         if not isinstance(value, str) or value.strip().lower() not in MODEL_IDS:
-            raise ValueError(f"model.default must be moss or z-image, got {value!r}")
+            raise ValueError(
+                f"model.default must be moss, z-image, or z-image-turbo, got {value!r}"
+            )
         return value.strip().lower()
     if key == "model.quant":
         if not isinstance(value, str) or value.strip().lower() not in MODEL_QUANT_MODES:

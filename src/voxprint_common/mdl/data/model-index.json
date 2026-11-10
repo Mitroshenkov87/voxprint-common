@@ -1,7 +1,7 @@
 {
   "head": "15edeab0f7a874c27d2b38ef6ecb69106ff94df8",
-  "serial": 9,
-  "generated_at": "2026-10-18T04:09:36Z",
+  "serial": 10,
+  "generated_at": "2026-11-09T23:46:34Z",
   "models": [
     {
       "id": "dinov2-base",
@@ -106,12 +106,6 @@
       "sha256": "f7827c5f9c1843a9d4677a62636ead0545ccb4b557c677df75dd0718dad70127"
     },
     {
-      "id": "mirror-z-image-turbo",
-      "repo": "Mitroshenkov87/voxprint-mirror-z-image-turbo",
-      "revision": "b74ab2e157465ba2cb432ebf39ab9ff5e5919c8b",
-      "sha256": "80cece369bb34fd3741e7033688913ef8da37ce62276ea5bcf774aadeee5c640"
-    },
-    {
       "id": "mirror-z-image-turbo-controlnet-union-2.1",
       "repo": "Mitroshenkov87/voxprint-mirror-z-image-turbo-controlnet-union-2.1",
       "revision": "a00c5bea0cd05548c88680bef88ce41414a31307",
@@ -127,13 +121,21 @@
       "id": "moss-image-base",
       "repo": "Mitroshenkov87/voxprint-mirror-moss-image-base",
       "revision": "be1a49ef970ec5859a934b794e8adbc95997f74f",
-      "sha256": "d6fd691e4c4e0f1b9b6ee8852364686f3f11abcbd8adf1d13e8d4bf439e65549"
+      "sha256": "d6fd691e4c4e0f1b9b6ee8852364686f3f11abcbd8adf1d13e8d4bf439e65549",
+      "size": 20128,
+      "default": false,
+      "optional": true,
+      "note": "Optional download, not the default model."
     },
     {
       "id": "moss-image-sft",
       "repo": "Mitroshenkov87/voxprint-mirror-moss-image-sft",
       "revision": "6db2a69abfefb6ddba4dfb597bf340ee63eeafa6",
-      "sha256": "580087427f17f6dd4922d80f2138c280a5636a9f1b3182b4a8a696216030ca96"
+      "sha256": "580087427f17f6dd4922d80f2138c280a5636a9f1b3182b4a8a696216030ca96",
+      "size": 20051,
+      "default": false,
+      "optional": true,
+      "note": "Optional download, not the default model."
     },
     {
       "id": "pyannote-embedding",
@@ -175,7 +177,22 @@
       "id": "z-image",
       "repo": "datasets/Mitroshenkov87/voxprint-model-index",
       "revision": "5b7bdb4062d5bbc080b406c6bb3cb0a724438003",
-      "sha256": "06c2c55b02c511a9b63a006e0847ad2e152b92cc4564809f1880f604f5d6d6c8"
+      "sha256": "06c2c55b02c511a9b63a006e0847ad2e152b92cc4564809f1880f604f5d6d6c8",
+      "size": 4275,
+      "default": false,
+      "optional": true,
+      "note": "Optional download, not the default model. Full Z-Image (Tongyi-MAI/Z-Image), the LoRA training base."
+    },
+    {
+      "id": "z-image-turbo",
+      "repo": "Mitroshenkov87/voxprint-mirror-z-image-turbo",
+      "revision": "a853c26eb946b9010b4bd142a2ad1439d83e7896",
+      "sha256": "fefa994cbef9d62201089f61d0bde2914ba0e826650f323816ec9b562965168e",
+      "size": 11047,
+      "license": "Apache-2.0",
+      "default": true,
+      "optional": false,
+      "note": "Default generation model: Z-Image-Turbo (Tongyi-MAI/Z-Image-Turbo@f332072aa78be7aecdf3ee76d5c247082da564a6, Apache-2.0). Descriptor is voxprint-model.json on Mitroshenkov87/voxprint-mirror-z-image-turbo @a853c26eb946b9010b4bd142a2ad1439d83e7896; author weights are already on that mirror. sha256 and size are of the descriptor."
     }
   ]
 }

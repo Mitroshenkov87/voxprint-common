@@ -10,8 +10,8 @@ One-page map of the repository, from the source itself (module docstrings; publi
 - `cli_protocol.py` — line protocol for `--json`: `progress`, `result`, `emit`, `iter_lines`, `Session`.
 - `download.py` — multi-source download with SHA-256, resume, disk check: `download`, `huggingface_url`, `modelscope_url`, `DownloadProgress`.
 - `gpu_probe.py` — NVIDIA probe and VRAM tiers: `query_gpus`, `assess`, `VramTier`; `ram_probe.py` — RAM tier and pin budget: `ram_tier`, `pin_budget_gib`, `RamTier`; `gpu_lock.py` — cross-process GPU lock: `try_acquire`, `gpu_job`, `Holder`, `Acquired`.
-- `image.py` — shared image saving and metadata (WebP default, PNG/AVIF/JPEG; XMP, EXIF, PNG iTXt; off by default): `save_image`, `read_metadata`, `build_xmp`, `parse_xmp`, `default_quality`; `provenance.py` — provenance embedding stub: `embed_image`, `finalize`, `detect`, `Report`.
-- `models.py` — shared base model and quant selector (MOSS default, Z-Image optional; peak GB are placeholders): `list_models`, `default_model`, `select_quant`, `normalize_base`, `lora_base_matches`, `ModelSpec`.
+- `image.py` — shared image saving and metadata (WebP default, PNG/AVIF/JPEG; `QUALITY_LOSSLESS` vs unset quality; XMP, EXIF, PNG iTXt; metadata off by default): `save_image`, `read_metadata`, `build_xmp`, `parse_xmp`, `default_quality`; `provenance.py` — provenance embedding stub: `embed_image`, `finalize`, `detect`, `Report`.
+- `models.py` — shared base model and quant selector (Z-Image-Turbo default, full Z-Image the LoRA training base, MOSS optional; peak GB are placeholders): `list_models`, `default_model`, `select_quant`, `normalize_base`, `lora_base_matches`, `ModelSpec`.
 - `licence.py` — licence gate for code and weights: `check`, `is_allowed`, `is_noncommercial`, `is_copyleft`, `canonical`.
 - `model_park.py` — keep weights RAM-resident, move to GPU per stage: `ModelPark`, `StagingRing`, `for_process`; `model_users.py` — per-model `.users.json` registry: `load_users`, `add_user`, `remove_user`, `hold_users`.
 - `paths.py` — suite directories shared by every app: `home`, `shared_dir`, `runtime_dir`, `cache_dir`, `state_dir`, `models_dir`; `home_migration.py` — move an existing suite home to its final path (`migrate`); `suite_settings.py` — shared `suite.json` (schema 1): `read`, `values`, `set_value`, theme/GPU/RAM/image-format/model accessors.
@@ -26,7 +26,7 @@ One-page map of the repository, from the source itself (module docstrings; publi
 - `__init__.py` / `__main__.py` / `cli.py` — package entry and the `voxprint-mdl` command line (`main`, `ready`).
 - `catalog.py` — per-app manifests, install discovery, download plan: `discover`, `plan_files`, `load_manifest`, `require_space`, `Model`, `AppManifest`.
 - `descriptor.py` — `voxprint-model/1` and `voxprint-app-models/1` files: `parse_descriptor`, `parse_app_manifest`, `Descriptor`, `AppModels`.
-- `index.py` — signed suite model index: `load_index`, `verify_index`, `fetch_indexed`, `SuiteIndex`; `resolve.py` — index rows to cached descriptors: `resolve_descriptors`.
+- `index.py` — signed suite model index (`IndexEntry` may include optional `note`, `size`, `license`, `default`, `optional`; bundled snapshot marks `z-image-turbo` the default, with `z-image` and `moss-image*` optional; the turbo row points at descriptor revision `a853c26e…`; the old id `mirror-z-image-turbo` is retired): `load_index`, `verify_index`, `fetch_indexed`, `SuiteIndex`; `resolve.py` — index rows to cached descriptors: `resolve_descriptors`.
 - `job.py` — plan, download, verify a model set: `plan`, `download`, `verify`, `verify_repair`, `Outcome`.
 - `fetch.py` — resumable downloads with backoff and mirrors: `fetch_file`, `FetchProgress`; `segments.py` — parallel HTTP Range connections: `download_segments`.
 - `queue.py` — one system-wide download queue: `enqueue`, `load_queue`, `run_or_attach`, `ensure_ready`; `control.py` — window-side queue view: `Controller`, `shared_controller`; `instance.py` — single running downloader process: `become_primary`, `send`.
@@ -42,7 +42,7 @@ One-page map of the repository, from the source itself (module docstrings; publi
 
 ## `src/voxprint_common/ui` — Qt helpers
 
-- `settings.py` — setting descriptors: `SettingSpec`, `Settings`, `reference_settings`; `tokens.py` — versioned design tokens: `TokenSet`, `load`; `theme.py` — palette and stylesheets: `build_style`, `build_shell_style`, `palette_colors`, `contrast_ratio`.
+- `settings.py` — setting descriptors: `SettingSpec`, `Settings`, `reference_settings`; `tokens.py` — versioned design tokens: `TokenSet`, `load` (identity includes Lucent `#5ce1ff`); `theme.py` — palette and stylesheets: `build_style`, `build_shell_style`, `palette_colors`, `contrast_ratio`.
 - `commands.py` — command registry for menus/palette/keymap: `Registry`, `CommandSpec`, `reference_commands`; `palette.py` — fuzzy scoring for the palette: `score_text`, `fuzzy_score`.
 - `keymap.py` — chords and user overrides: `KeyMap`, `normalize`, `effective`, `load_overrides`, `save_overrides`; `expert.py` — Expert mode contexts; `safety.py` — adult-content policy and reserved keys.
 - `variants.py` — thin per-app configurations: `AppSurface`, `surfaces`, `settings_for`, `variant_presets`; `presets/` — preset files: `parse_presets`, `load_presets`, `reference_presets`.
@@ -64,8 +64,9 @@ One-page map of the repository, from the source itself (module docstrings; publi
 
 ## `scripts/` — offscreen PNG renders of the windows
 
-- `render_mdl_window.py` (download window), `render_manage_window.py` (manage-models, EN/RU plus 150 % scale), `render_verify_window.py` (check-and-repair); all scripted, nothing downloaded.
+- `render_mdl_window.py` (download window), `render_manage_window.py` (manage-models, EN/RU plus 150 % scale), `render_verify_window.py` (check-and-repair), `render_shell_variants.py` (shared shell: image/audio/video/text at 100 % and 150 %); all scripted, nothing downloaded.
 
 ## `docs/` — MkDocs site
 
 - MkDocs sources: CLI/installer/memory/pin/migration/UI/worker-host guides, `mdl.md` and the 0.2.0 review, `api/` and `ci/` references, `img/` and `renders/` assets.
+- Repo root also has `MIGRATION-PLAN.md` (how each app hosts the shared shell; the old UI stays frozen) and this `REPO-MAP.md`.

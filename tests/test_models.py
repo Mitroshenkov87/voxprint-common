@@ -31,18 +31,21 @@ from voxprint_common.suite_settings import (
 _REAL_HOME = Path.home() / ".local" / "share" / "voxprint-ai-suite"
 
 
-def test_registry_defaults_to_moss() -> None:
+def test_registry_defaults_to_z_image_turbo() -> None:
     specs = list_models()
     by_id = {item.id: item for item in specs}
-    assert [item.id for item in specs] == ["moss", "z-image"]
+    assert [item.id for item in specs] == ["z-image-turbo", "z-image", "moss"]
     assert set(by_id) == set(MODEL_PEAK_GB)
     assert sum(item.default for item in specs) == 1
-    assert by_id["moss"].title == "MOSS-Image"
-    assert by_id["moss"].licence == "Apache-2.0"
-    assert by_id["moss"].default is True
+    assert by_id["z-image-turbo"].title == "Z-Image-Turbo"
+    assert by_id["z-image-turbo"].default is True
+    assert by_id["z-image-turbo"].licence == "Apache-2.0"
     assert by_id["z-image"].title == "Z-Image"
     assert by_id["z-image"].default is False
-    assert default_model() == "moss"
+    assert by_id["moss"].title == "MOSS-Image"
+    assert by_id["moss"].licence == "Apache-2.0"
+    assert by_id["moss"].default is False
+    assert default_model() == "z-image-turbo"
     assert MEMORY_BUDGET_GB == 14.0
     assert QUANT_ORDER == ("bf16", "fp8", "int8", "nf4")
 
@@ -62,6 +65,8 @@ def test_peak_table_covers_every_quant_and_mode() -> None:
         ("moss", "train", "nf4"),
         ("z-image", "generate", "fp8"),
         ("z-image", "train", "nf4"),
+        ("z-image-turbo", "generate", "fp8"),
+        ("z-image-turbo", "train", "nf4"),
     ],
 )
 def test_default_budget_picks_the_best_quant_that_fits(model: str, mode: str, chosen: str) -> None:
@@ -91,11 +96,16 @@ def test_select_quant_rejects_unknown_model_and_mode() -> None:
         ("  ", "z-image"),
         ("z-image", "z-image"),
         ("Z-Image", "z-image"),
+        ("z-image-turbo", "z-image"),
+        ("Z-Image-Turbo", "z-image"),
         ("moss", "moss"),
         ("MOSS", "moss"),
     ],
 )
 def test_normalize_base(tag: object, model_id: str) -> None:
+    # PIN (moss-final-spec item 4): untagged legacy LoRAs, including Garnis,
+    # read as "z-image" by design (Z-Image family / training base), even
+    # though the suite default generation model is now z-image-turbo.
     assert normalize_base(tag) == model_id
 
 
@@ -109,10 +119,14 @@ def test_normalize_base_rejects_unknown_tags() -> None:
 def test_lora_base_matches() -> None:
     assert lora_base_matches(None, "z-image") is True
     assert lora_base_matches("", "z-image") is True
+    assert lora_base_matches(None, "z-image-turbo") is True
+    assert lora_base_matches("z-image", "z-image-turbo") is True
+    assert lora_base_matches("z-image-turbo", "z-image") is True
     assert lora_base_matches(None, "moss") is False
     assert lora_base_matches("moss", "moss") is True
     assert lora_base_matches("MOSS", "moss") is True
     assert lora_base_matches("moss", "z-image") is False
+    assert lora_base_matches("moss", "z-image-turbo") is False
     assert lora_base_matches("z-image", "moss") is False
     with pytest.raises(ValueError):
         lora_base_matches("moss", "sdxl")
@@ -120,16 +134,18 @@ def test_lora_base_matches() -> None:
 
 def test_model_settings_round_trip() -> None:
     assert _REAL_HOME not in file().resolve().parents
-    assert model_default() == "moss"
+    assert model_default() == "z-image-turbo"
     assert model_quant() == "auto"
-    assert values()["model.default"] == "moss"
+    assert values()["model.default"] == "z-image-turbo"
     assert values()["model.quant"] == "auto"
-    assert set_model_default("Z-Image") == "z-image"
-    assert set_model_quant("NF4") == "nf4"
+    assert set_model_default("z-image") == "z-image"
     assert model_default() == "z-image"
+    assert set_model_default("MOSS") == "moss"
+    assert set_model_quant("NF4") == "nf4"
+    assert model_default() == "moss"
     assert model_quant() == "nf4"
     saved = json.loads(file().read_text(encoding="utf-8"))
-    assert saved["model.default"] == "z-image"
+    assert saved["model.default"] == "moss"
     assert saved["model.quant"] == "nf4"
     with pytest.raises(ValueError):
         set_model_default("sdxl")
@@ -144,7 +160,7 @@ def test_unknown_model_settings_read_as_defaults() -> None:
         json.dumps({"model.default": "sdxl", "model.quant": "gguf"}) + "\n",
         encoding="utf-8",
     )
-    assert model_default() == "moss"
+    assert model_default() == "z-image-turbo"
     assert model_quant() == "auto"
 
 

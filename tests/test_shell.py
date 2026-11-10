@@ -87,6 +87,34 @@ def test_headless_layout_and_adoption() -> None:
     assert tokens.identity["movie-dubber"] == "#b98cff"
     assert tokens.identity["enlarge"] == "#ff6b8a"
     assert tokens.identity["clarity"] == "#2dd4bf"
+    assert tokens.identity["lucent"] == "#5ce1ff"
+    assert "PySide6" not in sys.modules
+
+
+def test_compact_button_style_and_mark() -> None:
+    from voxprint_common.ui.theme import build_style, mark_compact
+
+    for style in (build_style(False), build_shell_style(False)):
+        assert 'QPushButton[compact="true"]' in style
+        block = style.split('QPushButton[compact="true"]', 1)[1].split("}", 1)[0]
+        assert "border-radius: 4px" in block
+        assert "padding: 2px 8px" in block
+        assert "min-height: 24px" in block
+    assert 'QPushButton[chip="true"]' in build_shell_style(False)
+
+    class _Dummy:
+        def __init__(self) -> None:
+            self.properties: dict[str, object] = {}
+
+        def setProperty(self, name: str, value: object) -> None:
+            self.properties[name] = value
+
+        def style(self) -> None:
+            return None
+
+    dummy = _Dummy()
+    assert mark_compact(dummy) is dummy
+    assert dummy.properties.get("compact") is True
     assert "PySide6" not in sys.modules
 
 

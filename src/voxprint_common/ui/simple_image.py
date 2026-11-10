@@ -55,6 +55,8 @@ from voxprint_common.ui.variants import (
 )
 
 __all__ = [
+    "HISTORY_CELL_GAP",
+    "HISTORY_CELL_SIZE",
     "GalleryItem",
     "Phase",
     "PresetChoice",
@@ -64,6 +66,8 @@ __all__ = [
     "SimpleLayout",
     "SimpleWidget",
     "image_presets",
+    "snap_history_offset",
+    "wheel_notch_steps",
 ]
 
 
@@ -83,6 +87,11 @@ _SOURCE_ID = "image.source"
 _MASK_ID = "image.mask"
 _VOICE_KEY = "shell.voice"
 GenerateHook = Callable[[Mapping[str, object]], None]
+
+#: History thumb edge in pixels. The strip height is the cell size plus 16 px.
+HISTORY_CELL_SIZE = 88
+#: Gap between history thumbs in pixels, also the scroll snap stride addend.
+HISTORY_CELL_GAP = 8
 
 
 @dataclass(frozen=True)
@@ -1084,6 +1093,81 @@ def _builtin_voices() -> tuple[tuple[str, str], ...]:
     )
 
 
+def wheel_notch_steps(accumulated: int, notch: int) -> tuple[int, int]:
+    """Split accumulated wheel motion into whole notches, truncating toward zero.
+
+    Python's ``divmod`` floors toward negative infinity, so a tiny negative
+    remainder would jump a whole cell. This waits for a full ``notch`` in
+    either direction before emitting a step.
+
+    Args:
+        accumulated: Signed remaining motion (angle or pixels).
+        notch: Size of one step. Must be at least 1.
+
+    Returns:
+        ``(steps, remainder)`` with ``remainder`` in ``(-(notch - 1), notch)``.
+
+    Raises:
+        ValueError: ``notch`` is below 1.
+    """
+    if notch < 1:
+        raise ValueError("notch must be at least 1")
+    steps = int(accumulated / notch)
+    return steps, accumulated - steps * notch
+
+
+def _right_edge_cuts_cell(right: int, *, cell_size: int, stride: int, content: int) -> bool:
+    """Return whether a viewport right edge at ``right`` cuts into a cell."""
+    phase = right % stride
+    return right < content and 0 < phase < cell_size
+
+
+def snap_history_offset(
+    offset: int,
+    *,
+    cell_size: int,
+    cell_gap: int,
+    viewport: int,
+    content: int,
+) -> int:
+    """Snap a history-strip scroll offset to a whole-cell boundary.
+
+    ``stride`` is ``cell_size + cell_gap``. The offset first snaps to the
+    nearest multiple of ``stride`` (a tie goes to the lower multiple), then
+    clamps to ``[0, max(0, content - viewport)]``. When that position would
+    leave the viewport's right edge cutting into a following cell, a lower
+    multiple that keeps every visible cell whole is preferred, so the leftover
+    viewport is empty padding rather than a partial cell. When even offset 0
+    would show a partial last cell, because the viewport is not a multiple of
+    ``stride``, the result stays on a cell boundary.
+
+    Args:
+        offset: The requested scroll offset in pixels.
+        cell_size: One history cell's edge in pixels.
+        cell_gap: The gap between cells in pixels.
+        viewport: The visible width in pixels.
+        content: The full row width in pixels.
+
+    Returns:
+        The snapped offset, inside ``[0, max(0, content - viewport)]``.
+    """
+    stride = cell_size + cell_gap
+    limit = max(0, content - viewport)
+    snapped = (int(offset) + (stride - 1) // 2) // stride * stride
+    snapped = min(max(snapped, 0), limit)
+    right = snapped + viewport
+    if _right_edge_cuts_cell(right, cell_size=cell_size, stride=stride, content=content):
+        lower = snapped - stride
+        while lower >= 0:
+            if not _right_edge_cuts_cell(
+                lower + viewport, cell_size=cell_size, stride=stride, content=content
+            ):
+                snapped = lower
+                break
+            lower -= stride
+    return snapped
+
+
 class SimpleImageWidget:
     """Qt view of a :class:`SimpleImageLayout`. Construction imports PySide6.
 
@@ -1118,6 +1202,8 @@ class SimpleImageWidget:
         on_pause: Callable[[], None] | None = None,
         on_resume: Callable[[], None] | None = None,
         surface: AppSurface | None = None,
+        cell_size: int = HISTORY_CELL_SIZE,
+        cell_gap: int = HISTORY_CELL_GAP,
     ) -> None:
         """Build the screen.
 
@@ -1137,7 +1223,16 @@ class SimpleImageWidget:
             on_pause: Called from Pause on the busy screen. None hides Pause.
             on_resume: Called from Resume on the busy screen. None hides Resume.
             surface: Which app this screen is. None is Canvas.
+            cell_size: History thumb edge in pixels. Below 1 is refused.
+            cell_gap: Gap between history thumbs in pixels. Below 1 is refused.
+
+        Raises:
+            ValueError: ``cell_size`` or ``cell_gap`` is below 1.
         """
+        if cell_size < 1:
+            raise ValueError("cell_size must be at least 1 px")
+        if cell_gap < 1:
+            raise ValueError("cell_gap must be at least 1 px")
         core, gui, widgets = _qt()
         self._core = core
         self._gui = gui
@@ -1145,6 +1240,11 @@ class SimpleImageWidget:
         self._qt = core.Qt
         self._layout = layout
         self._settings = settings
+        self._cell_size = int(cell_size)
+        self._cell_gap = int(cell_gap)
+        self._snapping_history = False
+        self._history_wheel_angle = 0
+        self._history_wheel_pixels = 0
         self._on_generate = on_generate
         self._on_command = on_command
         self._on_improve = on_improve
@@ -1282,6 +1382,156 @@ class SimpleImageWidget:
         """
         self._note.setText(text)  # type: ignore[attr-defined]
         self._note.setVisible(bool(text))  # type: ignore[attr-defined]
+
+    @property
+    def cell_size(self) -> int:
+        """Return the history thumb edge in pixels."""
+        return self._cell_size
+
+    @cell_size.setter
+    def cell_size(self, value: int) -> None:
+        """Resize the history thumbs and strip, then re-snap the scroll offset.
+
+        Args:
+            value: Thumb edge in pixels. Below 1 is refused.
+
+        Raises:
+            ValueError: ``value`` is below 1.
+        """
+        if value < 1:
+            raise ValueError("cell_size must be at least 1 px")
+        self._cell_size = int(value)
+        self._apply_history_metrics()
+
+    @property
+    def cell_gap(self) -> int:
+        """Return the gap between history thumbs in pixels."""
+        return self._cell_gap
+
+    @cell_gap.setter
+    def cell_gap(self, value: int) -> None:
+        """Re-space the history row, then re-snap the scroll offset.
+
+        Args:
+            value: Gap in pixels. Below 1 is refused.
+
+        Raises:
+            ValueError: ``value`` is below 1.
+        """
+        if value < 1:
+            raise ValueError("cell_gap must be at least 1 px")
+        self._cell_gap = int(value)
+        self._apply_history_metrics()
+
+    def _history_icon_px(self) -> int:
+        """Return the thumb icon edge: 8 px inset, or the cell size when tiny."""
+        size = self._cell_size - 8
+        return size if size >= 1 else self._cell_size
+
+    def _apply_history_metrics(self) -> None:
+        """Apply ``cell_size`` and ``cell_gap`` to thumbs, strip, and scroll."""
+        icon = self._core.QSize(self._history_icon_px(), self._history_icon_px())
+        layout = self._history
+        for index in range(layout.count()):  # type: ignore[attr-defined]
+            item = layout.itemAt(index)  # type: ignore[attr-defined]
+            button = None if item is None else item.widget()
+            if button is None:
+                continue
+            button.setFixedSize(self._cell_size, self._cell_size)  # type: ignore[attr-defined]
+            button.setIconSize(icon)  # type: ignore[attr-defined]
+        layout.setSpacing(self._cell_gap)  # type: ignore[attr-defined]
+        self._history_bar.setSingleStep(self._history_stride())  # type: ignore[attr-defined]
+        self._apply_history()
+        self._snap_history()
+
+    def _snap_history(self, *_args: object) -> None:
+        """Re-snap the history strip scroll offset to a whole-cell boundary."""
+        if self._snapping_history:
+            return
+        scroll = self._history_scroll
+        bar = self._history_bar
+        viewport = int(scroll.viewport().width())  # type: ignore[attr-defined]
+        row = scroll.widget()  # type: ignore[attr-defined]
+        content = int(row.width()) if row is not None else 0  # type: ignore[attr-defined]
+        snapped = snap_history_offset(
+            int(bar.value()),  # type: ignore[attr-defined]
+            cell_size=self._cell_size,
+            cell_gap=self._cell_gap,
+            viewport=viewport,
+            content=content,
+        )
+        if snapped == int(bar.value()):  # type: ignore[attr-defined]
+            return
+        self._snapping_history = True
+        try:
+            bar.setValue(snapped)  # type: ignore[attr-defined]
+        finally:
+            self._snapping_history = False
+
+    def _history_stride(self) -> int:
+        """Return the history snap stride: cell size plus gap."""
+        return self._cell_size + self._cell_gap
+
+    def _nudge_history(self, delta: int) -> None:
+        """Move the history strip by ``delta`` pixels, then snap to a cell."""
+        bar = self._history_bar
+        scroll = self._history_scroll
+        viewport = int(scroll.viewport().width())  # type: ignore[attr-defined]
+        row = scroll.widget()  # type: ignore[attr-defined]
+        content = int(row.width()) if row is not None else 0  # type: ignore[attr-defined]
+        current = snap_history_offset(
+            int(bar.value()),  # type: ignore[attr-defined]
+            cell_size=self._cell_size,
+            cell_gap=self._cell_gap,
+            viewport=viewport,
+            content=content,
+        )
+        self._snapping_history = True
+        try:
+            bar.setValue(current + delta)  # type: ignore[attr-defined]
+        finally:
+            self._snapping_history = False
+        self._snap_history()
+
+    def _handle_history_wheel(self, strip: object, event: object) -> None:
+        """Scroll the history strip by whole cells, or snap when a trackpad gesture ends.
+
+        A phased trackpad gesture (``ScrollUpdate``) is left to Qt so the
+        strip can move freely. The offset snaps when the gesture ends. A
+        discrete mouse wheel (no phase) accumulates angle, and each 120
+        degree notch moves exactly one cell, so a small notch can advance
+        instead of being pulled back to the current cell.
+        """
+        widgets = self._widgets
+        qt = self._qt
+        phase = event.phase()  # type: ignore[attr-defined]
+        if phase != qt.ScrollPhase.NoScrollPhase:
+            widgets.QScrollArea.wheelEvent(strip, event)  # type: ignore[arg-type]
+            if phase == qt.ScrollPhase.ScrollEnd:
+                self._history_wheel_angle = 0
+                self._history_wheel_pixels = 0
+                self._snap_history()
+            return
+        angle = event.angleDelta()  # type: ignore[attr-defined]
+        pixel = event.pixelDelta()  # type: ignore[attr-defined]
+        angle_delta = int(angle.x() or angle.y())
+        pixel_delta = int(pixel.x() or pixel.y())
+        if angle_delta == 0 and pixel_delta == 0:
+            widgets.QScrollArea.wheelEvent(strip, event)  # type: ignore[arg-type]
+            return
+        stride = self._history_stride()
+        # Wheel up / positive delta scrolls toward the start of the row.
+        if angle_delta:
+            self._history_wheel_angle += angle_delta
+            steps, self._history_wheel_angle = wheel_notch_steps(self._history_wheel_angle, 120)
+        else:
+            self._history_wheel_pixels += pixel_delta
+            steps, self._history_wheel_pixels = wheel_notch_steps(
+                self._history_wheel_pixels, stride
+            )
+        if steps:
+            self._nudge_history(-steps * stride)
+        event.accept()  # type: ignore[attr-defined]
 
     def set_voices(self, voices: Iterable[tuple[str, str]]) -> None:
         """Replace the voice combo and store the selected id.
@@ -1630,20 +1880,21 @@ class SimpleImageWidget:
         self._fitting_panel = False
         self._install_panel_fit()
         root.addWidget(self._centre_split, 1)
-        self._history_scroll = widgets.QScrollArea()
-        self._history_scroll.setObjectName("historyStrip")
-        self._history_scroll.setWidgetResizable(True)
-        self._history_scroll.setFrameShape(widgets.QFrame.Shape.NoFrame)
-        self._history_scroll.setHorizontalScrollBarPolicy(qt.ScrollBarAsNeeded)
-        self._history_scroll.setVerticalScrollBarPolicy(qt.ScrollBarAlwaysOff)
-        self._history_scroll.setFixedHeight(104)
+        self._history_scroll = self._history_strip()
+        self._history_scroll.setFixedHeight(self._cell_size + 16)
         history = widgets.QWidget()
         history.setObjectName("historyRow")
         self._history = widgets.QHBoxLayout(history)
         self._history.setContentsMargins(0, 0, 0, 0)
-        self._history.setSpacing(8)
+        self._history.setSpacing(self._cell_gap)
         self._history_scroll.setWidget(history)
         _darken(self._history_scroll, self._gui)
+        self._history_bar = self._history_scroll.horizontalScrollBar()
+        self._history_bar.setSingleStep(self._history_stride())  # type: ignore[attr-defined]
+        self._history_bar.actionTriggered.connect(self._snap_history)  # type: ignore[attr-defined]
+        # Snap when a drag ends, not on valueChanged: mid-drag and live
+        # trackpad updates must be able to pass a cell before they snap.
+        self._history_bar.sliderReleased.connect(self._snap_history)  # type: ignore[attr-defined]
         root.addWidget(self._history_scroll)
         self._status_row = widgets.QWidget()
         self._status_row.setObjectName("statusRow")
@@ -1663,6 +1914,28 @@ class SimpleImageWidget:
         self._install_keys()
         self.refresh()
 
+    def _history_strip(self) -> object:
+        """Return the history scroll area, snapping again when it resizes."""
+        widgets = self._widgets
+        qt = self._qt
+        widget = self
+
+        class _Strip(widgets.QScrollArea):
+            def resizeEvent(_self: object, event: object) -> None:
+                widgets.QScrollArea.resizeEvent(_self, event)  # type: ignore[arg-type]
+                widget._snap_history()
+
+            def wheelEvent(_self: object, event: object) -> None:
+                widget._handle_history_wheel(_self, event)
+
+        strip = _Strip()
+        strip.setObjectName("historyStrip")
+        strip.setWidgetResizable(True)
+        strip.setFrameShape(widgets.QFrame.Shape.NoFrame)
+        strip.setHorizontalScrollBarPolicy(qt.ScrollBarAsNeeded)
+        strip.setVerticalScrollBarPolicy(qt.ScrollBarAlwaysOff)
+        return strip
+
     def _apply_history(self) -> None:
         show = True
         state = self._layout.state
@@ -1670,7 +1943,7 @@ class SimpleImageWidget:
             show = state.get("viewer.show_history") is True
         strip = self._history_scroll
         if show:
-            strip.setFixedHeight(104)  # type: ignore[attr-defined]
+            strip.setFixedHeight(self._cell_size + 16)  # type: ignore[attr-defined]
             strip.show()  # type: ignore[attr-defined]
             return
         strip.hide()  # type: ignore[attr-defined]
@@ -2332,10 +2605,11 @@ class SimpleImageWidget:
             button.setProperty("thumb", "true")
             button.setCheckable(True)
             button.setAutoDefault(False)
-            button.setFixedSize(88, 88)
+            button.setFixedSize(self._cell_size, self._cell_size)
             if self._surface.result_kind is ResultKind.PICTURE:
+                icon = self._history_icon_px()
                 button.setIcon(self._gui.QIcon(_scene(self._gui, item.item_id, 168, 168)))
-                button.setIconSize(self._core.QSize(80, 80))
+                button.setIconSize(self._core.QSize(icon, icon))
             else:
                 button.setText(str(index))
                 button.setToolTip(item.prompt)
@@ -2353,6 +2627,7 @@ class SimpleImageWidget:
             button.style().unpolish(button)
             button.style().polish(button)
         self._history.addStretch(1)
+        self._snap_history()
 
     def _action_bar(self) -> object:
         if self._surface.variant is VariantId.VIEWER:
