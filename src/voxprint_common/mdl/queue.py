@@ -26,11 +26,14 @@ from voxprint_common.gpu_probe import GpuDevice, query_gpus
 from voxprint_common.hashing import HashMismatch
 from voxprint_common.hashing import verify as verify_hash
 from voxprint_common.mdl.catalog import (
+    AppManifest,
     CatalogError,
     PlannedFile,
     discover,
     load_manifest,
+    matching_models,
     plan_files,
+    split_row_selector,
     unavailable_rows,
 )
 from voxprint_common.mdl.events import ProgressEvent, TransferCancelled, TransferSession
@@ -110,6 +113,7 @@ class QueueJob:
     error: str
     enqueued_at: str
     unavailable: tuple[tuple[str, str, str], ...] = ()
+    include_groups: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         """Return the JSON object for this job."""
@@ -125,6 +129,7 @@ class QueueJob:
                 {"id": model_id, "display_name": name, "reason": reason}
                 for model_id, name, reason in self.unavailable
             ],
+            "include_groups": list(self.include_groups),
         }
 
 
@@ -139,6 +144,7 @@ def enqueue(
     *,
     manifests: Sequence[Path] | None = None,
     devices: Sequence[GpuDevice] | None = None,
+    include_groups: Sequence[str] = (),
 ) -> str:
     """Append a job and return its id. This does not download anything.
 
@@ -150,9 +156,15 @@ def enqueue(
     Args:
         app: Suite app id.
         models: Model ids to fetch, including on-demand and optional ones.
-            ``None`` means whatever that app's manifest needs for this GPU tier.
+            ``None`` means whatever that app's manifest needs for this GPU
+            tier. An entry may be a manage-row selector (``id|share_key|
+            tier|label``) naming one exact row of a duplicate-id model.
         manifests: Manifest paths to read instead of install discovery.
         devices: GPUs used to choose the tier. ``None`` queries nvidia-smi.
+        include_groups: Normalized group ids (for example ``safety``) whose
+            models are planned even when optional or above the card tier.
+            The installer ``ensure`` path passes ``("safety",)`` so the
+            fail-closed safety gate can go green.
 
     Raises:
         CatalogError: ``app`` is not a suite id, or the manifest is not valid.
@@ -160,7 +172,10 @@ def enqueue(
     app_id = _check_app(app)
     listed = None if models is None else tuple(_check_model(model) for model in models)
     paths = tuple(str(Path(item)) for item in manifests) if manifests else ()
-    _needed, notices, kept = _prepare(app_id, listed, paths, devices)
+    groups = tuple(
+        dict.fromkeys(group.strip().lower() for group in include_groups if group.strip())
+    )
+    _needed, notices, kept = _prepare(app_id, listed, paths, devices, groups)
     if kept is not None:
         listed = kept
     job = QueueJob(
@@ -172,6 +187,7 @@ def enqueue(
         error="",
         enqueued_at=_now(),
         unavailable=notices,
+        include_groups=groups,
     )
     path = queue_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -365,6 +381,7 @@ def _plan(
             compute=compute,
             opener=opener,
             guard=guard,
+            include_groups=job.include_groups,
         )
         for item in files:
             current = merged.get(item.sha256)
@@ -446,6 +463,7 @@ def _set_states(ids: Sequence[str], state: str, error: str = "") -> None:
                     error or job.error,
                     job.enqueued_at,
                     job.unavailable,
+                    job.include_groups,
                 )
         _write(path, jobs)
 
@@ -528,6 +546,11 @@ def _job(value: object) -> QueueJob:
     app = value.get("app")
     if not isinstance(job_id, str) or not job_id or not isinstance(app, str):
         raise CatalogError("job id and app are required")
+    include_groups = value.get("include_groups", [])
+    if not isinstance(include_groups, list) or any(
+        not isinstance(item, str) for item in include_groups
+    ):
+        raise CatalogError("job include_groups must be a list of group ids")
     return QueueJob(
         job_id,
         app,
@@ -537,6 +560,7 @@ def _job(value: object) -> QueueJob:
         str(value.get("error") or ""),
         str(value.get("enqueued_at") or ""),
         _unavailable_rows(value.get("unavailable")),
+        tuple(include_groups),
     )
 
 
@@ -573,14 +597,16 @@ def _prepare(
     models: tuple[str, ...] | None,
     manifests: tuple[str, ...],
     devices: Sequence[GpuDevice] | None,
+    include_groups: tuple[str, ...] = (),
     opener: object | None = None,
     guard: UrlGuard | None = None,
 ) -> tuple[list[PlannedFile], tuple[tuple[str, str, str], ...], tuple[str, ...] | None]:
     """Return files still needed, unavailable rows, and the model ids to store.
 
     The third value is None when the manifests could not be resolved yet.
-    The worker then plans them. Otherwise it is the ids that still need a
-    download, which may be empty.
+    The worker then plans them. Otherwise it is the entries that still need
+    a download, which may be empty. Plain ids stay plain; a manage-row
+    selector is kept verbatim so the worker re-plans the exact row.
     """
     paths = _manifest_paths(QueueJob("pending", app, models, manifests, "queued", "", ""))
     if not paths:
@@ -599,6 +625,7 @@ def _prepare(
         compute=compute,
         opener=opener,
         guard=guard,
+        include_groups=include_groups,
     )
     notices = tuple(unavailable_rows(parsed))
     waiting = files_awaiting_hooks(files)
@@ -609,8 +636,34 @@ def _prepare(
             if id(item) not in waiting:
                 continue
         needed.append(item)
-    ids = [item.model_id or item.model_ids[0] for item in needed if item.model_id or item.model_ids]
-    return needed, notices, tuple(dict.fromkeys(ids))
+    if models is None:
+        ids = [
+            item.model_id or item.model_ids[0] for item in needed if item.model_id or item.model_ids
+        ]
+        kept = tuple(dict.fromkeys(ids))
+    else:
+        kept = _kept_entries(models, parsed, needed)
+    return needed, notices, kept
+
+
+def _kept_entries(
+    models: Sequence[str], parsed: Sequence[AppManifest], needed: Sequence[PlannedFile]
+) -> tuple[str, ...]:
+    """Return the request entries whose matched models still need files.
+
+    Every needed file is mapped back to the entry that named its model, so a
+    job stores plain ids for plain-id requests (today's behaviour) and the
+    selector string for a manage-row request, in needed-file order.
+    """
+    pool = [model for manifest in parsed for model in manifest.models]
+    entry_by_sha: dict[str, str] = {}
+    for entry in models:
+        for model in matching_models(entry, pool):
+            for item in model.files:
+                entry_by_sha.setdefault(item.sha256, entry)
+    return tuple(
+        dict.fromkeys(entry_by_sha[item.sha256] for item in needed if item.sha256 in entry_by_sha)
+    )
 
 
 def _publish_settled(job: QueueJob) -> None:
@@ -669,7 +722,7 @@ def _check_app(value: str) -> str:
 
 def _check_model(value: str) -> str:
     text = value.strip()
-    if _MODEL.fullmatch(text) is None:
+    if _MODEL.fullmatch(text) is None and split_row_selector(text) is None:
         raise CatalogError(f"model id {value!r} is not valid")
     return text
 

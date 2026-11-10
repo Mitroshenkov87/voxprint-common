@@ -100,6 +100,7 @@ def plan(
     only: Collection[str] | None = None,
     opener: object | None = None,
     guard: UrlGuard | None = None,
+    include_groups: Collection[str] = (),
 ) -> Outcome:
     """Build the plan, check disk space, and publish a status file.
 
@@ -114,6 +115,9 @@ def plan(
         only: Model ids to include. ``None`` plans the tier.
         opener: Passed through when an app manifest still needs descriptors.
         guard: URL rules for that fetch.
+        include_groups: Normalized group ids whose models are always planned,
+            including optional rows. The installer ``ensure`` path passes
+            ``("safety",)``; general planning leaves this empty.
     """
     try:
         parsed, tier, cards = _inputs(manifests, devices)
@@ -126,6 +130,7 @@ def plan(
             only=only,
             opener=opener,
             guard=guard,
+            include_groups=include_groups,
         )
         status = _status_for(files, tier, JobState.PLANNED)
         _note_local(status, files)

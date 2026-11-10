@@ -531,6 +531,10 @@ def _enqueue(args: argparse.Namespace) -> tuple[int, str, dict[str, object]]:
 
 _BLOCKING_STATES = frozenset({"missing", "corrupt"})
 _STATE_RANK = {"ok": 0, "reused": 1, "downloaded": 2, "missing": 3, "corrupt": 4, "unavailable": 5}
+# Safety models gate the readiness check even when optional, so ensure must
+# plan every safety-group row or a missing optional safety blob would fail
+# the run closed without ever being queued.
+_ENSURE_INCLUDE_GROUPS = ("safety",)
 
 
 def _ensure(
@@ -556,16 +560,20 @@ def _ensure(
     models = tuple(args.model) if args.model else None
     parsed = [load_manifest(path) for path in manifests]
     if args.dry_run:
-        outcome = plan(manifests, only=models)
-        files = _planned(parsed, models) if outcome.code == EXIT_OK else []
+        outcome = plan(manifests, only=models, include_groups=_ENSURE_INCLUDE_GROUPS)
+        files = (
+            _planned(parsed, models, include_groups=_ENSURE_INCLUDE_GROUPS)
+            if outcome.code == EXIT_OK
+            else []
+        )
         rows = _model_rows(parsed, files, mode="dry-run", before=set(), only=models)
         code, payload = _readiness_payload(app, manifests, outcome.code, rows)
         body = _payload(outcome.status)
         body.update(payload)
         return code, outcome.message, body
-    files = _planned(parsed, models)
+    files = _planned(parsed, models, include_groups=_ENSURE_INCLUDE_GROUPS)
     before = {item.sha256 for item in files if _already_installed(item)}
-    job_id = enqueue(app, models, manifests=manifests)
+    job_id = enqueue(app, models, manifests=manifests, include_groups=_ENSURE_INCLUDE_GROUPS)
     outcome = run_or_attach(job_id, session=_watch(session))
     rows = _model_rows(parsed, files, mode="ensure", before=before, only=models)
     code, payload = _readiness_payload(app, manifests, outcome.code, rows)
@@ -609,7 +617,11 @@ def _discover_parsed(paths: Sequence[Path] | None) -> list[AppManifest]:
     return found
 
 
-def _planned(parsed: Sequence[AppManifest], only: tuple[str, ...] | None) -> list[PlannedFile]:
+def _planned(
+    parsed: Sequence[AppManifest],
+    only: tuple[str, ...] | None,
+    include_groups: Sequence[str] = (),
+) -> list[PlannedFile]:
     """Plan ``parsed`` for this machine the way the queue would."""
     cards = list(query_gpus())
     memory_gib, compute = _card(cards)
@@ -619,6 +631,7 @@ def _planned(parsed: Sequence[AppManifest], only: tuple[str, ...] | None) -> lis
         memory_gib=memory_gib,
         compute=compute,
         only=only,
+        include_groups=include_groups,
     )
 
 

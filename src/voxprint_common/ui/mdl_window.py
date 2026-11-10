@@ -725,6 +725,7 @@ def _builder(kind: str) -> object:
             self._scan_again = False
             self._scan_generation = 0
             self._scan_failures = 0
+            self._manage_tab = ""
             self._check_busy = False
             self._pending_view: tuple[int, WindowView] | None = None
             self._height_cap = 900
@@ -1388,6 +1389,15 @@ def _builder(kind: str) -> object:
             for group in tab.groups:
                 layout.addWidget(_manage_group(window, group))
             widget.addTab(page, tab.title)
+        # A rebuild makes a fresh tab widget; put the user back on the tab
+        # they were reading instead of the first one.
+        widget.setCurrentIndex(_manage_tab_index(tabs, window._manage_tab))
+
+        def remember(index: int) -> None:
+            if 0 <= index < len(tabs):
+                window._manage_tab = tabs[index].key
+
+        widget.currentChanged.connect(remember)
         return widget
 
     def _tier_section(window: DownloadWindow, layout: QVBoxLayout, section: TierSection) -> None:
@@ -1582,10 +1592,13 @@ def _builder(kind: str) -> object:
             window._request_scan()
             return
         elif action in {"add", "repair"}:
+            # The row key is the model id for unique rows and the precise
+            # row selector for duplicate ids, so Add/Repair plans exactly
+            # the row the button belongs to.
             controller.enqueue_app(
                 window._focus,
                 manifest=window._manifest,
-                models=(model_id,),
+                models=(key,),
                 open_cmd=window._open_cmd,
             )
             controller.start(display=True)
@@ -1930,6 +1943,16 @@ def _remove_component(
         if item.model_id == model_id:
             component = item.component_id
     return component
+
+
+def _manage_tab_index(tabs: Sequence[ManageTab], current_key: str) -> int:
+    """Return the index of ``current_key`` among manage tabs, or 0.
+
+    Every manage rebuild makes a fresh tab widget; this keeps the user on
+    the tab they were reading (``this_app`` or ``shared``) when that tab
+    still exists and falls back to the first tab otherwise.
+    """
+    return next((index for index, tab in enumerate(tabs) if tab.key == current_key), 0)
 
 
 def _settled(controller: object, item_state: object) -> bool:

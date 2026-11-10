@@ -81,10 +81,12 @@ __all__ = [
     "kaggle_url",
     "listed_ids",
     "load_manifest",
+    "matching_models",
     "model_share_key",
     "plan_files",
     "public_mirror_urls",
     "require_space",
+    "split_row_selector",
     "suite_root",
     "unavailable_rows",
 ]
@@ -424,6 +426,7 @@ def plan_files(
     variants: Mapping[str, str] | None = None,
     opener: object | None = None,
     guard: UrlGuard | None = None,
+    include_groups: Collection[str] = (),
 ) -> list[PlannedFile]:
     """Select the variants that fit ``tier`` and deduplicate them by digest.
 
@@ -437,7 +440,10 @@ def plan_files(
         models_root: Shared models directory. Defaults to
             :func:`voxprint_common.paths.models_dir`.
         only: Model ids to plan. When set, on-demand and optional ids are
-            included and every other id is left out.
+            included and every other id is left out. An entry may instead be
+            a manage-row selector (``id|share_key|tier|label``, see
+            :func:`split_row_selector`) naming one exact row, which plain-id
+            callers never produce.
         memory_gib: Card memory. When omitted, the tier's boundary is used
             (23.5, 15.5, or 8).
         compute: ``(major, minor)`` of the card. When omitted, compute
@@ -450,6 +456,11 @@ def plan_files(
         opener: Passed to the index when an app manifest still needs
             descriptors. Defaults to urllib.
         guard: URL rules for that fetch. Defaults to the production allowlist.
+        include_groups: Normalized group ids (for example ``safety``) whose
+            models are always planned, including optional and ``on_demand``
+            rows and rows above the card tier. Only the installer
+            ``ensure`` path passes this, so the fail-closed safety gate can
+            go green; general download planning leaves it empty.
 
     Raises:
         CatalogError: The same digest is declared with two sizes, a model
@@ -464,16 +475,21 @@ def plan_files(
     order: list[str] = []
     chosen = {**chosen_variants(), **dict(variants or {})}
     if only is not None:
-        unlisted = set(only).difference(*(listed_ids(item) for item in manifests))
+        plain = {entry for entry in only if split_row_selector(entry) is None}
+        unlisted = plain.difference(*(listed_ids(item) for item in manifests))
         if unlisted:
-            first = next(model_id for model_id in only if model_id in unlisted)
+            first = next(entry for entry in only if entry in unlisted)
             raise CatalogError(f"model {first} is not available for this card")
     for manifest in manifests:
         prepared = _with_descriptors(manifest, descriptors)
-        wanted = None if only is None else [m for m in only if m in listed_ids(manifest)]
+        wanted = (
+            None
+            if only is None
+            else [entry for entry in only if _selector_model_id(entry) in listed_ids(manifest)]
+        )
         if wanted == []:
             continue
-        for model in _chosen(prepared, cap, tier, wanted):
+        for model in _chosen(prepared, cap, tier, wanted, include_groups):
             model = _apply_selection(prepared, tier, model)
             try:
                 _check_fit(model, remembered, compute)
@@ -801,9 +817,70 @@ def model_share_key(model: Model) -> str:
     return model.id
 
 
+_SELECTOR_DEDUP = re.compile(r"#\d+$")
+
+
+def split_row_selector(value: str) -> tuple[str, str, str, str] | None:
+    """Parse a manage-row selector into ``(model_id, share_key, tier, label)``.
+
+    A manage page row key is ``model_id|share_key|tier|label``; a trailing
+    ``#N`` duplicate suffix (added when one manifest lists the same row
+    twice) is ignored. A plain model id — the form ``--model <id>`` and
+    ``enqueue(app, models=...)`` callers use — returns None, keeping the
+    "best fitting tier" behaviour for ids alone.
+    """
+    parts = value.strip().split("|", 3)
+    if len(parts) != 4:
+        return None
+    model_id = parts[0].strip()
+    share_key = parts[1].strip()
+    tier = parts[2].strip()
+    if _ID.fullmatch(model_id) is None or not share_key or tier not in ModelTier:
+        return None
+    return model_id, share_key, tier, _SELECTOR_DEDUP.sub("", parts[3].strip())
+
+
+def _selector_model_id(entry: str) -> str:
+    """Return the model id an ``only`` entry names, plain or selector."""
+    parsed = split_row_selector(entry)
+    return parsed[0] if parsed is not None else entry
+
+
+def _row_matches(model: Model, selector: tuple[str, str, str, str]) -> bool:
+    """Return whether ``model`` is the exact row ``selector`` names."""
+    model_id, share_key, tier, label = selector
+    if model.id != model_id or model.tier.value != tier:
+        return False
+    if model_share_key(model) != share_key:
+        return False
+    return not label or model.label == label
+
+
+def matching_models(entry: str, models: Collection[Model]) -> list[Model]:
+    """Return the models one ``only`` entry names from ``models``.
+
+    A plain id matches every row with that id (today's behaviour). A row
+    selector matches only the row with that id, share key, tier, and label,
+    so Add/Repair on one of several same-id rows plans exactly that row.
+    """
+    selector = split_row_selector(entry)
+    if selector is None:
+        return [model for model in models if model.id == entry]
+    return [model for model in models if _row_matches(model, selector)]
+
+
 def _repo_revision_key(repo: str, revision: str) -> str:
-    """Return the canonical ``repo@revision`` share-key form."""
-    return f"{repo.strip().lower()}@{revision.strip() or 'master'}"
+    """Return the canonical ``repo@revision`` share-key form.
+
+    A missing or blank revision, ``main``, and ``master`` all name the
+    upstream default branch (Hugging Face writes ``main``, ModelScope writes
+    ``master``), so for the share key only they collapse to ``main``; any
+    other revision stays distinct and case-sensitive.
+    """
+    rev = revision.strip()
+    if not rev or rev in {"main", "master"}:
+        rev = "main"
+    return f"{repo.strip().lower()}@{rev}"
 
 
 def _repo_revision(value: object) -> str:
@@ -1234,15 +1311,34 @@ def _chosen(
     cap: int,
     tier: VramTier,
     only: Collection[str] | None,
+    include_groups: Collection[str] = (),
 ) -> list[Model]:
     wanted = None if only is None else set(only)
+    loose: set[str] = set()
+    exact: list[tuple[str, str, str, str]] = []
+    if wanted is not None:
+        for entry in wanted:
+            parsed = split_row_selector(entry)
+            if parsed is None:
+                loose.add(entry)
+            else:
+                exact.append(parsed)
+        wanted = loose if loose else None
+    keep = {group.strip().lower() for group in include_groups}
+    targeted = wanted is not None or bool(exact)
     if manifest.app_models is None:
-        pool = manifest.models
-        if wanted is not None:
-            pool = tuple(model for model in pool if model.id in wanted)
-        chosen = _select(pool, cap)
+        if targeted:
+            chosen = (
+                []
+                if wanted is None
+                else _select([model for model in manifest.models if model.id in wanted], cap)
+            )
+        else:
+            chosen = _select(manifest.models, cap)
     elif wanted is not None:
         chosen = [model for model in manifest.models if model.id in wanted]
+    elif exact:
+        chosen = []
     else:
         ids = _listed_ids(manifest.app_models, tier)
         by_id = {model.id: model for model in manifest.models}
@@ -1250,20 +1346,49 @@ def _chosen(
         if missing:
             raise CatalogError(f"model {missing[0]} has no voxprint-model descriptor")
         chosen = [by_id[model_id] for model_id in ids]
-    if wanted is None and manifest.app_models is None:
-        chosen = [model for model in chosen if not model.on_demand and not model.optional]
-    elif wanted is None:
-        chosen = [model for model in chosen if not model.optional]
+    if exact:
+        chosen = [
+            *chosen,
+            *(
+                model
+                for model in manifest.models
+                if any(_row_matches(model, selector) for selector in exact)
+            ),
+        ]
+    if keep:
+        chosen = [
+            *chosen,
+            *(
+                model
+                for model in manifest.models
+                if model.group.strip().lower() in keep and model not in chosen
+            ),
+        ]
+    if not targeted and manifest.app_models is None:
+        chosen = [
+            model
+            for model in chosen
+            if (not model.on_demand and not model.optional) or model.group.strip().lower() in keep
+        ]
+    elif not targeted:
+        chosen = [
+            model for model in chosen if not model.optional or model.group.strip().lower() in keep
+        ]
     blocked = [model for model in chosen if model.unavailable]
-    if wanted is not None and blocked:
+    if targeted and blocked:
         first = blocked[0]
         detail = first.reason or "unavailable"
         raise CatalogError(f"model {first.id} is unavailable: {detail}")
     chosen = [model for model in chosen if not model.unavailable]
-    if wanted is None:
+    if not targeted:
         return chosen
     found = {model.id for model in chosen}
-    missing = [model_id for model_id in wanted if model_id not in found]
+    missing = [model_id for model_id in (wanted or ()) if model_id not in found]
+    missing.extend(
+        selector[0]
+        for selector in exact
+        if not any(_row_matches(model, selector) for model in chosen)
+    )
     if missing:
         raise CatalogError(f"model {missing[0]} is not available for this card")
     return chosen
@@ -1323,7 +1448,12 @@ def _ids_to_resolve(
         known.extend(ids)
     known.extend(item.id for item in document.optional)
     present = set(known)
-    return [model_id for model_id in only if model_id in present and model_id not in blocked]
+    resolved: list[str] = []
+    for entry in only:
+        model_id = _selector_model_id(entry)
+        if model_id in present and model_id not in blocked:
+            resolved.append(model_id)
+    return resolved
 
 
 def _apply_selection(manifest: AppManifest, tier: VramTier, model: Model) -> Model:

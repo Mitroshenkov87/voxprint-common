@@ -192,7 +192,10 @@ class Controller:
             open_cmd: Command stored for the Open button.
             manifest: ``mdl.json`` to read. Discovered when omitted.
             devices: GPUs used to choose the tier.
-            models: Model ids to fetch. ``None`` means the tier's required set.
+            models: Model ids to fetch. ``None`` means the tier's required
+                set. An entry may be a manage-row selector (``id|share_key|
+                tier|label``) naming one exact row of a duplicate-id model,
+                which is how Add/Repair targets the clicked row.
         """
         self._opens[app_id] = open_cmd
         self._focus = app_id

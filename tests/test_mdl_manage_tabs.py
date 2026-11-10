@@ -7,9 +7,15 @@ from pathlib import Path
 
 from voxprint_common.gpu_probe import VramTier
 from voxprint_common.hashing import sha256_bytes
-from voxprint_common.mdl.catalog import load_manifest, model_share_key
+from voxprint_common.mdl.catalog import load_manifest, model_share_key, plan_files
 from voxprint_common.mdl.control import Controller
-from voxprint_common.mdl.present import ManageRow, badge_label, group_manage_rows
+from voxprint_common.mdl.present import (
+    ManageRow,
+    ManageTab,
+    badge_label,
+    group_manage_rows,
+)
+from voxprint_common.mdl.queue import enqueue, load_queue
 from voxprint_common.mdl.readiness import shared_safety_gaps
 from voxprint_common.paths import models_dir, state_dir
 from voxprint_common.runtime_manifest import add_ref, load
@@ -21,6 +27,13 @@ _URL = "https://huggingface.co/org/weights.bin"
 
 def _hf(repo: str, revision: str = "main") -> dict[str, object]:
     return {"source": "huggingface", "repo": repo, "revision": revision, "filename": "w.bin"}
+
+
+def _ms(repo: str, revision: str | None = None) -> dict[str, object]:
+    row: dict[str, object] = {"source": "modelscope", "repo": repo, "filename": "w.bin"}
+    if revision is not None:
+        row["revision"] = revision
+    return row
 
 
 def _entry(
@@ -384,3 +397,87 @@ def test_remove_resolves_the_rows_own_component_with_duplicate_ids(tmp_path: Pat
     assert legacy.component_id == ""
     resolved = _remove_component(controller, "movie-dubber", dubber, legacy, "qwen3-tts")
     assert resolved == by_label["Compact"].component_id
+
+
+def test_add_repair_selector_plans_the_exact_duplicate_id_row(tmp_path: Path) -> None:
+    full_digest = sha256_bytes(b"qwen3-tts-full")
+    compact_digest = sha256_bytes(b"qwen3-tts-compact")
+    dubber = _manifest(
+        tmp_path / "dubber",
+        "movie-dubber",
+        [
+            _entry(
+                "qwen3-tts",
+                tier="24gb",
+                label="Full size",
+                digest=full_digest,
+                mirrors=[_hf("Org/TTS-1.7B")],
+            ),
+            _entry(
+                "qwen3-tts",
+                tier="any",
+                label="Compact",
+                digest=compact_digest,
+                mirrors=[_hf("Org/TTS-0.6B")],
+            ),
+        ],
+    )
+    parsed = load_manifest(dubber)
+    page = Controller().manage_page("movie-dubber", dubber, devices=[], lang="en")
+    rows = _rows_by_key(page)
+    full_key = next(key for key in rows if key.endswith("|24gb|Full size"))
+    compact_key = next(key for key in rows if key.endswith("|any|Compact"))
+    # The Add/Repair path enqueues the row key: repairing the full-size row
+    # must not plan the compact row, and adding the compact row must not
+    # plan the full-size one.
+    full_files = plan_files([parsed], VramTier.GB24, only=(full_key,))
+    assert {item.sha256 for item in full_files} == {full_digest}
+    compact_files = plan_files([parsed], VramTier.GB24, only=(compact_key,))
+    assert {item.sha256 for item in compact_files} == {compact_digest}
+    # A bare id keeps the best-fitting-tier behaviour for --model callers.
+    best_files = plan_files([parsed], VramTier.GB24, only=("qwen3-tts",))
+    assert {item.sha256 for item in best_files} == {full_digest}
+    # Enqueue stores the selector on the job, so the worker re-plans the
+    # same row instead of collapsing to the best-fitting tier.
+    enqueue("movie-dubber", (compact_key,), manifests=[dubber], devices=[])
+    (job,) = load_queue()
+    assert job.state == "queued"
+    assert job.models == (compact_key,)
+
+
+def test_share_key_canonicalizes_default_branch_revisions(tmp_path: Path) -> None:
+    blank = load_manifest(
+        _manifest(tmp_path / "a", "canvas", [_entry("m", mirrors=[_ms("Org/Foo")])])
+    )
+    main_rev = load_manifest(
+        _manifest(tmp_path / "b", "canvas", [_entry("m", mirrors=[_ms("Org/Foo", "main")])])
+    )
+    master_rev = load_manifest(
+        _manifest(tmp_path / "c", "canvas", [_entry("m", mirrors=[_ms("Org/Foo", "master")])])
+    )
+    pinned = load_manifest(
+        _manifest(tmp_path / "d", "canvas", [_entry("m", mirrors=[_ms("Org/Foo", "abc")])])
+    )
+    blank_key = model_share_key(blank.models[0])
+    # No revision, main, and master all name the upstream default branch.
+    assert blank_key == "org/foo@main"
+    assert model_share_key(main_rev.models[0]) == blank_key
+    assert model_share_key(master_rev.models[0]) == blank_key
+    # Any other revision stays distinct.
+    assert model_share_key(pinned.models[0]) == "org/foo@abc"
+    assert model_share_key(pinned.models[0]) != blank_key
+
+
+def test_manage_tab_index_restores_the_remembered_tab() -> None:
+    from voxprint_common.ui.mdl_window import _manage_tab_index
+
+    tabs = (
+        ManageTab("this_app", "This app (1)", (), 1),
+        ManageTab("shared", "Shared (2)", (), 2),
+    )
+    assert _manage_tab_index(tabs, "this_app") == 0
+    assert _manage_tab_index(tabs, "shared") == 1
+    # A missing tab, no remembered tab, or no tabs falls back to the first.
+    assert _manage_tab_index(tabs, "gone") == 0
+    assert _manage_tab_index(tabs, "") == 0
+    assert _manage_tab_index((), "shared") == 0

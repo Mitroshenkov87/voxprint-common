@@ -70,6 +70,7 @@ def _manifest(
     app: str = "enlarge",
     model: str = "upscaler",
     group: str = "",
+    optional: bool = False,
 ) -> Path:
     path = folder / "mdl.json"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -88,6 +89,8 @@ def _manifest(
     }
     if group:
         entry["group"] = group
+    if optional:
+        entry["optional"] = True
     path.write_text(json.dumps({"schema": 1, "app": app, "models": [entry]}), encoding="utf-8")
     return path
 
@@ -194,6 +197,40 @@ def test_verify_json_result_shape(
         }
     ]
     assert result["safety_gaps"] == []
+
+
+def test_ensure_downloads_a_missing_optional_safety_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    state = _State(PAYLOAD)
+    server, root = _serve(state)
+    manifest = _manifest(
+        tmp_path / "canvas",
+        f"{root}/file",
+        app="canvas",
+        model="yunet-face",
+        group="safety",
+        optional=True,
+    )
+    monkeypatch.setenv("VOXPRINT_MDL_TEST_GUARD", "loopback")
+    try:
+        code = main(["--json", "ensure", "--app-manifest", str(manifest)])
+        result = _result(capsys)
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert code == 0
+    assert result["ready"] is True
+    assert result["safety_gaps"] == []
+    assert result["models"] == [
+        {
+            "id": "yunet-face",
+            "share_key": f"model-{DIGEST[:12]}",
+            "state": "downloaded",
+            "bytes": len(PAYLOAD),
+        }
+    ]
+    assert len(_bodies(state)) == 1
 
 
 def test_missing_safety_blob_fails_closed(
