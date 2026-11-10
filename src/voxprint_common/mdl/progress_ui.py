@@ -2,8 +2,9 @@
 
 The window uses the suite stylesheet from :mod:`voxprint_common.ui.theme`.
 PySide6 is imported inside :func:`run_window` so this module can be imported
-on a headless installer without Qt. Download labels that predate the catalogs
-stay Russian. The check-and-repair window reads :mod:`voxprint_common.i18n`.
+on a headless installer without Qt. The package UI is English-source: every
+label this window paints comes from :mod:`voxprint_common.i18n` through
+``tr_lang``. The module-level constants keep the English fallback spelling.
 """
 
 from __future__ import annotations
@@ -51,14 +52,15 @@ _ROW_HEIGHT = 36
 _ROW_BAR_HEIGHT = 17
 _CELL_PAD_LEFT = 8
 
-RETRY_TEXT = "Повторить"
-CANCEL_TEXT = "Отмена"
-CANCELLED_TEXT = "Отменено"
-READY_TEXT = "Готово"
-ERROR_PREFIX = "Ошибка"
-HEADING = "Загрузка моделей"
-OVERALL = "Общий прогресс"
-COLUMNS = ("Модель", "Размер", "Источник", "Скорость", "Осталось")
+RETRY_TEXT = "Retry"
+CANCEL_TEXT = "Cancel"
+CANCELLED_TEXT = "Cancelled"
+READY_TEXT = "Ready"
+ERROR_PREFIX = "Error"
+HEADING = "Downloading models"
+OVERALL = "Overall progress"
+COLUMNS = ("Model", "Size", "Source", "Speed", "Left")
+_COLUMN_KEYS = ("model", "size", "source", "speed", "left")
 
 Starter = Callable[[threading.Event, Callable[[Status], None]], Outcome]
 _VERIFY_JOBS = 0
@@ -100,49 +102,47 @@ def window_title() -> str:
     return DISPLAY_NAME
 
 
-def format_size(amount: int) -> str:
-    """Return a short Russian size, for example ``1.5 МБ``.
+def format_size(amount: int, *, lang: str | None = None) -> str:
+    """Return a short localized size, for example ``1.5 MB``.
 
     Args:
         amount: Size in bytes.
+        lang: Language code. Defaults to the active UI language.
     """
-    value = float(max(0, amount))
-    for unit in ("Б", "КБ", "МБ", "ГБ"):
-        if value < 1024 or unit == "ГБ":
-            if unit == "Б":
-                return f"{int(value)} {unit}"
-            return f"{value:.1f} {unit}"
-        value /= 1024
-    return f"{value:.1f} ГБ"
+    return localized_size(amount, lang=lang)
 
 
-def format_speed(bps: float) -> str:
-    """Return a throughput label, or an em dash when nothing has been measured.
+def format_speed(bps: float, *, lang: str | None = None) -> str:
+    """Return a throughput label, or a dash when nothing has been measured.
 
     Args:
         bps: Bytes per second.
+        lang: Language code. Defaults to the active UI language.
     """
+    code = lang or get_language()
     if bps <= 0 or math.isnan(bps):
-        return "—"
-    return f"{format_size(int(bps))}/с"
+        return tr_lang("mdl.eta.unknown", code)
+    return tr_lang("mdl.unit.per_second", code, size=format_size(int(bps), lang=code))
 
 
-def format_eta(seconds: float | None) -> str:
-    """Return a Russian ETA, or an em dash when it is unknown.
+def format_eta(seconds: float | None, *, lang: str | None = None) -> str:
+    """Return a localized ETA, or a dash when it is unknown.
 
     Args:
         seconds: Remaining seconds.
+        lang: Language code. Defaults to the active UI language.
     """
+    code = lang or get_language()
     if seconds is None or seconds < 0 or math.isnan(seconds) or math.isinf(seconds):
-        return "—"
+        return tr_lang("mdl.eta.unknown", code)
     total = int(seconds)
     hours, rem = divmod(total, 3600)
     minutes, secs = divmod(rem, 60)
     if hours:
-        return f"{hours} ч {minutes} мин"
+        return tr_lang("mdl.eta.hours", code, hours=hours, minutes=minutes)
     if minutes:
-        return f"{minutes} мин {secs} с"
-    return f"{secs} с"
+        return tr_lang("mdl.eta.minutes", code, minutes=minutes, seconds=secs)
+    return tr_lang("mdl.eta.seconds", code, seconds=secs)
 
 
 def run_window(start: Starter, *, mode: str = "download") -> int:
@@ -159,7 +159,7 @@ def run_window(start: Starter, *, mode: str = "download") -> int:
     Returns:
         The process exit code. A download success closes the window. A verify
         run stays open on the summary until Close. Failure of a download leaves
-        the window open until Повторить or the window is closed.
+        the window open until Retry is pressed or the window is closed.
     """
     detach_console()
     chosen = WindowMode(mode)
@@ -300,7 +300,7 @@ def _run_download_window(start: Starter) -> int:
 
     Returns:
         The process exit code. Success closes the window. Failure leaves it
-        open until Повторить or the window is closed.
+        open until Retry is pressed or the window is closed.
     """
     # Qt stays out of the module import so headless tests can format the labels.
     from PySide6.QtCore import QTimer
@@ -331,6 +331,7 @@ def _run_download_window(start: Starter) -> int:
     app = QApplication.instance()
     if app is None:
         app = QApplication([])
+    lang = get_language()
     window = _Window()
     window.setObjectName("root")
     window.setWindowTitle(window_title())
@@ -339,24 +340,26 @@ def _run_download_window(start: Starter) -> int:
     layout = QVBoxLayout(window)
     title = QLabel(window_title())
     title.setObjectName("title")
-    heading = QLabel(HEADING)
+    heading = QLabel(tr_lang("mdl.progress.heading", lang))
     heading.setObjectName("subtitle")
     table = QTableWidget(0, len(COLUMNS))
-    table.setHorizontalHeaderLabels(list(COLUMNS))
+    table.setHorizontalHeaderLabels(
+        [tr_lang(f"mdl.progress.column.{name}", lang) for name in _COLUMN_KEYS]
+    )
     table.verticalHeader().setVisible(False)
     table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
     table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
-    overall_label = QLabel(OVERALL)
+    overall_label = QLabel(tr_lang("mdl.progress.overall", lang))
     overall = QProgressBar()
     overall.setRange(0, 1000)
     error = QLabel("")
     error.setWordWrap(True)
     error.setStyleSheet(f"color: {RED};")
     buttons = QHBoxLayout()
-    retry = QPushButton(RETRY_TEXT)
+    retry = QPushButton(tr_lang("mdl.retry", lang))
     retry.setObjectName("primary")
     retry.setEnabled(False)
-    cancel_button = QPushButton(CANCEL_TEXT)
+    cancel_button = QPushButton(tr_lang("mdl.cancel", lang))
     buttons.addStretch(1)
     buttons.addWidget(retry)
     buttons.addWidget(cancel_button)
@@ -377,29 +380,31 @@ def _run_download_window(start: Starter) -> int:
         for row, step in enumerate(status.steps):
             values = (
                 step.model,
-                format_size(step.size),
-                step.source or "—",
-                format_speed(step.speed_bps),
-                format_eta(step.eta_s),
+                format_size(step.size, lang=lang),
+                step.source or tr_lang("mdl.eta.unknown", lang),
+                format_speed(step.speed_bps, lang=lang),
+                format_eta(step.eta_s, lang=lang),
             )
             for column, text in enumerate(values):
                 table.setItem(row, column, QTableWidgetItem(text))
+        overall_text = tr_lang("mdl.progress.overall", lang)
         if status.bytes_total:
             overall.setRange(0, 1000)
             fraction = min(1.0, status.bytes_done / status.bytes_total)
             overall.setValue(int(fraction * 1000))
-            overall_label.setText(f"{OVERALL}: {int(fraction * 100)}%")
+            overall_label.setText(f"{overall_text}: {int(fraction * 100)}%")
         else:
             overall.setRange(0, 1)
             overall.setValue(1 if status.ready else 0)
-            overall_label.setText(OVERALL)
+            overall_label.setText(overall_text)
         if status.state is JobState.READY:
-            error.setText(READY_TEXT)
+            error.setText(tr_lang("mdl.progress.ready", lang))
             error.setStyleSheet("")
         elif status.state is JobState.CANCELLED:
-            error.setText(CANCELLED_TEXT)
+            error.setText(tr_lang("mdl.progress.cancelled", lang))
         elif status.error:
-            error.setText(f"{ERROR_PREFIX}: {status.error}")
+            prefix = tr_lang("mdl.progress.error_prefix", lang)
+            error.setText(f"{prefix}: {status.error}")
             error.setStyleSheet(f"color: {RED};")
         else:
             error.setText("")

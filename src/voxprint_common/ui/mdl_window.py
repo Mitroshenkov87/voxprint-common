@@ -38,12 +38,14 @@ from voxprint_common.mdl.present import (
     ItemState,
     ManageGroup,
     ManageRow,
+    ManageTab,
     ManageView,
     RowView,
     SmoothedProgress,
     Snapshot,
     TierSection,
     WindowView,
+    badge_label,
     can_remove,
     view_for,
 )
@@ -374,6 +376,7 @@ def _builder(kind: str) -> object:
         QScrollArea,
         QSizePolicy,
         QSystemTrayIcon,
+        QTabWidget,
         QVBoxLayout,
         QWidget,
     )
@@ -1271,7 +1274,9 @@ def _builder(kind: str) -> object:
             disk = WrapLabel(view.manage.disk)
             disk.setObjectName("hint")
             window._rows.addWidget(disk)
-            if view.manage.groups:
+            if view.manage.tabs:
+                window._rows.addWidget(_manage_tabs(window, view.manage.tabs))
+            elif view.manage.groups:
                 for group in view.manage.groups:
                     window._rows.addWidget(_manage_group(window, group))
             else:
@@ -1370,6 +1375,19 @@ def _builder(kind: str) -> object:
         layout.addWidget(title)
         layout.addWidget(_row_block(window, group.rows))
         return host
+
+    def _manage_tabs(window: DownloadWindow, tabs: tuple[ManageTab, ...]) -> QTabWidget:
+        """The This app / Shared tabs, one page of task groups each."""
+        widget = QTabWidget()
+        for tab in tabs:
+            page = QWidget()
+            layout = QVBoxLayout(page)
+            layout.setContentsMargins(8, 8, 8, 8)
+            layout.setSpacing(6)
+            for group in tab.groups:
+                layout.addWidget(_manage_group(window, group))
+            widget.addTab(page, tab.title)
+        return widget
 
     def _tier_section(window: DownloadWindow, layout: QVBoxLayout, section: TierSection) -> None:
         """One open subsection, or a closed one behind the other-cards disclosure."""
@@ -1478,8 +1496,9 @@ def _builder(kind: str) -> object:
         chip = QLabel(row.state_label)
         chip.setStyleSheet(chip_style(row.state))
         layout.addLayout(text, 1)
-        if row.badge:
-            badge = QLabel(row.badge)
+        badge_text = badge_label(row.badge)
+        if badge_text:
+            badge = QLabel(badge_text)
             badge.setStyleSheet(
                 f"color: {TEXT_MUTED}; background: #2a2a35; "
                 "border-radius: 10px; padding: 3px 8px; font-size: 12px;"
@@ -1512,35 +1531,37 @@ def _builder(kind: str) -> object:
     def _open_group(window: DownloadWindow, app_id: str) -> None:
         _launch_app(_command_for(window._controller, app_id) or window._open_cmd)
 
-    def _row_group(window: DownloadWindow, key: str) -> str:
-        """Return the task group of the row ``key``, or ``""`` when unknown."""
+    def _find_manage_row(window: DownloadWindow, key: str) -> ManageRow | None:
+        """Return the row ``key``, or None when unknown."""
         view = window._view
         manage = view.manage if view else None
         if manage is None:
-            return ""
+            return None
         pools: list[tuple[ManageRow, ...]] = [manage.installed, manage.available]
+        for tab in manage.tabs:
+            for group in tab.groups:
+                pools.append(group.rows)
+                pools.extend(section.rows for section in group.sections)
         for group in manage.groups:
             pools.append(group.rows)
             pools.extend(section.rows for section in group.sections)
         for pool in pools:
             for row in pool:
                 if row.key == key:
-                    return row.group
-        return ""
+                    return row
+        return None
 
     def _manage_action(window: DownloadWindow, action: str, key: str) -> None:
         controller = window._controller
         if controller is None or window._manifest is None:
             return
+        row = _find_manage_row(window, key)
+        model_id = (row.model_id or row.key) if row is not None else key
         if action == "remove":
-            group = _row_group(window, key)
-            if not can_remove(group):
+            group = row.group if row is not None else ""
+            if row is None or not row.removable or not can_remove(group):
                 return
-            row_title = key
-            if window._view and window._view.manage:
-                for row in (*window._view.manage.installed, *window._view.manage.available):
-                    if row.key == key:
-                        row_title = row.title
+            row_title = row.title
             if not _ask(
                 window,
                 tr("mdl.confirm.remove.title"),
@@ -1553,10 +1574,10 @@ def _builder(kind: str) -> object:
                 tr("mdl.confirm.remove.no"),
             ):
                 return
-            component = f"model-{key}" if not key.startswith("model-") else key
+            component = f"model-{model_id}" if not model_id.startswith("model-") else model_id
             listing = controller.listing(window._focus, window._manifest, all_tiers=True)
             for item in listing:
-                if item.model_id == key:
+                if item.model_id == model_id:
                     component = item.component_id
             controller.remove_model(window._focus, component, group=group)
             window._request_scan()
@@ -1565,7 +1586,7 @@ def _builder(kind: str) -> object:
             controller.enqueue_app(
                 window._focus,
                 manifest=window._manifest,
-                models=(key,),
+                models=(model_id,),
                 open_cmd=window._open_cmd,
             )
             controller.start(display=True)
@@ -1602,6 +1623,12 @@ def _builder(kind: str) -> object:
         if view.manage is not None:
             parts.append("i" + ",".join(row.key + row.state for row in view.manage.installed))
             parts.append("a" + ",".join(row.key + row.state for row in view.manage.available))
+            for tab in view.manage.tabs:
+                painted = ",".join(
+                    group.key + ":" + ",".join(row.key + row.state for row in group.rows)
+                    for group in tab.groups
+                )
+                parts.append("t" + tab.key + ":" + painted)
             for group in view.manage.groups:
                 if group.sections:
                     painted = ",".join(

@@ -150,14 +150,14 @@ def test_offscreen_shell_screenshots(tmp_path: Path) -> None:
     )
     assert completed.returncode == 0, completed.stdout + "\n" + completed.stderr
     english = (tmp_path / "en-shell.png").read_bytes()
-    russian = (tmp_path / "ru-shell.png").read_bytes()
+    ukrainian = (tmp_path / "uk-shell.png").read_bytes()
     german = (tmp_path / "de-shell.png").read_bytes()
     palette = (tmp_path / "en-palette.png").read_bytes()
-    russian_palette = (tmp_path / "ru-palette.png").read_bytes()
+    ukrainian_palette = (tmp_path / "uk-palette.png").read_bytes()
     split = (tmp_path / "en-split.png").read_bytes()
     empty = (tmp_path / "en-simple-empty.png").read_bytes()
     result = (tmp_path / "en-simple-result.png").read_bytes()
-    russian_result = (tmp_path / "ru-simple-result.png").read_bytes()
+    ukrainian_result = (tmp_path / "uk-simple-result.png").read_bytes()
     expert = (tmp_path / "en-expert.png").read_bytes()
     modified = (tmp_path / "en-expert-modified.png").read_bytes()
     variants = {
@@ -174,12 +174,12 @@ def test_offscreen_shell_screenshots(tmp_path: Path) -> None:
             "text-expert.png",
             "tool-simple.png",
             "tool-expert.png",
-            "ru-image-simple.png",
-            "ru-image-expert.png",
-            "ru-audio-simple.png",
-            "ru-audio-expert.png",
-            "ru-dub-simple.png",
-            "ru-dub-expert.png",
+            "uk-image-simple.png",
+            "uk-image-expert.png",
+            "uk-audio-simple.png",
+            "uk-audio-expert.png",
+            "uk-dub-simple.png",
+            "uk-dub-expert.png",
             "viewer-simple.png",
             "viewer-expert.png",
             "image-modified.png",
@@ -188,45 +188,45 @@ def test_offscreen_shell_screenshots(tmp_path: Path) -> None:
             "text-modified.png",
             "tool-modified.png",
             "viewer-modified.png",
-            "ru-video-simple.png",
-            "ru-video-expert.png",
-            "ru-text-simple.png",
-            "ru-text-expert.png",
-            "ru-tool-simple.png",
-            "ru-tool-expert.png",
-            "ru-viewer-simple.png",
-            "ru-viewer-expert.png",
+            "uk-video-simple.png",
+            "uk-video-expert.png",
+            "uk-text-simple.png",
+            "uk-text-expert.png",
+            "uk-tool-simple.png",
+            "uk-tool-expert.png",
+            "uk-viewer-simple.png",
+            "uk-viewer-expert.png",
             "de-image-simple.png",
             "de-image-expert.png",
-            "ru-sections.png",
-            "ru-casting.png",
-            "ru-steps.png",
-            "ru-steps-running.png",
+            "uk-sections.png",
+            "uk-casting.png",
+            "uk-steps.png",
+            "uk-steps-running.png",
         )
     }
     pictures = (
         english,
-        russian,
+        ukrainian,
         german,
         palette,
-        russian_palette,
+        ukrainian_palette,
         split,
         empty,
         result,
-        russian_result,
+        ukrainian_result,
         expert,
         modified,
     )
     for blob in pictures:
         assert blob.startswith(b"\x89PNG")
         assert len(blob) > 1000
-    assert english != russian
+    assert english != ukrainian
     assert english != german
-    assert palette != russian_palette
+    assert palette != ukrainian_palette
     assert english != palette
     assert english != split
     assert empty != result
-    assert result != russian_result
+    assert result != ukrainian_result
     assert result != expert
     assert expert != modified
     assert empty != english

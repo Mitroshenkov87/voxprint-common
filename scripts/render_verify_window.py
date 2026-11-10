@@ -1,7 +1,7 @@
 """Paint offscreen PNGs of the check-and-repair window.
 
-Run with ``QT_QPA_PLATFORM=offscreen``. The rows are scripted. Nothing is hashed
-or downloaded.
+Run with ``QT_QPA_PLATFORM=offscreen``. The rows are scripted, in English.
+Nothing is hashed or downloaded.
 """
 
 from __future__ import annotations
@@ -25,12 +25,6 @@ _NAMES = {
         "Video enhancement model",
         "Face restoration",
         "Frame stabilizer",
-    ),
-    "ru": (
-        "Студийный голос",
-        "Модель улучшения видео",
-        "Восстановление лиц",
-        "Стабилизация кадров",
     ),
 }
 
@@ -90,10 +84,10 @@ def _rows(lang: str, phase: str) -> list[tuple[str, int, int, str]]:
 
 
 def main() -> None:
-    """Write the English and Russian check and repair renders."""
+    """Write the English check and repair renders."""
     OUT.mkdir(parents=True, exist_ok=True)
     counters = {"verify": (1, 4), "review": (4, 4), "repair": (1, 2)}
-    for lang in ("en", "ru"):
+    for lang in ("en",):
         for phase, stem in (
             ("verify", "mdl-verify"),
             ("review", "mdl-review"),

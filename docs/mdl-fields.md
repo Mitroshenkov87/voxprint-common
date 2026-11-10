@@ -2,6 +2,8 @@
 
 Model entries can carry three optional display strings — `label`, `purpose`, and `group` — that drive the grouped Manage models window. They exist on both manifest forms: schema 1 `mdl.json` model objects and `voxprint-app-models/1` tier entries (object form) plus `optional[]` entries. Every field is optional; files written before 0.7.1 load and render unchanged.
 
+Since 0.7.2 the manage window also splits into two tabs, "This app" and "Shared", and the task groups and VRAM sections apply inside each tab independently (a tab with no rows is hidden; the visible tab titles carry a row count). A row is Shared when the shared store refcount names more than one app, or another installed app lists the same share key. The share key is repo+revision of the resolved descriptor or of the Hugging Face / ModelScope mirror on a schema-1 entry — never the model id, which is not unique across apps and can repeat inside one `mdl.json`. When repo+revision cannot be read, the key falls back to the file sha256 (`model-<sha12>`), so two apps that already share a blob still group together. Shared rows show "Used by:" with every installed app that refs the component or lists the key; Remove on a shared row drops only this app's reference (the files go when the refcount reaches zero, which the row says); a model any installed app marks required — not `optional` and not `on_demand`, or `group=safety` — paints no Remove in the Shared tab and the remove path refuses it, reading "Required for safety" or "Required by <app display name>". A missing or corrupt shared safety copy fails closed: the row shows Repair with "Required, missing" / "Required, needs repair", and `voxprint_common.mdl.readiness.shared_safety_gaps()` reports the bad share keys so the app refuses the gated action. Duplicate ids in one manifest load fine; each entry is its own row, keyed by repo+revision plus tier and label so rows and actions do not collide.
+
 ## Fields
 
 | Field | Type | Meaning |
@@ -63,7 +65,7 @@ The split applies only inside `generate`, `edit`, `upscale`, and `restore`, and 
 
 - `16gb` (and `8gb`, when present) rows go in "For 16 GB cards (compact)".
 - `24gb` rows go in "Full size (24 GB+)".
-- Every row is badged with its tier (`8gb`, `16gb`, `24gb`); `any` gets no badge.
+- Every row is badged with its tier; the badge paints "8 GB" / "16 GB" / "24 GB" through the catalogs. Internally `ManageRow.badge` keeps the raw `8gb` / `16gb` / `24gb` value (and `""` for `any`, which gets no badge), so grouping and the split never see the display string.
 - The subsection matching the detected card starts open: "Full size (24 GB+)" on a 24 GB card, the compact section on a 16 GB or 8 GB card, or when no GPU was detected. The other subsection starts collapsed under "Show models for other cards".
 - `any`-tier rows in a split group join the open subsection, with no badge.
 

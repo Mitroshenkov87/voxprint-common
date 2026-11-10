@@ -36,6 +36,7 @@ __all__ = [
     "ItemState",
     "ManageGroup",
     "ManageRow",
+    "ManageTab",
     "ManageView",
     "QueueItem",
     "RowView",
@@ -43,6 +44,7 @@ __all__ = [
     "Snapshot",
     "TierSection",
     "WindowView",
+    "badge_label",
     "can_remove",
     "display_path",
     "explain",
@@ -266,11 +268,17 @@ class GroupView:
 class ManageRow:
     """One model on the manage-models page.
 
-    ``key`` is the raw model id and becomes the row tooltip. ``group`` is
-    the normalized task group id. ``badge`` is the VRAM tier (``8gb``,
-    ``16gb``, or ``24gb``); an empty string means tier ``any`` and paints
-    no badge. ``removable`` is false for the protected ``safety`` and
-    ``internal`` groups, which paint no Remove button.
+    ``key`` is the unique row key and becomes the row tooltip. It is the raw
+    model id unless the manifest lists the same id twice, in which case it
+    carries the share key, tier, and label so rows and actions do not
+    collide. ``model_id`` is the raw model id used to enqueue or release the
+    model; it defaults to ``key`` for rows built before the field existed.
+    ``group`` is the normalized task group id. ``badge`` is the VRAM tier
+    (``8gb``, ``16gb``, or ``24gb``); an empty string means tier ``any`` and
+    paints no badge — the window maps it to the display string through
+    :func:`badge_label`. ``removable`` is false for the protected ``safety``
+    and ``internal`` groups and for shared rows another app requires, which
+    paint no Remove button.
     """
 
     key: str
@@ -285,6 +293,7 @@ class ManageRow:
     group: str = "other"
     badge: str = ""
     removable: bool = True
+    model_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -319,12 +328,30 @@ class ManageGroup:
 
 
 @dataclass(frozen=True)
+class ManageTab:
+    """One tab of the manage-models page.
+
+    ``key`` is ``this_app`` or ``shared``. ``title`` already carries the row
+    count, for example "This app (7)". ``groups`` holds the task groups and
+    VRAM sections, grouped independently inside this tab; a tab with no rows
+    is not added to the view at all.
+    """
+
+    key: str
+    title: str
+    groups: tuple[ManageGroup, ...]
+    count: int
+
+
+@dataclass(frozen=True)
 class ManageView:
     """Installed models and the extras this graphics card can run.
 
     ``groups`` is the task-grouped organisation the window paints. The
     ``installed`` and ``available`` tuples stay for callers that built the
     old flat page and for the fallback layout when ``groups`` is empty.
+    ``tabs`` splits the rows into "This app" and "Shared"; the window paints
+    it when present and falls back to ``groups`` / the flat tuples otherwise.
     """
 
     installed: tuple[ManageRow, ...]
@@ -333,6 +360,7 @@ class ManageView:
     empty_installed: str
     empty_available: str
     groups: tuple[ManageGroup, ...] = ()
+    tabs: tuple[ManageTab, ...] = ()
 
 
 GROUP_ORDER = (
@@ -387,6 +415,30 @@ def can_remove(group: str) -> bool:
     here and the row paints no Remove button.
     """
     return normalize_group(group) not in PROTECTED_GROUPS
+
+
+_BADGE_KEYS = {
+    "8gb": "mdl.badge.8gb",
+    "16gb": "mdl.badge.16gb",
+    "24gb": "mdl.badge.24gb",
+}
+
+
+def badge_label(badge: str, *, lang: str | None = None) -> str:
+    """Return the painted VRAM badge for an internal ``ManageRow.badge`` value.
+
+    ``8gb`` / ``16gb`` / ``24gb`` become "8 GB" / "16 GB" / "24 GB" through
+    the catalogs; ``any`` (an empty badge) and every unknown value paint no
+    badge and return an empty string.
+
+    Args:
+        badge: The internal badge value kept on :class:`ManageRow`.
+        lang: Language code. Defaults to the active UI language.
+    """
+    key = _BADGE_KEYS.get(badge)
+    if key is None:
+        return ""
+    return _t(key, lang)
 
 
 def group_manage_rows(

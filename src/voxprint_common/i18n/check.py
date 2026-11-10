@@ -2,7 +2,7 @@
 
 The CI command is::
 
-    python -m voxprint_common.i18n.check --src src/<pkg> --locales <dir> --langs en,ru,de,uk,lv
+    python -m voxprint_common.i18n.check --src src/<pkg> --locales <dir> --langs en,de,uk,lv
 
 It fails when a Qt or PySide6 call carries a hard-coded user-facing string,
 when a key is missing from any requested locale, or when ``{placeholder}``

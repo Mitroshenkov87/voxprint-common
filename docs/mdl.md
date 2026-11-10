@@ -42,7 +42,7 @@ voxprint-mdl cleanup --apply --mode link --app canvas --manifest "C:\Program Fil
 
 `download` uses the same blob. A finished `blobs\<sha256>` of the right size is not fetched again: the `.verified` marker is enough, and the digest is read only when that marker is missing. A fetch writes that marker when the file lands, and again when a hash confirms a blob that was already there.
 
-`--gui` opens the download window. It needs `voxprint-common[ui]`. Labels come from `voxprint_common.i18n` (English, German, Russian, Ukrainian, Latvian). Without `--gui` the job is headless and suitable for a silent install. A hook failure uses exit code 2. The window's Retry runs the job again.
+`--gui` opens the download window. It needs `voxprint-common[ui]`. Labels come from `voxprint_common.i18n` (English, German, Ukrainian, Latvian). Without `--gui` the job is headless and suitable for a silent install. A hook failure uses exit code 2. The window's Retry runs the job again.
 
 Apps keep a Manage models button and drop their own download screens. The button runs:
 
@@ -259,17 +259,21 @@ There is one window for the whole queue. Each app is a group with that app's spl
 
 Pause and Resume talk to the worker's `TransferSession`. Cancel asks for confirmation and says the download can resume later. Errors are a short "What happened" and "What to do", with Retry. The traceback stays behind Details and in the log file.
 
-Manage models lists installed files with size and status, and optional models this GPU tier can run, grouped by task (Generate, Edit & structure, and so on; see [mdl-fields](mdl-fields.md)). A group with both compact and full-size variants folds the half that does not match the card under "Show models for other cards"; the page alone lists models above the card's tier, so they stay addable there. A model whose minimum VRAM is above the card is hidden from `listing()`. Add enqueues that model. Remove drops this app's ref and deletes the file only when no other app still uses it; the `safety` and `internal` groups have no Remove and are refused in logic. Verify re-hashes the plan.
+Manage models lists installed files with size and status, and optional models this GPU tier can run, grouped by task (Generate, Edit & structure, and so on; see [mdl-fields](mdl-fields.md)). The page has two tabs, "This app" and "Shared", and the task groups and VRAM sections apply inside each tab independently; a tab with no rows is hidden, and each visible tab title shows a row count. "This app" holds the models only this app uses. "Shared" holds the models in the shared suite store that the runtime manifest refcounts to more than one app, or that another installed app (found through `catalog.discover()` / `installed-apps.json`) lists under the same share key. The share key is repo+revision of the resolved descriptor or of the Hugging Face / ModelScope mirror on a schema-1 entry — never the model id, which is not unique across apps and may repeat inside one manifest; when repo+revision cannot be read the key falls back to the file sha256 (`model-<sha12>`), so two apps that already share a blob still group together.
+
+A Shared row shows "Used by:" with every installed app that refs the component or lists the same share key, including this app. Remove on a shared row drops only this app's reference; the files are deleted only when the refcount reaches zero, and the row says so. A model that any installed app marks required (not `optional` and not `on_demand`, or `group=safety`) paints no Remove in the Shared tab and the remove path refuses it: the row reads "Required for safety" when any installed app marks it safety, otherwise "Required by <app display name>". The `safety` and `internal` groups keep their rules everywhere: no Remove, refused in logic, collapsed by default.
+
+A missing, corrupt, or hash-mismatched shared safety copy fails closed. The manage row shows Repair (not Download, not Remove) with the status "Required, missing" or "Required, needs repair", and `voxprint_common.mdl.readiness.shared_safety_gaps()` returns the safety models — keyed by share key — whose shared copy is missing, corrupt, or hash-mismatched, so an app can refuse to run the gated action those models guard. `gaps_for` / `disk_ready` are unchanged.
+
+Duplicate model ids inside one `mdl.json` load fine: the manage page lists each entry as its own row, keyed by repo+revision plus tier and label so rows and actions do not collide. A group with both compact and full-size variants folds the half that does not match the card under "Show models for other cards"; the page alone lists models above the card's tier, so they stay addable there. A model whose minimum VRAM is above the card is hidden from `listing()`. Add enqueues that model. Remove drops this app's ref and deletes the file only when no other app still uses it; the `safety` and `internal` groups have no Remove and are refused in logic. Verify re-hashes the plan.
+
+Tier badges paint "8 GB" / "16 GB" / "24 GB" through the catalogs; the internal `ManageRow.badge` values stay `8gb` / `16gb` / `24gb` (and `""` for `any`, which has no badge), so grouping and the tier split never see the display string.
 
 `voxprint-mdl verify --gui` opens the check-and-repair window. The first phase hashes each model. The rows then read OK, missing, or corrupt. `verify --repair` still clears a dangerous manifest path and does not delete files; it then downloads only the missing or corrupt models and leaves the healthy ones in place. `run_verify_repair(model_ids, repair=True)` is the call an app makes. The same window is `run_window(start, mode="verify")`.
 
 ![Check phase](renders/mdl-verify-en.png)
 
 ![Repair phase](renders/mdl-repair-en.png)
-
-![Check phase in Russian](renders/mdl-verify-ru.png)
-
-![Repair phase in Russian](renders/mdl-repair-ru.png)
 
 The window reads the queue in `voxprint_common.mdl.queue`. It does not write a second queue file.
 
@@ -285,8 +289,6 @@ The window reads the queue in `voxprint_common.mdl.queue`. It does not write a s
 
 ![Manage models](img/mdl-window/en-manage.png)
 
-![The same queue in Russian](img/mdl-window/ru-queue.png)
-
 ![A long German error on a 720-wide window](img/mdl-window/de-error.png)
 
 ![A long Latvian queue on a 720-wide window](img/mdl-window/lv-queue.png)
@@ -299,13 +301,15 @@ A component path that is the suite home, the models root, the shared runtime, vo
 
 ## Languages
 
-`voxprint_common.i18n` loads one JSON file per language from `ui/locales/`, beside `tokens.json`. English is the source and the fallback. The package ships `en`, `de`, `ru`, `uk`, and `lv`. The active language is the `ui_language` key when that key is present in `suite.json`, then `VOXPRINT_LANG`, then the system UI locale, then English. `add_catalogs` lets an app point at its own `locales` directory. Later folders override the same key.
+`voxprint_common.i18n` loads one JSON file per language from `ui/locales/`, beside `tokens.json`. English is the source and the fallback. The package ships `en`, `de`, `uk`, and `lv`. The active language is the `ui_language` key when that key is present in `suite.json`, then `VOXPRINT_LANG`, then the system UI locale, then English. `add_catalogs` lets an app point at its own `locales` directory. Later folders override the same key.
+
+The shipped Russian catalog was removed (English-only source UI), not the machinery: `normalize_code("ru-RU")` is still `ru`, Russian plural forms still work, and an app can ship its own `ru.json` through `add_catalogs`. Input-side Cyrillic detection in the safety checks is unchanged.
 
 Apps check their own UI in CI:
 
 ```yaml
 - name: UI strings
-  run: python -m voxprint_common.i18n.check --src src/<pkg> --locales src/<pkg>/locales --langs en,ru,de,uk,lv
+  run: python -m voxprint_common.i18n.check --src src/<pkg> --locales src/<pkg>/locales --langs en,de,uk,lv
 ```
 
 The checker fails on a hard-coded user-facing string in a Qt call, a key missing from a shipped locale, or a `{placeholder}` sequence that differs between languages. An unused key is a warning. `# i18n: ignore` skips one call. Splash titles use `splash.app.<id>` and keep the same brand spelling in every language.

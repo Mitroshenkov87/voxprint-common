@@ -81,6 +81,7 @@ __all__ = [
     "kaggle_url",
     "listed_ids",
     "load_manifest",
+    "model_share_key",
     "plan_files",
     "public_mirror_urls",
     "require_space",
@@ -222,6 +223,11 @@ class Model:
     the manage page. ``group`` is a task id; an empty or unknown value is
     shown in the "other" task group. Old manifests without the fields load
     unchanged and every field defaults to an empty string.
+
+    ``share_key`` is the repo+revision of the resolved descriptor or of the
+    Hugging Face / ModelScope mirror on a schema-1 entry. Model ids are not
+    unique across apps (and may repeat inside one manifest), so shared-store
+    detection keys on this, never on ``id``; see :func:`model_share_key`.
     """
 
     id: str
@@ -243,6 +249,7 @@ class Model:
     label: str = ""
     purpose: str = ""
     group: str = ""
+    share_key: str = ""
 
 
 @dataclass(frozen=True)
@@ -769,6 +776,91 @@ def _find_manifest(folder: Path) -> Path | None:
     return None
 
 
+_SHARE_SOURCES = frozenset({"huggingface", "modelscope"})
+_SHARE_KINDS = frozenset({"hf", "modelscope"})
+
+
+def model_share_key(model: Model) -> str:
+    """Return the share key that decides whether two apps share a model.
+
+    The key is ``repo@revision`` of the Hugging Face / ModelScope mirror (on
+    a schema-1 entry) or of the resolved descriptor. The same repo+revision
+    is shared even when the model ids differ; different repo+revision is not
+    shared even when the ids are identical. When no repo+revision can be
+    read, the key falls back to the first file's ``model-<sha12>`` component
+    id, so two apps that already share a blob still group together.
+
+    Args:
+        model: One manifest model.
+    """
+    if model.share_key:
+        return model.share_key
+    digest = model.files[0].sha256 if model.files else ""
+    if digest:
+        return f"model-{digest[:MODEL_PREFIX]}"
+    return model.id
+
+
+def _repo_revision_key(repo: str, revision: str) -> str:
+    """Return the canonical ``repo@revision`` share-key form."""
+    return f"{repo.strip().lower()}@{revision.strip() or 'master'}"
+
+
+def _repo_revision(value: object) -> str:
+    """Return ``repo@revision`` for the first HF/ModelScope mirror in ``value``."""
+    if not isinstance(value, list):
+        return ""
+    for row in value:
+        if not isinstance(row, dict):
+            continue
+        source = str(row.get("source") or "").strip().lower()
+        if source not in _SHARE_SOURCES:
+            continue
+        repo = row.get("repo")
+        revision = row.get("revision")
+        if not isinstance(repo, str) or not repo.strip():
+            continue
+        if not isinstance(revision, str):
+            revision = ""
+        return _repo_revision_key(repo, revision)
+    return ""
+
+
+def _mdl_share_key(value: Mapping[str, object]) -> str:
+    """Return the repo+revision share key declared on one schema-1 model."""
+    rows = value.get("files")
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            for field in ("mirrors", "sources"):
+                found = _repo_revision(row.get(field))
+                if found:
+                    return found
+    groups = value.get("file_groups")
+    if isinstance(groups, list):
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            found = _repo_revision(group.get("sources"))
+            if found:
+                return found
+    return ""
+
+
+def _descriptor_share_key(descriptor: Descriptor) -> str:
+    """Return the repo+revision share key of one resolved descriptor."""
+    pools: list[tuple[MirrorRef, ...]] = [descriptor.mirrors]
+    pools.extend(item.sources for item in descriptor.files)
+    pools.extend(group.sources for group in descriptor.file_groups)
+    for pool in pools:
+        for mirror in pool:
+            if mirror.kind not in _SHARE_KINDS or not mirror.ref.strip():
+                continue
+            return _repo_revision_key(mirror.ref, mirror.revision)
+    return ""
+
+
 def listed_ids(manifest: AppManifest) -> frozenset[str]:
     """Return every model id that ``manifest`` lists, resolved or not.
 
@@ -884,6 +976,7 @@ def _mark_unavailable(
                 label=model.label,
                 purpose=model.purpose,
                 group=model.group,
+                share_key=model.share_key,
             )
         )
     for model_id, reason in blocked:
@@ -961,6 +1054,7 @@ def _model_from_descriptor(
         label=label,
         purpose=purpose,
         group=group,
+        share_key=_descriptor_share_key(descriptor),
         fallbacks=tuple(
             FallbackVariant(
                 group.id,
@@ -1486,6 +1580,7 @@ def _model(value: object) -> Model:
         label=_display_field(model_id, value.get("label"), "label"),
         purpose=_display_field(model_id, value.get("purpose"), "purpose"),
         group=_display_field(model_id, value.get("group"), "group"),
+        share_key=_mdl_share_key(value),
     )
 
 
