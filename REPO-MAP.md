@@ -36,7 +36,7 @@ One-page map of the repository, from the source itself (module docstrings; publi
 - `views.py` — canvas model views over the blob store: `view_directory`, `materialize_views`; `variants.py` — fallback variant choice: `chosen_variants`, `choose_variant`.
 - `hooks.py` — post-install commands from app manifests: `apply_hooks`, `files_awaiting_hooks`, `remove_outputs`.
 - `ed25519.py` — Ed25519 signatures: `sign`, `verify`, `public_key`; `safety.py` — HTTPS allowlist: `UrlGuard`, `proxied`; `priority.py` — low CPU/IO priority: `background_priority`.
-- `events.py` — progress events windows subscribe to: `TransferSession`, `ProgressEvent`; `present.py` — window text/errors/views: `view_for`, `explain`, `ManageView`, `WindowView`.
+- `events.py` — progress events windows subscribe to: `TransferSession`, `ProgressEvent`; `present.py` — window text/errors/views: `view_for`, `explain`, `ManageView`, `ManageTab`, `WindowView`.
 - `progress_ui.py` — headless progress and verify-repair windows: `run_window`, `run_verify_repair`, `build_verify_window`.
 - `names.py` — the product name in one place; `data/` — pinned index snapshot; `schemas/` — vendored JSON Schema.
 
@@ -64,7 +64,7 @@ One-page map of the repository, from the source itself (module docstrings; publi
 
 ## `scripts/` — offscreen PNG renders of the windows
 
-- `render_mdl_window.py` (download window), `render_manage_window.py` (manage-models, EN/RU plus 150 % scale), `render_verify_window.py` (check-and-repair), `render_shell_variants.py` (shared shell: image/audio/video/text at 100 % and 150 %); all scripted, nothing downloaded.
+- `render_mdl_window.py` (download window), `render_manage_window.py` (manage-models tabs, English at 100 % and 150 % scale), `render_verify_window.py` (check-and-repair), `render_shell_variants.py` (shared shell: image/audio/video/text at 100 % and 150 %); all scripted, nothing downloaded.
 
 ## `docs/` — MkDocs site
 

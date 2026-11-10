@@ -224,3 +224,70 @@ def test_tier_plan_resolves_only_its_ids(monkeypatch, tmp_path: Path) -> None:
     files = plan_files([load_manifest(path)], VramTier.GB8)
     assert asked == [_MODEL]
     assert {item.model_id for item in files} == {_MODEL}
+
+
+def test_included_safety_group_is_resolved_with_the_tier(monkeypatch, tmp_path: Path) -> None:
+    lite, lite_sha, full_sha = _weights()
+    base = _descriptor(lite_sha, full_sha, len(lite))
+    asked: list[str] = []
+
+    def resolve(model_ids, *, opener=None, guard=None, index=None):
+        del opener, guard, index
+        asked.extend(model_ids)
+        return {model_id: replace(base, id=model_id) for model_id in model_ids}
+
+    monkeypatch.setattr("voxprint_common.mdl.catalog.resolve_descriptors", resolve)
+    path = tmp_path / "voxprint-app-models.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema": "voxprint-app-models/1",
+                "app_id": "canvas",
+                "tiers": {"8gb": ["big-model"]},
+                "runtimes": [],
+                "optional": [{"id": "safety-model", "min_vram_gib": None, "group": "safety"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    files = plan_files([load_manifest(path)], VramTier.GB8, include_groups=("safety",))
+    assert asked == ["big-model", "safety-model"]
+    planned = {model_id for item in files for model_id in item.model_ids}
+    assert planned == {"big-model", "safety-model"}
+
+
+def test_included_safety_group_on_tier_entry_is_resolved_with_only(
+    monkeypatch, tmp_path: Path
+) -> None:
+    lite, lite_sha, full_sha = _weights()
+    base = _descriptor(lite_sha, full_sha, len(lite))
+    asked: list[str] = []
+
+    def resolve(model_ids, *, opener=None, guard=None, index=None):
+        del opener, guard, index
+        asked.extend(model_ids)
+        return {model_id: replace(base, id=model_id) for model_id in model_ids}
+
+    monkeypatch.setattr("voxprint_common.mdl.catalog.resolve_descriptors", resolve)
+    path = tmp_path / "voxprint-app-models.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema": "voxprint-app-models/1",
+                "app_id": "canvas",
+                "tiers": {"8gb": ["big-model", {"id": "safety-model", "group": "safety"}]},
+                "runtimes": [],
+                "optional": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    files = plan_files(
+        [load_manifest(path)],
+        VramTier.GB8,
+        only=["big-model"],
+        include_groups=("safety",),
+    )
+    assert asked == ["big-model", "safety-model"]
+    planned = {model_id for item in files for model_id in item.model_ids}
+    assert planned == {"big-model", "safety-model"}

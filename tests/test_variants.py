@@ -241,7 +241,7 @@ def test_setting_suffix_follows_the_language() -> None:
     assert format_setting_value(rate, 44) == "44.0 kHz"
     assert setting_suffix(pixels) == "px"
     assert UNIT_PERCENT == "unit.percent"
-    set_language("ru")
+    set_language("uk")
     assert format_setting_value(level, -16) == "-16.0 дБ"
     assert setting_suffix(rate) == "кГц"
     set_language("de")

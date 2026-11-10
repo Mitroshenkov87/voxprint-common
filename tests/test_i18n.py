@@ -16,6 +16,7 @@ from voxprint_common.i18n import (
     catalog_dir,
     detect_language,
     get_language,
+    normalize_code,
     plural_category,
     reset,
     set_language,
@@ -30,7 +31,6 @@ _PLACEHOLDER = re.compile(r"\{[a-z_]+\}")
 _REQUIRED = {
     "en": {"one", "other"},
     "de": {"one", "other"},
-    "ru": {"one", "few", "many", "other"},
     "uk": {"one", "few", "many", "other"},
     "lv": {"zero", "one", "other"},
 }
@@ -84,6 +84,8 @@ def test_system_locale_when_nothing_is_set(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_plurals_for_russian_ukrainian_and_latvian() -> None:
+    """Russian plural machinery stays even though no ru catalog ships."""
+    assert normalize_code("ru-RU") == "ru"
     assert [plural_category(n, "ru") for n in (1, 2, 5, 11, 21, 22)] == [
         "one",
         "few",
@@ -101,9 +103,10 @@ def test_plurals_for_russian_ukrainian_and_latvian() -> None:
         "zero",
         "one",
     ]
-    assert tr_lang("mdl.files", "ru", count=1) == "1 файл"
-    assert tr_lang("mdl.files", "ru", count=2) == "2 файла"
-    assert tr_lang("mdl.files", "ru", count=5) == "5 файлов"
+    assert tr_lang("mdl.files", "ru", count=1) == "1 file"  # falls back to English
+    assert tr_lang("mdl.files", "uk", count=1) == "1 файл"
+    assert tr_lang("mdl.files", "uk", count=2) == "2 файли"
+    assert tr_lang("mdl.files", "uk", count=5) == "5 файлів"
     assert tr_lang("mdl.files", "lv", count=0) == "0 failu"
     assert tr_lang("mdl.files", "lv", count=1) == "1 fails"
     assert tr_lang("mdl.files", "lv", count=3) == "3 faili"
@@ -124,7 +127,7 @@ def test_added_catalog_overrides_and_nested_keys(tmp_path: Path) -> None:
     assert tr_lang("mdl.retry", "en") == "Again"
     assert tr_lang("mdl.pause", "en") == "Pause"
     assert "fr" in available_languages()
-    assert available_languages()[:5] == LANGS
+    assert available_languages()[: len(LANGS)] == LANGS
     reset()
 
 
@@ -140,9 +143,9 @@ def test_catalogs_live_beside_tokens_and_fall_back_to_english(tmp_path: Path) ->
     reset()
 
 
-def test_preset_and_descriptor_label_keys_exist_in_english_and_russian() -> None:
+def test_preset_and_descriptor_label_keys_exist_in_english_and_ukrainian() -> None:
     english = _flat("en")
-    russian = _flat("ru")
+    ukrainian = _flat("uk")
     keys: set[str] = set()
     preset_dir = tokens_path().parent / "presets"
     for path in preset_dir.glob("*.json"):
@@ -156,8 +159,24 @@ def test_preset_and_descriptor_label_keys_exist_in_english_and_russian() -> None
             keys.add(spec.label_key)
             for choice in spec.choices:
                 keys.add(choice.label_key)
-    missing = sorted(key for key in keys if key not in english or key not in russian)
+    missing = sorted(key for key in keys if key not in english or key not in ukrainian)
     assert keys and missing == []
+
+
+def test_russian_catalog_is_not_shipped_but_the_machinery_stays() -> None:
+    assert "ru" not in LANGS
+    assert LANGS == ("en", "de", "uk", "lv")
+    assert not (catalog_dir() / "ru.json").exists()
+    assert {path.name for path in catalog_dir().glob("*.json")} == {
+        "en.json",
+        "de.json",
+        "uk.json",
+        "lv.json",
+    }
+    assert normalize_code("ru-RU") == "ru"
+    assert set_language("ru") == "ru"
+    assert tr("mdl.retry") == "Retry"  # no shipped ru lines: English fallback
+    reset()
 
 
 def test_catalogs_share_keys_and_placeholders() -> None:
@@ -181,9 +200,9 @@ def test_catalogs_share_keys_and_placeholders() -> None:
                     english[f"{stem}.other"]
                 )
     assert _flat("de")["mdl.pause"] == "Pause"
-    assert _flat("ru")["mdl.retry"] == "Повторить"
-    assert _flat("ru")["mdl.cancel"] == "Отмена"
-    assert _flat("ru")["mdl.heading.all_set"] == "Всё готово"
+    assert _flat("uk")["mdl.retry"] == "Повторити"
+    assert _flat("uk")["mdl.cancel"] == "Скасувати"
+    assert _flat("uk")["mdl.heading.all_set"] == "Усе готово"
     assert tr("mdl.retry")
 
 

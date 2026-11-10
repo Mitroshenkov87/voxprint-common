@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "voxprint-common"
-version = "0.7.1"
+version = "0.7.2"
 description = "Shared Python library for the Voxprint AI Media Suite."
 readme = "README.md"
 requires-python = ">=3.14"
@@ -75,7 +75,6 @@ packages = ["src/voxprint_common"]
 "src/voxprint_common/mdl/data/examples/pyannote-speaker-diarization-community-1.json" = "voxprint_common/mdl/data/examples/pyannote-speaker-diarization-community-1.json"
 "src/voxprint_common/ui/locales/en.json" = "voxprint_common/ui/locales/en.json"
 "src/voxprint_common/ui/locales/de.json" = "voxprint_common/ui/locales/de.json"
-"src/voxprint_common/ui/locales/ru.json" = "voxprint_common/ui/locales/ru.json"
 "src/voxprint_common/ui/locales/uk.json" = "voxprint_common/ui/locales/uk.json"
 "src/voxprint_common/ui/locales/lv.json" = "voxprint_common/ui/locales/lv.json"
 
@@ -100,8 +99,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
 "src/voxprint_common/ui/splash.py" = ["E402"]
-# Russian UI text uses letters that look like Latin.
-"src/voxprint_common/mdl/progress_ui.py" = ["RUF001", "RUF002", "RUF003"]
+# Cyrillic catalog strings use letters that look like Latin.
 "src/voxprint_common/i18n/__init__.py" = ["RUF001", "RUF002", "RUF003"]
 "tests/test_mdl.py" = ["RUF001", "RUF002", "RUF003"]
 "tests/test_i18n.py" = ["RUF001", "RUF002", "RUF003"]

@@ -258,10 +258,10 @@ def test_verify_window_opens_and_title_close_returns_the_job_code() -> None:
 
 
 def test_summary_uses_plural_forms() -> None:
-    ru = verify_summary({"ok": 0, "missing": 0, "corrupt": 2, "repaired": 5}, "ru")
-    assert ru == "0 в порядке, 0 отсутствует, 2 повреждены, 5 восстановлено"
-    uk = verify_summary({"ok": 1, "missing": 0, "corrupt": 2, "repaired": 5}, "uk")
-    assert "0 відсутньо" in uk and "2 пошкоджені" in uk
+    uk = verify_summary({"ok": 0, "missing": 0, "corrupt": 2, "repaired": 5}, "uk")
+    assert uk == "0 гаразд, 0 відсутньо, 2 пошкоджені, 5 відновлено"
+    uk_one = verify_summary({"ok": 1, "missing": 0, "corrupt": 2, "repaired": 5}, "uk")
+    assert "0 відсутньо" in uk_one and "2 пошкоджені" in uk_one
     lv = verify_summary({"ok": 0, "missing": 0, "corrupt": 1, "repaired": 2}, "lv")
     assert "0 nav atrasts" in lv and "2 salaboti" in lv
     assert verify_summary({"ok": 1, "missing": 2, "corrupt": 0, "repaired": 0}, "de") == (
@@ -269,7 +269,7 @@ def test_summary_uses_plural_forms() -> None:
     )
 
 
-def test_verify_window_fits_at_1280_in_english_and_russian() -> None:
+def test_verify_window_fits_at_1280_in_english_and_ukrainian() -> None:
     pytest.importorskip("PySide6")
     from PySide6.QtCore import QPoint
     from PySide6.QtWidgets import QApplication, QLabel, QProgressBar, QPushButton, QTableWidget
@@ -281,11 +281,11 @@ def test_verify_window_fits_at_1280_in_english_and_russian() -> None:
             "Face restoration",
             "Frame stabilizer",
         ),
-        "ru": (
-            "Студийный голос",
-            "Модель улучшения видео",
-            "Восстановление лиц",
-            "Стабилизация кадров",
+        "uk": (
+            "Студійний голос",
+            "Модель покращення відео",
+            "Відновлення облич",
+            "Стабілізація кадрів",
         ),
     }
     radius = load().density.button_radius_px
@@ -361,11 +361,11 @@ def test_verify_window_fits_at_1280_in_english_and_russian() -> None:
             close = window._verify_close
             assert close.objectName() == "close"
             assert close.isEnabled() is False
-            if lang == "ru" and phase == "verify":
+            if lang == "uk" and phase == "verify":
                 summary = window.findChild(QLabel, "summary")
                 assert summary is not None
-                assert "0 отсутствует" in summary.text()
-                assert "нет" not in summary.text()
+                assert "0 відсутньо" in summary.text()
+                assert "немає" not in summary.text()
             widths[(lang, phase)] = section
             window.hide()
         assert widths[(lang, "verify")] == widths[(lang, "repair")]

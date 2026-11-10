@@ -11,6 +11,9 @@ from voxprint_common.ui import splash
 
 _ROOT = Path("src/voxprint_common")
 _LOCALES = _ROOT / "ui" / "locales"
+# Some checker fixtures build a temporary ru catalog on purpose: they test the
+# tool against a five-language app, not this package's shipped locales.
+_CHECK_LANGS = ("en", "ru", "de", "uk", "lv")
 
 
 def _catalogs(folder: Path, payloads: dict[str, dict[str, object]]) -> Path:
@@ -95,11 +98,11 @@ def test_missing_key_and_placeholder_mismatch(tmp_path: Path) -> None:
     source = tmp_path / "ui.py"
     source.write_text('def build():\n    return tr("menu.greet")\n', encoding="utf-8")
     payloads: dict[str, dict[str, object]] = {
-        code: {"menu.greet": "Hello {name}"} for code in LANGS
+        code: {"menu.greet": "Hello {name}"} for code in _CHECK_LANGS
     }
     payloads["de"] = {"menu.greet": "Hallo {person}"}
-    del payloads["ru"]["menu.greet"]
-    result = check_tree(source, _catalogs(tmp_path / "locales", payloads), LANGS)
+    payloads["ru"] = {}
+    result = check_tree(source, _catalogs(tmp_path / "locales", payloads), _CHECK_LANGS)
     text = "\n".join(result.errors)
     assert "missing from ru" in text
     assert "placeholder mismatch" in text
@@ -129,7 +132,7 @@ def test_plural_forms_and_placeholder_order(tmp_path: Path) -> None:
             }
         },
     }
-    result = check_tree(source, _catalogs(tmp_path / "locales", payloads), LANGS)
+    result = check_tree(source, _catalogs(tmp_path / "locales", payloads), _CHECK_LANGS)
     assert any("items.few" in error and "missing from ru" in error for error in result.errors)
     payloads["ru"] = {
         "items": {
@@ -139,7 +142,7 @@ def test_plural_forms_and_placeholder_order(tmp_path: Path) -> None:
             "other": "{count} x",
         }
     }
-    mismatched = check_tree(source, _catalogs(tmp_path / "locales", payloads), LANGS)
+    mismatched = check_tree(source, _catalogs(tmp_path / "locales", payloads), _CHECK_LANGS)
     assert any(
         "placeholder mismatch" in error and "items.few" in error for error in mismatched.errors
     )
@@ -153,7 +156,7 @@ def test_unused_key_warns_and_cli_exits_zero(tmp_path: Path, capsys: object) -> 
     result = check_tree(source, locales, LANGS)
     assert result.errors == ()
     assert result.warnings == ("unused key 'menu.old'",)
-    code = main(["--src", str(source), "--locales", str(locales), "--langs", "en,ru,de,uk,lv"])
+    code = main(["--src", str(source), "--locales", str(locales), "--langs", "en,de,uk,lv"])
     assert code == 0
     captured = capsys.readouterr()
     assert "unused key" in captured.err
@@ -213,7 +216,7 @@ def test_preset_json_keys_count_as_used(tmp_path: Path) -> None:
 
 
 def test_package_window_and_splash_pass() -> None:
-    result = check_tree(_ROOT, _LOCALES, ("en", "ru", "de", "uk", "lv"))
+    result = check_tree(_ROOT, _LOCALES, ("en", "de", "uk", "lv"))
     assert result.errors == ()
     assert result.warnings == ()
 

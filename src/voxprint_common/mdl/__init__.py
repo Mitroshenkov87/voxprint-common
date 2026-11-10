@@ -37,7 +37,7 @@ from voxprint_common.mdl.job import Outcome, download, plan, progress_event, ver
 from voxprint_common.mdl.names import CLI_NAME, DISPLAY_NAME
 from voxprint_common.mdl.progress_ui import run_verify_repair
 from voxprint_common.mdl.queue import Failed, Ready, enqueue, ensure_ready, run_or_attach
-from voxprint_common.mdl.readiness import disk_ready
+from voxprint_common.mdl.readiness import disk_ready, shared_safety_gaps
 from voxprint_common.mdl.status import Status, load_status
 from voxprint_common.mdl.status import ready as _status_ready
 
@@ -71,6 +71,7 @@ __all__ = [
     "ready",
     "run_or_attach",
     "run_verify_repair",
+    "shared_safety_gaps",
     "suite_root",
     "verify",
     "verify_repair",

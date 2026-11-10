@@ -17,6 +17,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Sequence
 from dataclasses import replace
 from enum import StrEnum
 from pathlib import Path
@@ -30,7 +31,7 @@ from voxprint_common.branding import (
 )
 from voxprint_common.i18n import tr
 from voxprint_common.mdl.catalog import SUITE_APPS, discover, install_dir
-from voxprint_common.mdl.control import app_outcome, shared_controller
+from voxprint_common.mdl.control import ManagedFile, app_outcome, shared_controller
 from voxprint_common.mdl.instance import become_primary, send
 from voxprint_common.mdl.names import DISPLAY_NAME
 from voxprint_common.mdl.present import (
@@ -38,12 +39,14 @@ from voxprint_common.mdl.present import (
     ItemState,
     ManageGroup,
     ManageRow,
+    ManageTab,
     ManageView,
     RowView,
     SmoothedProgress,
     Snapshot,
     TierSection,
     WindowView,
+    badge_label,
     can_remove,
     view_for,
 )
@@ -374,6 +377,7 @@ def _builder(kind: str) -> object:
         QScrollArea,
         QSizePolicy,
         QSystemTrayIcon,
+        QTabWidget,
         QVBoxLayout,
         QWidget,
     )
@@ -721,6 +725,7 @@ def _builder(kind: str) -> object:
             self._scan_again = False
             self._scan_generation = 0
             self._scan_failures = 0
+            self._manage_tab = ""
             self._check_busy = False
             self._pending_view: tuple[int, WindowView] | None = None
             self._height_cap = 900
@@ -1271,7 +1276,9 @@ def _builder(kind: str) -> object:
             disk = WrapLabel(view.manage.disk)
             disk.setObjectName("hint")
             window._rows.addWidget(disk)
-            if view.manage.groups:
+            if view.manage.tabs:
+                window._rows.addWidget(_manage_tabs(window, view.manage.tabs))
+            elif view.manage.groups:
                 for group in view.manage.groups:
                     window._rows.addWidget(_manage_group(window, group))
             else:
@@ -1370,6 +1377,28 @@ def _builder(kind: str) -> object:
         layout.addWidget(title)
         layout.addWidget(_row_block(window, group.rows))
         return host
+
+    def _manage_tabs(window: DownloadWindow, tabs: tuple[ManageTab, ...]) -> QTabWidget:
+        """The This app / Shared tabs, one page of task groups each."""
+        widget = QTabWidget()
+        for tab in tabs:
+            page = QWidget()
+            layout = QVBoxLayout(page)
+            layout.setContentsMargins(8, 8, 8, 8)
+            layout.setSpacing(6)
+            for group in tab.groups:
+                layout.addWidget(_manage_group(window, group))
+            widget.addTab(page, tab.title)
+        # A rebuild makes a fresh tab widget; put the user back on the tab
+        # they were reading instead of the first one.
+        widget.setCurrentIndex(_manage_tab_index(tabs, window._manage_tab))
+
+        def remember(index: int) -> None:
+            if 0 <= index < len(tabs):
+                window._manage_tab = tabs[index].key
+
+        widget.currentChanged.connect(remember)
+        return widget
 
     def _tier_section(window: DownloadWindow, layout: QVBoxLayout, section: TierSection) -> None:
         """One open subsection, or a closed one behind the other-cards disclosure."""
@@ -1478,8 +1507,9 @@ def _builder(kind: str) -> object:
         chip = QLabel(row.state_label)
         chip.setStyleSheet(chip_style(row.state))
         layout.addLayout(text, 1)
-        if row.badge:
-            badge = QLabel(row.badge)
+        badge_text = badge_label(row.badge)
+        if badge_text:
+            badge = QLabel(badge_text)
             badge.setStyleSheet(
                 f"color: {TEXT_MUTED}; background: #2a2a35; "
                 "border-radius: 10px; padding: 3px 8px; font-size: 12px;"
@@ -1512,35 +1542,37 @@ def _builder(kind: str) -> object:
     def _open_group(window: DownloadWindow, app_id: str) -> None:
         _launch_app(_command_for(window._controller, app_id) or window._open_cmd)
 
-    def _row_group(window: DownloadWindow, key: str) -> str:
-        """Return the task group of the row ``key``, or ``""`` when unknown."""
+    def _find_manage_row(window: DownloadWindow, key: str) -> ManageRow | None:
+        """Return the row ``key``, or None when unknown."""
         view = window._view
         manage = view.manage if view else None
         if manage is None:
-            return ""
+            return None
         pools: list[tuple[ManageRow, ...]] = [manage.installed, manage.available]
+        for tab in manage.tabs:
+            for group in tab.groups:
+                pools.append(group.rows)
+                pools.extend(section.rows for section in group.sections)
         for group in manage.groups:
             pools.append(group.rows)
             pools.extend(section.rows for section in group.sections)
         for pool in pools:
             for row in pool:
                 if row.key == key:
-                    return row.group
-        return ""
+                    return row
+        return None
 
     def _manage_action(window: DownloadWindow, action: str, key: str) -> None:
         controller = window._controller
         if controller is None or window._manifest is None:
             return
+        row = _find_manage_row(window, key)
+        model_id = (row.model_id or row.key) if row is not None else key
         if action == "remove":
-            group = _row_group(window, key)
-            if not can_remove(group):
+            group = row.group if row is not None else ""
+            if row is None or not row.removable or not can_remove(group):
                 return
-            row_title = key
-            if window._view and window._view.manage:
-                for row in (*window._view.manage.installed, *window._view.manage.available):
-                    if row.key == key:
-                        row_title = row.title
+            row_title = row.title
             if not _ask(
                 window,
                 tr("mdl.confirm.remove.title"),
@@ -1553,15 +1585,16 @@ def _builder(kind: str) -> object:
                 tr("mdl.confirm.remove.no"),
             ):
                 return
-            component = f"model-{key}" if not key.startswith("model-") else key
-            listing = controller.listing(window._focus, window._manifest, all_tiers=True)
-            for item in listing:
-                if item.model_id == key:
-                    component = item.component_id
+            component = _remove_component(
+                controller, window._focus, window._manifest, row, model_id
+            )
             controller.remove_model(window._focus, component, group=group)
             window._request_scan()
             return
         elif action in {"add", "repair"}:
+            # The row key is the model id for unique rows and the precise
+            # row selector for duplicate ids, so Add/Repair plans exactly
+            # the row the button belongs to.
             controller.enqueue_app(
                 window._focus,
                 manifest=window._manifest,
@@ -1602,6 +1635,12 @@ def _builder(kind: str) -> object:
         if view.manage is not None:
             parts.append("i" + ",".join(row.key + row.state for row in view.manage.installed))
             parts.append("a" + ",".join(row.key + row.state for row in view.manage.available))
+            for tab in view.manage.tabs:
+                painted = ",".join(
+                    group.key + ":" + ",".join(row.key + row.state for row in group.rows)
+                    for group in tab.groups
+                )
+                parts.append("t" + tab.key + ":" + painted)
             for group in view.manage.groups:
                 if group.sections:
                     painted = ",".join(
@@ -1878,6 +1917,42 @@ def _find_manifest(app_id: str) -> Path | None:
         if app.id == app_id:
             return app.path
     return None
+
+
+def _remove_component(
+    controller: object,
+    focus: str,
+    manifest: Path | None,
+    row: ManageRow | None,
+    model_id: str,
+) -> str:
+    """Return the shared-store component a Remove must release.
+
+    The row carries its own component id, so duplicate model ids (Movie
+    Dubber lists three ``qwen3-tts`` rows) release the row's component
+    instead of the last model-id match. Rows built before the field existed
+    fall back to the model-id lookup.
+    """
+    if row is not None and row.component_id:
+        return row.component_id
+    component = f"model-{model_id}" if not model_id.startswith("model-") else model_id
+    if controller is None or manifest is None:
+        return component
+    listing: Sequence[ManagedFile] = controller.listing(focus, manifest, all_tiers=True)
+    for item in listing:
+        if item.model_id == model_id:
+            component = item.component_id
+    return component
+
+
+def _manage_tab_index(tabs: Sequence[ManageTab], current_key: str) -> int:
+    """Return the index of ``current_key`` among manage tabs, or 0.
+
+    Every manage rebuild makes a fresh tab widget; this keeps the user on
+    the tab they were reading (``this_app`` or ``shared``) when that tab
+    still exists and falls back to the first tab otherwise.
+    """
+    return next((index for index, tab in enumerate(tabs) if tab.key == current_key), 0)
 
 
 def _settled(controller: object, item_state: object) -> bool:

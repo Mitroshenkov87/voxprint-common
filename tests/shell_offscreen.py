@@ -10,8 +10,9 @@ import os
 import sys
 from pathlib import Path
 
-_LOCALES = ("en", "ru", "de", "uk", "lv")
+_LOCALES = ("en", "de", "uk", "lv")
 _GERMAN_TOOLS = ("Speichern", "Rückgängig", "Wiederholen", "Befehlspalette")
+_UKRAINIAN_TOOLS = ("Зберегти", "Скасувати", "Повторити", "Палітра команд")
 
 
 def main() -> None:
@@ -95,7 +96,7 @@ def main() -> None:
     _check_audiobook(app)
     _check_viewer(app)
     grab_shell(out / "en-shell.png", language="en", full_layout=True)
-    grab_shell(out / "ru-shell.png", language="ru", full_layout=True)
+    grab_shell(out / "uk-shell.png", language="uk", full_layout=True)
     grab_shell(out / "de-shell.png", language="de", full_layout=True, reveal_close=True)
     grab_shell(
         out / "en-palette.png",
@@ -105,8 +106,8 @@ def main() -> None:
         palette_query="pa",
     )
     grab_shell(
-        out / "ru-palette.png",
-        language="ru",
+        out / "uk-palette.png",
+        language="uk",
         full_layout=True,
         show_palette=True,
         palette_query="па",
@@ -115,8 +116,8 @@ def main() -> None:
     grab_shell(out / "en-simple-empty.png", language="en")
     grab_shell(out / "en-simple-result.png", language="en", result=True)
     grab_shell(
-        out / "ru-simple-result.png",
-        language="ru",
+        out / "uk-simple-result.png",
+        language="uk",
         result=True,
         prompt="Тихий холм в сумерках",
     )
@@ -198,45 +199,45 @@ def main() -> None:
         prompt="Standard",
     )
     grab_shell(
-        out / "ru-image-simple.png",
-        language="ru",
+        out / "uk-image-simple.png",
+        language="uk",
         result=True,
         app_id="canvas",
         prompt="Тихий холм в сумерках",
     )
     grab_shell(
-        out / "ru-image-expert.png",
-        language="ru",
+        out / "uk-image-expert.png",
+        language="uk",
         expert=True,
         result=True,
         app_id="canvas",
         prompt="Тихий холм в сумерках",
     )
     grab_shell(
-        out / "ru-audio-simple.png",
-        language="ru",
+        out / "uk-audio-simple.png",
+        language="uk",
         result=True,
         app_id="audiobook-builder",
         prompt="тихая-глава.epub",
     )
     grab_shell(
-        out / "ru-audio-expert.png",
-        language="ru",
+        out / "uk-audio-expert.png",
+        language="uk",
         expert=True,
         result=True,
         app_id="audiobook-builder",
         prompt="тихая-глава.epub",
     )
     grab_shell(
-        out / "ru-dub-simple.png",
-        language="ru",
+        out / "uk-dub-simple.png",
+        language="uk",
         result=True,
         app_id="movie-dubber",
         prompt="тихий-фильм.mp4",
     )
     grab_shell(
-        out / "ru-dub-expert.png",
-        language="ru",
+        out / "uk-dub-expert.png",
+        language="uk",
         expert=True,
         result=True,
         app_id="movie-dubber",
@@ -295,15 +296,15 @@ def main() -> None:
             "viewer": "viewer",
         }[app_id]
         grab_shell(
-            out / f"ru-{stem}-simple.png",
-            language="ru",
+            out / f"uk-{stem}-simple.png",
+            language="uk",
             result=True,
             app_id=app_id,
             prompt=prompt,
         )
         grab_shell(
-            out / f"ru-{stem}-expert.png",
-            language="ru",
+            out / f"uk-{stem}-expert.png",
+            language="uk",
             expert=True,
             result=True,
             app_id=app_id,
@@ -325,29 +326,29 @@ def main() -> None:
         prompt="Ein stiller Hügel",
     )
     grab_shell(
-        out / "ru-sections.png",
-        language="ru",
+        out / "uk-sections.png",
+        language="uk",
         app_id="audiobook-builder",
         sections=True,
         prompt="тихая-глава.epub",
     )
     grab_shell(
-        out / "ru-casting.png",
-        language="ru",
+        out / "uk-casting.png",
+        language="uk",
         app_id="audiobook-builder",
         sections=True,
         section_id="roles",
     )
     grab_shell(
-        out / "ru-steps.png",
-        language="ru",
+        out / "uk-steps.png",
+        language="uk",
         app_id="audiobook-builder",
         sections=True,
         wizard_id="train",
     )
     grab_shell(
-        out / "ru-steps-running.png",
-        language="ru",
+        out / "uk-steps-running.png",
+        language="uk",
         app_id="audiobook-builder",
         sections=True,
         wizard_id="train",
@@ -1092,6 +1093,9 @@ def _check_toolbar(app: object, language: str) -> None:
     if language == "de":
         for needed in _GERMAN_TOOLS:
             assert needed in labels, labels
+    if language == "uk":
+        for needed in _UKRAINIAN_TOOLS:
+            assert needed in labels, labels
     shell.close()
     app.processEvents()  # type: ignore[attr-defined]
 
@@ -1676,7 +1680,7 @@ def _check_suffix(app: object) -> None:
     label = view.root.findChild(QLabel, "value-demo.level")
     assert label is not None and label.isVisible()
     assert label.text() == format_setting_value(level, -16.0) == "-16.0 dB"
-    set_language("ru")
+    set_language("uk")
     view.refresh()
     view.set_expert(True)
     app.processEvents()  # type: ignore[attr-defined]
@@ -1710,7 +1714,7 @@ def _check_dub_surface(app: object) -> None:
     book.close()
     app.processEvents()  # type: ignore[attr-defined]
 
-    set_language("ru")
+    set_language("uk")
     shell = ReferenceShell(app="movie-dubber", state_dir=root / "dub")
     shell.resize(1200, 900)
     shell.show()
@@ -1738,7 +1742,7 @@ def _check_dub_surface(app: object) -> None:
         assert play is None or not play.isVisible()
     else:
         assert play is not None and play.isVisible()
-        assert play.text() == "Воспроизвести"
+        assert play.text() == "Відтворити"
         assert not shell.simple._video_is_playing()
     shell.close()
     app.processEvents()  # type: ignore[attr-defined]
@@ -1756,14 +1760,14 @@ def _check_chip_reflow(app: object) -> None:
     from voxprint_common.ui.tokens import load
 
     pad = load().density.chip_pad_px
-    set_language("ru")
+    set_language("uk")
     shell = ReferenceShell(app="canvas")
     shell.resize(1200, 900)
     shell.show()
     app.processEvents()  # type: ignore[attr-defined]
     toggle = shell.widget.findChild(QPushButton, "expertToggle")
     assert toggle is not None
-    assert toggle.text() == "Режим эксперта"
+    assert toggle.text() == "Режим експерта"
     assert toggle.minimumWidth() == _chip_width(toggle)
 
     def side(button: QPushButton) -> int:
@@ -1835,7 +1839,7 @@ def _check_chip_fit(app: object) -> None:
     )
     _check_suffix(app)
     _check_dub_surface(app)
-    for language in ("en", "ru", "de", "uk", "lv"):
+    for language in ("en", "de", "uk", "lv"):
         for app_id in surfaces:
             set_language(language)
             set_expert_mode(False)
@@ -1924,7 +1928,7 @@ def _check_chip_fit(app: object) -> None:
 
 
 def _check_pill_wrap(app: object) -> None:
-    """A long pill wraps onto a second row instead of clipping, in Russian and German."""
+    """A long pill wraps onto a second row instead of clipping, in Ukrainian and German."""
     from PySide6.QtGui import QFontMetrics
     from PySide6.QtWidgets import QPushButton, QWidget
 
@@ -1935,7 +1939,7 @@ def _check_pill_wrap(app: object) -> None:
 
     label = "Оставить язык книги"
     pad = load().density.chip_pad_px
-    for language in ("ru", "de"):
+    for language in ("uk", "de"):
         set_language(language)
         shell = ReferenceShell(app="canvas")
         shell.resize(1200, 900)

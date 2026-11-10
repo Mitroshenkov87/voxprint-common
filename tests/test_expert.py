@@ -217,7 +217,7 @@ def test_expert_keymap_context_runs_only_while_the_mode_is_on() -> None:
 
 def test_toggle_expert_mode_titles() -> None:
     assert tr_lang("command.view.toggle_expert_mode", "en") == "Expert mode"
-    assert tr_lang("command.view.toggle_expert_mode", "ru") == "Режим эксперта"
+    assert tr_lang("command.view.toggle_expert_mode", "ru") == "Expert mode"  # English fallback
     assert tr_lang("command.view.toggle_expert_mode", "de") == "Expertenmodus"
     assert tr_lang("command.view.toggle_expert_mode", "uk") == "Режим експерта"
     assert tr_lang("command.view.toggle_expert_mode", "lv") == "Eksperta režīms"

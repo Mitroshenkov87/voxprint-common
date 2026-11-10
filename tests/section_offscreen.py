@@ -1,4 +1,4 @@
-"""Offscreen check: six Russian section tabs, no clipping and no scroll arrows."""
+"""Offscreen check: six Ukrainian section tabs, no clipping and no scroll arrows."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ def main() -> None:
     from voxprint_common.i18n import set_language
     from voxprint_common.ui.shell import ReferenceShell
 
-    set_language("ru")
+    set_language("uk")
     app = QApplication([])
     state = Path(sys.argv[1])
     shell = ReferenceShell(app="audiobook-builder", sections=True, state_dir=state)

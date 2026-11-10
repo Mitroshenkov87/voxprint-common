@@ -17,10 +17,14 @@ from voxprint_common.gpu_probe import GpuDevice, VramTier, query_gpus
 from voxprint_common.i18n import tr, tr_lang
 from voxprint_common.mdl.catalog import (
     MODEL_PREFIX,
+    SUITE_APPS,
     AppManifest,
+    CatalogError,
     Model,
     ModelTier,
+    discover,
     load_manifest,
+    model_share_key,
 )
 from voxprint_common.mdl.events import ItemProgress, ProgressEvent, TransferSession
 from voxprint_common.mdl.hooks import remove_outputs
@@ -30,6 +34,7 @@ from voxprint_common.mdl.present import (
     AppSlot,
     ItemState,
     ManageRow,
+    ManageTab,
     ManageView,
     QueueItem,
     Snapshot,
@@ -100,6 +105,7 @@ class ManagedFile:
         purpose: str = "",
         group: str = "",
         tier: ModelTier = ModelTier.ANY,
+        share_key: str = "",
     ) -> None:
         self.model_id = model_id
         self.names = names
@@ -116,6 +122,7 @@ class ManagedFile:
         self.purpose = purpose
         self.group = group
         self.tier = tier
+        self.share_key = share_key
 
 
 def backend_name() -> str:
@@ -185,7 +192,10 @@ class Controller:
             open_cmd: Command stored for the Open button.
             manifest: ``mdl.json`` to read. Discovered when omitted.
             devices: GPUs used to choose the tier.
-            models: Model ids to fetch. ``None`` means the tier's required set.
+            models: Model ids to fetch. ``None`` means the tier's required
+                set. An entry may be a manage-row selector (``id|share_key|
+                tier|label``) naming one exact row of a duplicate-id model,
+                which is how Add/Repair targets the clicked row.
         """
         self._opens[app_id] = open_cmd
         self._focus = app_id
@@ -290,80 +300,134 @@ class Controller:
         Unlike :meth:`listing`, the page also lists models above this
         card's VRAM tier. They stay addable and sit in the collapsed
         "other cards" section of a split task group.
+
+        Rows split into "This app" and "Shared" tabs. A row is shared when
+        the shared store refcount names more than one app, or another
+        installed app lists the same share key (repo+revision) in its
+        manifest. Shared rows name every app that refs the component or
+        lists the key, never offer Remove on a model any installed app
+        marks required or safety, and fail closed on a broken shared
+        safety copy: Repair plus a "Required, …" status, never Remove.
         """
         code = lang
         gpus = self._gpus(devices)
         parsed = load_manifest(manifest)
         rows = _visible(parsed, gpus, all_tiers=True)
+        keys = _row_keys(rows)
+        listed_by, required_by, safety_by, installed_ids = _installed_model_flags(app_id)
         installed: list[ManageRow] = []
         available: list[ManageRow] = []
-        for row in rows:
+        shared_rows: list[ManageRow] = []
+        own_rows: list[ManageRow] = []
+        for index, row in enumerate(rows):
             title = row.label or localized_name(row.names, row.fallback, code)
             bits = [format_size(row.size, lang=code)]
             if row.tier_gb:
                 bits.append(_say("mdl.manage.min_vram", code, gb=row.tier_gb))
             meta = " · ".join(bits)
+            key = row.share_key
             others = [identity(name).display_name for name in row.refs if name != app_id]
-            note = _say("mdl.manage.shared", code, apps=", ".join(others)) if others else ""
+            shared = len(row.refs) > 1 or any(name != app_id for name in listed_by.get(key, ()))
             group = normalize_group(row.group)
             badge = _TIER_BADGES.get(row.tier, "")
             removable = can_remove(group)
+            note = ""
+            state = "pending"
             if row.installed and row.verified:
-                installed.append(
-                    ManageRow(
-                        row.model_id,
-                        title,
-                        meta,
-                        "ready",
-                        _say("mdl.manage.status.ok", code),
-                        "remove" if removable else "",
-                        _say("mdl.manage.remove", code) if removable else "",
-                        note,
-                        purpose=row.purpose,
-                        group=group,
-                        badge=badge,
-                        removable=removable,
-                    )
-                )
+                state = "ready"
             elif row.installed:
-                installed.append(
-                    ManageRow(
-                        row.model_id,
-                        title,
-                        meta,
-                        "error",
-                        _say("mdl.manage.status.bad", code),
-                        "repair",
-                        _say("mdl.manage.repair", code),
-                        note,
-                        purpose=row.purpose,
-                        group=group,
-                        badge=badge,
-                        removable=removable,
-                    )
+                state = "error"
+            if shared:
+                removable = removable and key not in required_by
+                users = _ordered_app_names(
+                    (set(row.refs) & installed_ids) | set(listed_by.get(key, ()))
                 )
+                notes = [_say("mdl.manage.used_by", code, apps=", ".join(users))]
+                if key in safety_by:
+                    notes.append(_say("mdl.manage.required.safety", code))
+                elif key in required_by:
+                    names = _ordered_app_names(set(required_by[key]))
+                    notes.append(_say("mdl.manage.required.by", code, apps=", ".join(names)))
+                elif removable and state == "ready":
+                    notes.append(_say("mdl.manage.shared_remove", code))
+                note = "\n".join(notes)
+            elif others:
+                note = _say("mdl.manage.shared", code, apps=", ".join(others))
+            damaged = state == "error"
+            missing = state == "pending"
+            if shared and key in safety_by:
+                # A shared safety copy fails closed: repair, never Remove.
+                removable = False
+                if missing:
+                    state_label = _say("mdl.manage.status.required_missing", code)
+                    action, action_label = "repair", _say("mdl.manage.repair", code)
+                elif damaged:
+                    state_label = _say("mdl.manage.status.required_repair", code)
+                    action, action_label = "repair", _say("mdl.manage.repair", code)
+                else:
+                    state_label = _say("mdl.manage.status.ok", code)
+                    action, action_label = "", ""
+            elif damaged:
+                state_label = _say("mdl.manage.status.bad", code)
+                action, action_label = "repair", _say("mdl.manage.repair", code)
+            elif missing:
+                state_label = _say("mdl.manage.status.missing", code)
+                action, action_label = "add", _say("mdl.manage.add", code)
             else:
-                available.append(
-                    ManageRow(
-                        row.model_id,
-                        title,
-                        meta,
-                        "pending",
-                        _say("mdl.manage.status.missing", code),
-                        "add",
-                        _say("mdl.manage.add", code),
-                        note,
-                        purpose=row.purpose,
-                        group=group,
-                        badge=badge,
-                        removable=removable,
-                    )
-                )
+                state_label = _say("mdl.manage.status.ok", code)
+                if removable:
+                    action, action_label = "remove", _say("mdl.manage.remove", code)
+                else:
+                    action, action_label = "", ""
+            built = ManageRow(
+                keys[index],
+                title,
+                meta,
+                state,
+                state_label,
+                action,
+                action_label,
+                note,
+                purpose=row.purpose,
+                group=group,
+                badge=badge,
+                removable=removable,
+                model_id=row.model_id,
+                component_id=row.component_id,
+            )
+            if shared:
+                shared_rows.append(built)
+            else:
+                own_rows.append(built)
+            if built.state == "pending":
+                available.append(built)
+            else:
+                installed.append(built)
         folder = models_dir()
         used = _used_bytes()
         free = shutil.disk_usage(folder).free if folder.exists() else 0
         name = identity(app_id).display_name
-        groups = group_manage_rows((*installed, *available), tier=detect_tier(gpus), lang=code)
+        tier = detect_tier(gpus)
+        groups = group_manage_rows((*installed, *available), tier=tier, lang=code)
+        tabs: list[ManageTab] = []
+        if own_rows:
+            tabs.append(
+                ManageTab(
+                    "this_app",
+                    _say("mdl.manage.tab.this_app.count", code, count=len(own_rows)),
+                    group_manage_rows(own_rows, tier=tier, lang=code),
+                    len(own_rows),
+                )
+            )
+        if shared_rows:
+            tabs.append(
+                ManageTab(
+                    "shared",
+                    _say("mdl.manage.tab.shared.count", code, count=len(shared_rows)),
+                    group_manage_rows(shared_rows, tier=tier, lang=code),
+                    len(shared_rows),
+                )
+            )
         return ManageView(
             tuple(installed),
             tuple(available),
@@ -378,6 +442,7 @@ class Controller:
             _say("mdl.manage.empty_installed", code, app=name),
             _say("mdl.manage.empty_available", code),
             groups,
+            tuple(tabs),
         )
 
     def remove_model(self, app_id: str, component_id: str, *, group: str | None = None) -> bool:
@@ -450,9 +515,87 @@ def _visible(
                 purpose=model.purpose,
                 group=model.group,
                 tier=model.tier,
+                share_key=model_share_key(model),
             )
         )
     return found
+
+
+def _row_keys(rows: list[ManagedFile]) -> list[str]:
+    """Return one unique row key per entry, in ``rows`` order.
+
+    The key is the raw model id while ids are unique in the manifest. When an
+    id repeats (Movie Dubber lists three ``qwen3-tts`` rows), the key carries
+    the share key, tier, and label so rows and their actions do not collide;
+    a identical descriptor listed twice still gets a numeric suffix.
+    """
+    counts: dict[str, int] = {}
+    for row in rows:
+        counts[row.model_id] = counts.get(row.model_id, 0) + 1
+    seen: dict[str, int] = {}
+    keys: list[str] = []
+    for row in rows:
+        if counts[row.model_id] == 1:
+            keys.append(row.model_id)
+            continue
+        stem = "|".join((row.model_id, row.share_key, row.tier.value, row.label))
+        number = seen.get(stem, 0)
+        seen[stem] = number + 1
+        keys.append(stem if number == 0 else f"{stem}#{number + 1}")
+    return keys
+
+
+def _installed_model_flags(
+    app_id: str,
+) -> tuple[dict[str, list[str]], dict[str, list[str]], dict[str, list[str]], set[str]]:
+    """Scan installed app manifests for share-key usage.
+
+    Returns one map from share key to the installed apps that list it, one
+    for the apps that mark it required (not ``optional`` and not
+    ``on_demand``, or normalising to ``group=safety``), one for the apps
+    that mark it ``safety``, and the set of installed app ids. A manifest
+    that cannot be read is skipped. ``app_id`` is only used for logging; the
+    maps cover every installed app, including the caller.
+    """
+    del app_id
+    listed_by: dict[str, list[str]] = {}
+    required_by: dict[str, list[str]] = {}
+    safety_by: dict[str, list[str]] = {}
+    installed_ids: set[str] = set()
+    try:
+        installed = discover()
+    except CatalogError:
+        logger.exception("installed app discovery failed")
+        installed = []
+    for found in installed:
+        installed_ids.add(found.id)
+        try:
+            manifest = load_manifest(found.path)
+        except CatalogError:
+            logger.warning("installed app %s manifest could not be read", found.id)
+            continue
+        for model in manifest.models:
+            key = model_share_key(model)
+            if found.id not in listed_by.setdefault(key, []):
+                listed_by[key].append(found.id)
+            safety = normalize_group(model.group) == "safety"
+            if safety and found.id not in safety_by.setdefault(key, []):
+                safety_by[key].append(found.id)
+            if (safety or (not model.optional and not model.on_demand)) and (
+                found.id not in required_by.setdefault(key, [])
+            ):
+                required_by[key].append(found.id)
+    return listed_by, required_by, safety_by, installed_ids
+
+
+def _ordered_app_names(app_ids: set[str] | list[str]) -> list[str]:
+    """Return display names in stable :data:`SUITE_APPS` order."""
+    order = {spec.id: index for index, spec in enumerate(SUITE_APPS)}
+
+    def rank(app_id: str) -> tuple[int, str]:
+        return (order.get(app_id, len(order)), app_id)
+
+    return [identity(app_id).display_name for app_id in sorted(app_ids, key=rank)]
 
 
 def _model_kind(model: Model, component_id: str, component: object | None) -> str:

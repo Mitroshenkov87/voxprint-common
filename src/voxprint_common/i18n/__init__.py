@@ -8,7 +8,7 @@ writing them out as JSON: a flat ``{"menu.open": "Open"}`` table and a nested
 
 This module is that mechanism, so an app can adopt it instead of copying its
 own ``tr``. The languages shipped here are English (the source and the
-fallback), German, Russian, Ukrainian, and Latvian. The files are JSON in
+fallback), German, Ukrainian, and Latvian. The files are JSON in
 ``ui/locales``, beside ``tokens.json``, so a C++ reader uses the same copy.
 
 An app adds its own folder once, at startup. Files in that folder override
@@ -22,9 +22,8 @@ from voxprint_common.i18n import add_catalogs
 add_catalogs(Path(__file__).resolve().parent / "locales")
 ```
 
-The folder holds ``en.json``, ``ru.json``, ``de.json``, ``uk.json``, and
-``lv.json``. A missing line falls back to English, then to the key. ``tr``
-never raises.
+The folder holds ``en.json``, ``de.json``, ``uk.json``, and ``lv.json``.
+A missing line falls back to English, then to the key. ``tr`` never raises.
 
 Plural forms are a nested object or dotted keys (``items.one``,
 ``items.few``, ``items.many``, ``items.other``, and ``items.zero`` for
@@ -76,8 +75,13 @@ __all__ = [
 
 log = logging.getLogger(__name__)
 
-LANGS = ("en", "de", "ru", "uk", "lv")
+LANGS = ("en", "de", "uk", "lv")
 DEFAULT_LANG = "en"
+# Codes the machinery still understands even though no catalog ships for them:
+# ``normalize_code("ru-RU")`` is ``ru``, Russian plural forms work, and an app
+# can ship its own ``ru.json`` through :func:`add_catalogs`. Only the shipped
+# Russian UI catalog was removed (English-only source UI).
+_MACHINERY_LANGS = frozenset({"ru"})
 LANG_NAMES = {
     "en": "English",
     "de": "Deutsch",
@@ -333,7 +337,7 @@ def _search_dirs() -> list[Path]:
 
 
 def _known_codes() -> set[str]:
-    found = set(LANGS)
+    found = set(LANGS) | set(_MACHINERY_LANGS)
     for folder in _search_dirs():
         if not folder.is_dir():
             continue
