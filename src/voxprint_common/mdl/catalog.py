@@ -467,7 +467,7 @@ def plan_files(
             does not fit the card, a descriptor is missing, or a tier
             selection matches no files.
     """
-    manifests = _attach_resolved(manifests, tier, only, opener, guard, descriptors)
+    manifests = _attach_resolved(manifests, tier, only, opener, guard, descriptors, include_groups)
     root = models_root or models_dir()
     cap = _gpu_rank(tier)
     remembered = memory_gib if memory_gib is not None else _tier_gib(tier)
@@ -1374,7 +1374,10 @@ def _chosen(
         chosen = [
             model for model in chosen if not model.optional or model.group.strip().lower() in keep
         ]
-    blocked = [model for model in chosen if model.unavailable]
+    # Only a row the request named may fail on availability; an included
+    # group row that is unavailable is skipped, as in a full ensure.
+    asked = set(wanted or ()) | {selector[0] for selector in exact}
+    blocked = [model for model in chosen if model.unavailable and model.id in asked]
     if targeted and blocked:
         first = blocked[0]
         detail = first.reason or "unavailable"
@@ -1401,6 +1404,7 @@ def _attach_resolved(
     opener: object | None,
     guard: UrlGuard | None,
     descriptors: Mapping[str, Descriptor] | None,
+    include_groups: Collection[str] = (),
 ) -> list[AppManifest]:
     if descriptors is not None:
         return list(manifests)
@@ -1410,7 +1414,7 @@ def _attach_resolved(
         if document is None or manifest.models:
             attached.append(manifest)
             continue
-        ids = _ids_to_resolve(document, tier, only)
+        ids = _ids_to_resolve(document, tier, only, include_groups)
         if not ids:
             attached.append(manifest)
             continue
@@ -1439,21 +1443,32 @@ def _ids_to_resolve(
     document: AppModels,
     tier: VramTier,
     only: Collection[str] | None,
+    include_groups: Collection[str] = (),
 ) -> list[str]:
+    """Return the ids whose descriptors must be fetched, including group rows.
+
+    Optional ids declared with an ``include_groups`` group are resolved along
+    with the tier list (or the ``only`` ids), so an included safety row can be
+    planned even though it is neither in the tier list nor requested by name.
+    """
     blocked = {model_id for model_id, _reason in document.unavailable}
+    keep = {group.strip().lower() for group in include_groups}
+    grouped = [item.id for item in document.optional if item.group.strip().lower() in keep]
     if only is None:
-        return [model_id for model_id in _listed_ids(document, tier) if model_id not in blocked]
-    known: list[str] = []
-    for _name, ids in document.tiers:
-        known.extend(ids)
-    known.extend(item.id for item in document.optional)
-    present = set(known)
-    resolved: list[str] = []
-    for entry in only:
-        model_id = _selector_model_id(entry)
-        if model_id in present and model_id not in blocked:
-            resolved.append(model_id)
-    return resolved
+        resolved = [model_id for model_id in _listed_ids(document, tier) if model_id not in blocked]
+    else:
+        known: list[str] = []
+        for _name, ids in document.tiers:
+            known.extend(ids)
+        known.extend(item.id for item in document.optional)
+        present = set(known)
+        resolved = []
+        for entry in only:
+            model_id = _selector_model_id(entry)
+            if model_id in present and model_id not in blocked:
+                resolved.append(model_id)
+    resolved.extend(model_id for model_id in grouped if model_id not in blocked)
+    return list(dict.fromkeys(resolved))
 
 
 def _apply_selection(manifest: AppManifest, tier: VramTier, model: Model) -> Model:

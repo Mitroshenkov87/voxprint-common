@@ -11,11 +11,14 @@ import pytest
 
 from voxprint_common.hashing import sha256_bytes
 from voxprint_common.mdl.cli import main
+from voxprint_common.paths import models_dir
 from voxprint_common.runtime_manifest import load
 from voxprint_common.suite_settings import set_keep_awake_during_jobs
 
 PAYLOAD = b"voxprint-mdl-bytes-0123456789abcdef" * 4
 DIGEST = sha256_bytes(PAYLOAD)
+REQUIRED_PAYLOAD = b"voxprint-required-weights-fedcba9876543210" * 4
+REQUIRED_DIGEST = sha256_bytes(REQUIRED_PAYLOAD)
 
 
 @pytest.fixture(autouse=True)
@@ -231,6 +234,135 @@ def test_ensure_downloads_a_missing_optional_safety_model(
         }
     ]
     assert len(_bodies(state)) == 1
+
+
+def test_ensure_model_still_downloads_a_missing_safety_blob(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    state = _State(PAYLOAD)
+    server, root = _serve(state)
+    manifest = tmp_path / "canvas" / "mdl.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "app": "canvas",
+                "models": [
+                    {
+                        "id": "upscaler",
+                        "version": "1",
+                        "vram_tier": "8gb",
+                        "files": [
+                            {
+                                "path": "weights.bin",
+                                "size": len(REQUIRED_PAYLOAD),
+                                "sha256": REQUIRED_DIGEST,
+                                "mirrors": [{"source": "url", "url": f"{root}/required"}],
+                            }
+                        ],
+                    },
+                    {
+                        "id": "yunet-face",
+                        "version": "1",
+                        "vram_tier": "8gb",
+                        "optional": True,
+                        "group": "safety",
+                        "files": [
+                            {
+                                "path": "weights.bin",
+                                "size": len(PAYLOAD),
+                                "sha256": DIGEST,
+                                "mirrors": [{"source": "url", "url": f"{root}/safety"}],
+                            }
+                        ],
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    installed = models_dir() / "blobs" / REQUIRED_DIGEST
+    installed.parent.mkdir(parents=True, exist_ok=True)
+    installed.write_bytes(REQUIRED_PAYLOAD)
+    installed.with_name(installed.name + ".verified").write_text(
+        REQUIRED_DIGEST + "\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("VOXPRINT_MDL_TEST_GUARD", "loopback")
+    try:
+        code = main(["--json", "ensure", "--model", "upscaler", "--app-manifest", str(manifest)])
+        result = _result(capsys)
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert code == 0
+    assert result["ready"] is True
+    assert result["safety_gaps"] == []
+    rows = {row["id"]: row for row in result["models"]}
+    assert rows["upscaler"]["state"] == "reused"
+    assert rows["yunet-face"]["state"] == "downloaded"
+    assert (models_dir() / "blobs" / DIGEST).is_file()
+    assert len(_bodies(state)) == 1  # only the safety blob was fetched
+
+
+def test_ensure_model_skips_an_unrelated_unavailable_safety_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    state = _State(PAYLOAD)
+    server, root = _serve(state)
+    manifest = tmp_path / "canvas" / "mdl.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "app": "canvas",
+                "models": [
+                    {
+                        "id": "upscaler",
+                        "version": "1",
+                        "vram_tier": "8gb",
+                        "files": [
+                            {
+                                "path": "weights.bin",
+                                "size": len(PAYLOAD),
+                                "sha256": DIGEST,
+                                "mirrors": [{"source": "url", "url": f"{root}/file"}],
+                            }
+                        ],
+                    },
+                    {
+                        "id": "yunet-face",
+                        "version": "1",
+                        "vram_tier": "8gb",
+                        "optional": True,
+                        "group": "safety",
+                        "status": "unavailable",
+                        "reason": "model_in_preparation",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("VOXPRINT_MDL_TEST_GUARD", "loopback")
+    try:
+        code = main(["--json", "ensure", "--model", "upscaler", "--app-manifest", str(manifest)])
+        result = _result(capsys)
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert code == 0
+    assert result["ready"] is True
+    assert result["safety_gaps"] == []
+    assert result["models"] == [
+        {
+            "id": "upscaler",
+            "share_key": f"model-{DIGEST[:12]}",
+            "state": "downloaded",
+            "bytes": len(PAYLOAD),
+        }
+    ]
 
 
 def test_missing_safety_blob_fails_closed(

@@ -642,18 +642,24 @@ def _prepare(
         ]
         kept = tuple(dict.fromkeys(ids))
     else:
-        kept = _kept_entries(models, parsed, needed)
+        kept = _kept_entries(models, parsed, needed, include_groups)
     return needed, notices, kept
 
 
 def _kept_entries(
-    models: Sequence[str], parsed: Sequence[AppManifest], needed: Sequence[PlannedFile]
+    models: Sequence[str],
+    parsed: Sequence[AppManifest],
+    needed: Sequence[PlannedFile],
+    include_groups: Sequence[str] = (),
 ) -> tuple[str, ...]:
     """Return the request entries whose matched models still need files.
 
     Every needed file is mapped back to the entry that named its model, so a
     job stores plain ids for plain-id requests (today's behaviour) and the
-    selector string for a manage-row request, in needed-file order.
+    selector string for a manage-row request, in needed-file order. A model
+    pulled in through ``include_groups`` maps to its own id, so the job stays
+    queued and the worker re-plans that row while one of its files is still
+    missing, even when every explicit request is already installed.
     """
     pool = [model for manifest in parsed for model in manifest.models]
     entry_by_sha: dict[str, str] = {}
@@ -661,6 +667,11 @@ def _kept_entries(
         for model in matching_models(entry, pool):
             for item in model.files:
                 entry_by_sha.setdefault(item.sha256, entry)
+    keep = {group.strip().lower() for group in include_groups}
+    for model in pool:
+        if model.group.strip().lower() in keep:
+            for item in model.files:
+                entry_by_sha.setdefault(item.sha256, model.id)
     return tuple(
         dict.fromkeys(entry_by_sha[item.sha256] for item in needed if item.sha256 in entry_by_sha)
     )

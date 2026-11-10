@@ -842,7 +842,9 @@ def _status_for(files: Sequence[PlannedFile], tier: VramTier, state: JobState) -
 
 
 def _note_local(status: Status, files: Sequence[PlannedFile]) -> None:
-    for item, step in zip(files, status.steps, strict=True):
+    # Unavailable rows from the queue are appended after the file steps, so
+    # only the leading steps pair with the plan.
+    for item, step in zip(files, status.steps[: len(files)], strict=True):
         if not item.destination.is_file():
             step.state = "needs download"
             step.received = 0
