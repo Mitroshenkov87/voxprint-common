@@ -60,7 +60,7 @@ logger = logging.getLogger(__name__)
 _shared: Controller | None = None
 _TIER_RANK = {ModelTier.ANY: 0, ModelTier.GB8: 1, ModelTier.GB16: 2, ModelTier.GB24: 3}
 _GPU_RANK = {VramTier.UNKNOWN: 1, VramTier.GB8: 1, VramTier.GB16: 2, VramTier.GB24: 3}
-_TIER_BADGES = {8: "8gb", 16: "16gb", 24: "24gb"}
+_TIER_BADGES = {ModelTier.GB8: "8gb", ModelTier.GB16: "16gb", ModelTier.GB24: "24gb"}
 _STATE = {
     "pending": ItemState.PENDING,
     "queued": ItemState.PENDING,
@@ -99,6 +99,7 @@ class ManagedFile:
         label: str = "",
         purpose: str = "",
         group: str = "",
+        tier: ModelTier = ModelTier.ANY,
     ) -> None:
         self.model_id = model_id
         self.names = names
@@ -114,6 +115,7 @@ class ManagedFile:
         self.label = label
         self.purpose = purpose
         self.group = group
+        self.tier = tier
 
 
 def backend_name() -> str:
@@ -304,7 +306,7 @@ class Controller:
             others = [identity(name).display_name for name in row.refs if name != app_id]
             note = _say("mdl.manage.shared", code, apps=", ".join(others)) if others else ""
             group = normalize_group(row.group)
-            badge = _TIER_BADGES.get(row.tier_gb, "")
+            badge = _TIER_BADGES.get(row.tier, "")
             removable = can_remove(group)
             if row.installed and row.verified:
                 installed.append(
@@ -447,6 +449,7 @@ def _visible(
                 label=model.label,
                 purpose=model.purpose,
                 group=model.group,
+                tier=model.tier,
             )
         )
     return found
@@ -481,6 +484,7 @@ def _model_kind(model: Model, component_id: str, component: object | None) -> st
 
 
 def _tier_gb(model: Model) -> int:
+    """Return the minimum-VRAM hint for the meta line; badges use ``model.tier``."""
     if model.min_vram_gib:
         return int(model.min_vram_gib)
     return {ModelTier.GB8: 8, ModelTier.GB16: 16, ModelTier.GB24: 24}.get(model.tier, 0)

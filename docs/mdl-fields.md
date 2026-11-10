@@ -57,6 +57,8 @@ Installed and available models appear together in their task group; each row kee
 
 `vram_tier` interacts with the card the page was opened for. Download planning is untouched: `job.detect_tier` / `plan_files` still treat an unknown GPU as 8 GB. Only the manage-page layout differs: when no GPU is detected (`VramTier.UNKNOWN` or an empty device list) the page assumes 16 GB for which subsection is open.
 
+Badges and the compact/full split follow `vram_tier` alone; `min_vram_gib` never changes them and only feeds the "N GB VRAM" meta line on the row.
+
 The split applies only inside `generate`, `edit`, `upscale`, and `restore`, and only when that group holds both a compact tier (`8gb` or `16gb`) and a full-size (`24gb`) row:
 
 - `16gb` (and `8gb`, when present) rows go in "For 16 GB cards (compact)".

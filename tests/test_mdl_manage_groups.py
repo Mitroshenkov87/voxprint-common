@@ -38,6 +38,7 @@ def _entry(
     label: str | None = None,
     purpose: str | None = None,
     group: str | None = None,
+    min_vram_gib: float | None = None,
     digest: str = DIGEST,
     size: int = len(PAYLOAD),
 ) -> dict[str, object]:
@@ -60,6 +61,8 @@ def _entry(
         row["purpose"] = purpose
     if group is not None:
         row["group"] = group
+    if min_vram_gib is not None:
+        row["min_vram_gib"] = min_vram_gib
     return row
 
 
@@ -284,6 +287,28 @@ def test_manage_page_lists_other_tiers_while_listing_hides_them(tmp_path: Path) 
     no_gpu = controller.manage_page("canvas", path, devices=[], lang="en")
     compact, full = no_gpu.groups[0].sections
     assert compact.open and not full.open
+
+
+def test_badges_follow_vram_tier_not_min_vram(tmp_path: Path) -> None:
+    path = _manifest(
+        tmp_path,
+        [
+            _entry("gen-16", tier="16gb", min_vram_gib=12, label="Gen 16", group="generate"),
+            _entry("gen-24", tier="24gb", min_vram_gib=15.5, label="Gen 24", group="generate"),
+            _entry("gen-any", tier="any", min_vram_gib=6, label="Gen any", group="generate"),
+        ],
+    )
+    controller = Controller()
+    page = controller.manage_page("canvas", path, devices=[_gpu(16384)], lang="en")
+    (group,) = page.groups
+    compact, full = group.sections
+    assert compact.open and not full.open
+    assert [row.key for row in compact.rows] == ["gen-16", "gen-any"]
+    assert [row.key for row in full.rows] == ["gen-24"]
+    rows = {row.key: row for row in (*compact.rows, *full.rows)}
+    assert rows["gen-16"].badge == "16gb"
+    assert rows["gen-24"].badge == "24gb"
+    assert rows["gen-any"].badge == ""
 
 
 def test_protected_groups_refuse_removal(tmp_path: Path) -> None:
