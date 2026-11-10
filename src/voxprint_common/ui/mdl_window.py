@@ -36,12 +36,15 @@ from voxprint_common.mdl.names import DISPLAY_NAME
 from voxprint_common.mdl.present import (
     GroupView,
     ItemState,
+    ManageGroup,
     ManageRow,
     ManageView,
     RowView,
     SmoothedProgress,
     Snapshot,
+    TierSection,
     WindowView,
+    can_remove,
     view_for,
 )
 from voxprint_common.mdl.progress_ui import run_verify_repair, verify_job_running
@@ -1268,18 +1271,22 @@ def _builder(kind: str) -> object:
             disk = WrapLabel(view.manage.disk)
             disk.setObjectName("hint")
             window._rows.addWidget(disk)
-            _section(
-                window,
-                tr("mdl.manage.installed"),
-                view.manage.installed,
-                view.manage.empty_installed,
-            )
-            _section(
-                window,
-                tr("mdl.manage.available"),
-                view.manage.available,
-                view.manage.empty_available,
-            )
+            if view.manage.groups:
+                for group in view.manage.groups:
+                    window._rows.addWidget(_manage_group(window, group))
+            else:
+                _section(
+                    window,
+                    tr("mdl.manage.installed"),
+                    view.manage.installed,
+                    view.manage.empty_installed,
+                )
+                _section(
+                    window,
+                    tr("mdl.manage.available"),
+                    view.manage.available,
+                    view.manage.empty_available,
+                )
             verify = QPushButton(tr("mdl.manage.verify"))
             verify.clicked.connect(lambda: _verify(window))
             window._rows.addWidget(verify)
@@ -1305,6 +1312,85 @@ def _builder(kind: str) -> object:
             return
         for row in rows:
             window._rows.addWidget(_manage_row(window, row))
+
+    def _fold_button() -> QPushButton:
+        button = QPushButton("")
+        button.setObjectName("disclosure")
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        return button
+
+    def _wire_fold(button: QPushButton, block: QWidget, closed_text: str, open_text: str) -> None:
+        """Fold ``block`` away behind ``button`` until the button is pressed."""
+        state = {"open": False}
+        button.setText("▸ " + closed_text)
+        block.setVisible(False)
+
+        def flip(_checked: bool = False) -> None:
+            state["open"] = not state["open"]
+            block.setVisible(state["open"])
+            mark = "▾ " if state["open"] else "▸ "
+            label = open_text if state["open"] else closed_text
+            button.setText(mark + label)
+
+        button.clicked.connect(flip)
+
+    def _row_block(window: DownloadWindow, rows: tuple[ManageRow, ...]) -> QWidget:
+        block = QWidget()
+        layout = QVBoxLayout(block)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        for row in rows:
+            layout.addWidget(_manage_row(window, row))
+        return block
+
+    def _manage_group(window: DownloadWindow, group: ManageGroup) -> QWidget:
+        """One task group: a flat list, or two VRAM halves when split."""
+        host = QWidget()
+        layout = QVBoxLayout(host)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        if group.sections:
+            title = QLabel(group.title)
+            title.setObjectName("sectiontitle")
+            title.setWordWrap(True)
+            layout.addWidget(title)
+            for section in group.sections:
+                _tier_section(window, layout, section)
+            return host
+        if group.collapsed:
+            button = _fold_button()
+            block = _row_block(window, group.rows)
+            layout.addWidget(button)
+            layout.addWidget(block)
+            _wire_fold(button, block, group.title, group.title)
+            return host
+        title = QLabel(group.title)
+        title.setObjectName("sectiontitle")
+        title.setWordWrap(True)
+        layout.addWidget(title)
+        layout.addWidget(_row_block(window, group.rows))
+        return host
+
+    def _tier_section(window: DownloadWindow, layout: QVBoxLayout, section: TierSection) -> None:
+        """One open subsection, or a closed one behind the other-cards disclosure."""
+        block = QWidget()
+        block_layout = QVBoxLayout(block)
+        block_layout.setContentsMargins(0, 0, 0, 0)
+        block_layout.setSpacing(6)
+        title = QLabel(section.title)
+        title.setObjectName("hint")
+        title.setWordWrap(True)
+        block_layout.addWidget(title)
+        for row in section.rows:
+            block_layout.addWidget(_manage_row(window, row))
+        if section.open:
+            layout.addWidget(block)
+            return
+        button = _fold_button()
+        closed = tr("mdl.manage.other_cards_show", count=len(section.rows))
+        layout.addWidget(button)
+        layout.addWidget(block)
+        _wire_fold(button, block, closed, tr("mdl.manage.other_cards_hide"))
 
     def _group_card(window: DownloadWindow, group: GroupView) -> QFrame:
         card = QFrame()
@@ -1376,9 +1462,14 @@ def _builder(kind: str) -> object:
         layout.setContentsMargins(12, 10, 12, 10)
         text = QVBoxLayout()
         title = WrapLabel(row.title)
+        title.setToolTip(row.key)
         meta = WrapLabel(row.meta)
         meta.setObjectName("hint")
         text.addWidget(title)
+        if row.purpose:
+            purpose = WrapLabel(row.purpose)
+            purpose.setObjectName("hint")
+            text.addWidget(purpose)
         if row.note:
             note = WrapLabel(row.note)
             note.setObjectName("hint")
@@ -1386,15 +1477,24 @@ def _builder(kind: str) -> object:
         text.addWidget(meta)
         chip = QLabel(row.state_label)
         chip.setStyleSheet(chip_style(row.state))
-        button = QPushButton(row.action_label)
-        button.clicked.connect(
-            lambda _checked=False, action=row.action, key=row.key: _manage_action(
-                window, action, key
-            )
-        )
         layout.addLayout(text, 1)
+        if row.badge:
+            badge = QLabel(row.badge)
+            badge.setStyleSheet(
+                f"color: {TEXT_MUTED}; background: #2a2a35; "
+                "border-radius: 10px; padding: 3px 8px; font-size: 12px;"
+            )
+            badge.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+            layout.addWidget(badge, 0, Qt.AlignmentFlag.AlignVCenter)
         layout.addWidget(chip, 0, Qt.AlignmentFlag.AlignVCenter)
-        layout.addWidget(button, 0, Qt.AlignmentFlag.AlignVCenter)
+        if row.action:
+            button = QPushButton(row.action_label)
+            button.clicked.connect(
+                lambda _checked=False, action=row.action, key=row.key: _manage_action(
+                    window, action, key
+                )
+            )
+            layout.addWidget(button, 0, Qt.AlignmentFlag.AlignVCenter)
         card.setAccessibleName(f"{row.title}. {row.state_label}. {row.meta}")
         return card
 
@@ -1412,11 +1512,30 @@ def _builder(kind: str) -> object:
     def _open_group(window: DownloadWindow, app_id: str) -> None:
         _launch_app(_command_for(window._controller, app_id) or window._open_cmd)
 
+    def _row_group(window: DownloadWindow, key: str) -> str:
+        """Return the task group of the row ``key``, or ``""`` when unknown."""
+        view = window._view
+        manage = view.manage if view else None
+        if manage is None:
+            return ""
+        pools: list[tuple[ManageRow, ...]] = [manage.installed, manage.available]
+        for group in manage.groups:
+            pools.append(group.rows)
+            pools.extend(section.rows for section in group.sections)
+        for pool in pools:
+            for row in pool:
+                if row.key == key:
+                    return row.group
+        return ""
+
     def _manage_action(window: DownloadWindow, action: str, key: str) -> None:
         controller = window._controller
         if controller is None or window._manifest is None:
             return
         if action == "remove":
+            group = _row_group(window, key)
+            if not can_remove(group):
+                return
             row_title = key
             if window._view and window._view.manage:
                 for row in (*window._view.manage.installed, *window._view.manage.available):
@@ -1435,11 +1554,11 @@ def _builder(kind: str) -> object:
             ):
                 return
             component = f"model-{key}" if not key.startswith("model-") else key
-            listing = controller.listing(window._focus, window._manifest)
+            listing = controller.listing(window._focus, window._manifest, all_tiers=True)
             for item in listing:
                 if item.model_id == key:
                     component = item.component_id
-            controller.remove_model(window._focus, component)
+            controller.remove_model(window._focus, component, group=group)
             window._request_scan()
             return
         elif action in {"add", "repair"}:
@@ -1483,6 +1602,18 @@ def _builder(kind: str) -> object:
         if view.manage is not None:
             parts.append("i" + ",".join(row.key + row.state for row in view.manage.installed))
             parts.append("a" + ",".join(row.key + row.state for row in view.manage.available))
+            for group in view.manage.groups:
+                if group.sections:
+                    painted = ",".join(
+                        f"{section.key}:{section.open}:"
+                        + ",".join(row.key + row.state for row in section.rows)
+                        for section in group.sections
+                    )
+                    parts.append("g" + group.key + ":" + painted)
+                else:
+                    parts.append(
+                        "g" + group.key + ":" + ",".join(row.key + row.state for row in group.rows)
+                    )
         return "|".join(parts)
 
     def _ask(parent: QWidget, title: str, body: str, yes: str, no: str) -> bool:

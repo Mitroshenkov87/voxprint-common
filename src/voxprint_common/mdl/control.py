@@ -33,9 +33,12 @@ from voxprint_common.mdl.present import (
     ManageView,
     QueueItem,
     Snapshot,
+    can_remove,
     display_path,
     format_size,
+    group_manage_rows,
     localized_name,
+    normalize_group,
 )
 from voxprint_common.mdl.queue import enqueue, run_or_attach
 from voxprint_common.mdl.status import JobState, Status, load_status
@@ -57,6 +60,7 @@ logger = logging.getLogger(__name__)
 _shared: Controller | None = None
 _TIER_RANK = {ModelTier.ANY: 0, ModelTier.GB8: 1, ModelTier.GB16: 2, ModelTier.GB24: 3}
 _GPU_RANK = {VramTier.UNKNOWN: 1, VramTier.GB8: 1, VramTier.GB16: 2, VramTier.GB24: 3}
+_TIER_BADGES = {ModelTier.GB8: "8gb", ModelTier.GB16: "16gb", ModelTier.GB24: "24gb"}
 _STATE = {
     "pending": ItemState.PENDING,
     "queued": ItemState.PENDING,
@@ -92,6 +96,10 @@ class ManagedFile:
         refs: tuple[str, ...],
         component_id: str,
         verified: bool,
+        label: str = "",
+        purpose: str = "",
+        group: str = "",
+        tier: ModelTier = ModelTier.ANY,
     ) -> None:
         self.model_id = model_id
         self.names = names
@@ -104,6 +112,10 @@ class ManagedFile:
         self.refs = refs
         self.component_id = component_id
         self.verified = verified
+        self.label = label
+        self.purpose = purpose
+        self.group = group
+        self.tier = tier
 
 
 def backend_name() -> str:
@@ -255,10 +267,15 @@ class Controller:
         manifest: Path,
         *,
         devices: list[GpuDevice] | None = None,
+        all_tiers: bool = False,
     ) -> list[ManagedFile]:
-        """Return models this card can run, including optional ones."""
+        """Return models this card can run, including optional ones.
+
+        Pass ``all_tiers=True`` to include models above this card's VRAM
+        tier, which the manage page shows under "models for other cards".
+        """
         parsed = load_manifest(manifest)
-        return _visible(parsed, self._gpus(devices))
+        return _visible(parsed, self._gpus(devices), all_tiers=all_tiers)
 
     def manage_page(
         self,
@@ -268,19 +285,29 @@ class Controller:
         devices: list[GpuDevice] | None = None,
         lang: str | None = None,
     ) -> ManageView:
-        """Build the manage-models page for one app."""
+        """Build the manage-models page for one app.
+
+        Unlike :meth:`listing`, the page also lists models above this
+        card's VRAM tier. They stay addable and sit in the collapsed
+        "other cards" section of a split task group.
+        """
         code = lang
-        rows = self.listing(app_id, manifest, devices=devices)
+        gpus = self._gpus(devices)
+        parsed = load_manifest(manifest)
+        rows = _visible(parsed, gpus, all_tiers=True)
         installed: list[ManageRow] = []
         available: list[ManageRow] = []
         for row in rows:
-            title = localized_name(row.names, row.fallback, code)
+            title = row.label or localized_name(row.names, row.fallback, code)
             bits = [format_size(row.size, lang=code)]
             if row.tier_gb:
                 bits.append(_say("mdl.manage.min_vram", code, gb=row.tier_gb))
             meta = " · ".join(bits)
             others = [identity(name).display_name for name in row.refs if name != app_id]
             note = _say("mdl.manage.shared", code, apps=", ".join(others)) if others else ""
+            group = normalize_group(row.group)
+            badge = _TIER_BADGES.get(row.tier, "")
+            removable = can_remove(group)
             if row.installed and row.verified:
                 installed.append(
                     ManageRow(
@@ -289,9 +316,13 @@ class Controller:
                         meta,
                         "ready",
                         _say("mdl.manage.status.ok", code),
-                        "remove",
-                        _say("mdl.manage.remove", code),
+                        "remove" if removable else "",
+                        _say("mdl.manage.remove", code) if removable else "",
                         note,
+                        purpose=row.purpose,
+                        group=group,
+                        badge=badge,
+                        removable=removable,
                     )
                 )
             elif row.installed:
@@ -305,6 +336,10 @@ class Controller:
                         "repair",
                         _say("mdl.manage.repair", code),
                         note,
+                        purpose=row.purpose,
+                        group=group,
+                        badge=badge,
+                        removable=removable,
                     )
                 )
             else:
@@ -318,12 +353,17 @@ class Controller:
                         "add",
                         _say("mdl.manage.add", code),
                         note,
+                        purpose=row.purpose,
+                        group=group,
+                        badge=badge,
+                        removable=removable,
                     )
                 )
         folder = models_dir()
         used = _used_bytes()
         free = shutil.disk_usage(folder).free if folder.exists() else 0
         name = identity(app_id).display_name
+        groups = group_manage_rows((*installed, *available), tier=detect_tier(gpus), lang=code)
         return ManageView(
             tuple(installed),
             tuple(available),
@@ -337,10 +377,18 @@ class Controller:
             ),
             _say("mdl.manage.empty_installed", code, app=name),
             _say("mdl.manage.empty_available", code),
+            groups,
         )
 
-    def remove_model(self, app_id: str, component_id: str) -> bool:
-        """Drop this app's ref. A folder is removed only when the release checks pass."""
+    def remove_model(self, app_id: str, component_id: str, *, group: str | None = None) -> bool:
+        """Drop this app's ref. A folder is removed only when the release checks pass.
+
+        A ``group`` in the protected set (``safety`` or ``internal``) is
+        refused even when the caller names the model directly. Without
+        ``group`` the check is skipped, which keeps old callers working.
+        """
+        if group is not None and not can_remove(group):
+            return False
         deleted = release_component(component_id, app_id).deleted
         if deleted:
             remove_outputs(app_id, component_id)
@@ -363,13 +411,18 @@ class Controller:
         self._event = event
 
 
-def _visible(manifest: AppManifest, devices: list[GpuDevice] | None) -> list[ManagedFile]:
+def _visible(
+    manifest: AppManifest,
+    devices: list[GpuDevice] | None,
+    *,
+    all_tiers: bool = False,
+) -> list[ManagedFile]:
     tier = detect_tier(devices)
     cap = _GPU_RANK[tier]
     document = load()
     found: list[ManagedFile] = []
     for model in manifest.models:
-        if model.unavailable or _TIER_RANK[model.tier] > cap:
+        if model.unavailable or (not all_tiers and _TIER_RANK[model.tier] > cap):
             continue
         digest = model.files[0].sha256 if model.files else ""
         component_id = f"model-{digest[:MODEL_PREFIX]}" if digest else ""
@@ -393,6 +446,10 @@ def _visible(manifest: AppManifest, devices: list[GpuDevice] | None) -> list[Man
                 refs,
                 component_id,
                 kind == "ok",
+                label=model.label,
+                purpose=model.purpose,
+                group=model.group,
+                tier=model.tier,
             )
         )
     return found
@@ -427,6 +484,7 @@ def _model_kind(model: Model, component_id: str, component: object | None) -> st
 
 
 def _tier_gb(model: Model) -> int:
+    """Return the minimum-VRAM hint for the meta line; badges use ``model.tier``."""
     if model.min_vram_gib:
         return int(model.min_vram_gib)
     return {ModelTier.GB8: 8, ModelTier.GB16: 16, ModelTier.GB24: 24}.get(model.tier, 0)

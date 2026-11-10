@@ -216,7 +216,13 @@ class OnnxPrebuiltFile:
 
 @dataclass(frozen=True)
 class Model:
-    """One variant of a model id."""
+    """One variant of a model id.
+
+    ``label``, ``purpose``, and ``group`` are optional display fields for
+    the manage page. ``group`` is a task id; an empty or unknown value is
+    shown in the "other" task group. Old manifests without the fields load
+    unchanged and every field defaults to an empty string.
+    """
 
     id: str
     version: str
@@ -234,6 +240,9 @@ class Model:
     fallbacks: tuple[FallbackVariant, ...] = ()
     onnx_prebuilts: tuple[OnnxPrebuiltFile, ...] = ()
     groups: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    label: str = ""
+    purpose: str = ""
+    group: str = ""
 
 
 @dataclass(frozen=True)
@@ -829,11 +838,15 @@ def _models_from_descriptors(
             raise CatalogError(f"model {model_id} has no voxprint-model descriptor")
         if descriptor.id != model_id:
             raise CatalogError(f"descriptor id {descriptor.id} does not match {model_id}")
+        label, purpose, group = document.display_meta(model_id)
         models.append(
             _model_from_descriptor(
                 descriptor,
                 _tier_name_for(document, model_id),
                 optional=model_id in optional_ids,
+                label=label,
+                purpose=purpose,
+                group=group,
             )
         )
     return tuple(models)
@@ -868,6 +881,9 @@ def _mark_unavailable(
                 reason=reason,
                 post_install=model.post_install,
                 onnx_prebuilts=model.onnx_prebuilts,
+                label=model.label,
+                purpose=model.purpose,
+                group=model.group,
             )
         )
     for model_id, reason in blocked:
@@ -912,7 +928,15 @@ def _tier_name_for(document: AppModels, model_id: str) -> ModelTier:
     return ModelTier.ANY
 
 
-def _model_from_descriptor(descriptor: Descriptor, tier: ModelTier, *, optional: bool) -> Model:
+def _model_from_descriptor(
+    descriptor: Descriptor,
+    tier: ModelTier,
+    *,
+    optional: bool,
+    label: str = "",
+    purpose: str = "",
+    group: str = "",
+) -> Model:
     version = descriptor.build.tag or descriptor.build.date
     files = tuple(
         ModelFile(
@@ -934,6 +958,9 @@ def _model_from_descriptor(descriptor: Descriptor, tier: ModelTier, *, optional:
         min_vram_gib=descriptor.tier.min_vram_gib,
         display_name=descriptor.display_name,
         gpu_min_cc=descriptor.tier.gpu_min_cc,
+        label=label,
+        purpose=purpose,
+        group=group,
         fallbacks=tuple(
             FallbackVariant(
                 group.id,
@@ -1373,6 +1400,20 @@ def _vram_gib(model_id: str, value: object) -> float | None:
     return float(value)
 
 
+def _display_field(model_id: str, value: object, field_name: str) -> str:
+    """Return an optional display field, refusing a non-string value.
+
+    An absent field and an empty string both read as ``""``. An unknown
+    ``group`` value is kept: the manage page sorts it into "other" instead
+    of failing the load, so old files keep working.
+    """
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise CatalogError(f"model {model_id} {field_name} must be a string")
+    return value.strip()
+
+
 def _runtime_names(value: object) -> tuple[str, ...]:
     if value is None:
         return ()
@@ -1442,6 +1483,9 @@ def _model(value: object) -> Model:
         reason=reason.strip(),
         post_install=hook,
         onnx_prebuilts=() if status == "unavailable" else _mdl_onnx_prebuilts(model_id, value),
+        label=_display_field(model_id, value.get("label"), "label"),
+        purpose=_display_field(model_id, value.get("purpose"), "purpose"),
+        group=_display_field(model_id, value.get("group"), "group"),
     )
 
 
