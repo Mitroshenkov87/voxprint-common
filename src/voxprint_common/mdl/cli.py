@@ -1,8 +1,8 @@
 """``voxprint-mdl`` command line.
 
-Subcommands: ``plan``, ``enqueue``, ``download``, ``adopt``, ``cleanup``,
-``status``, ``verify``, ``worker``, ``index``. ``--check`` prints which model
-index is in use.
+Subcommands: ``plan``, ``enqueue``, ``download``, ``ensure``, ``adopt``,
+``cleanup``, ``status``, ``verify``, ``worker``, ``index``. ``--check`` prints
+which model index is in use.
 
 ``voxprint-mdl-gui --app <id>`` opens Manage models with no console. The console
 script ``voxprint-mdl --gui --app <id>`` still opens that page and keeps a
@@ -10,26 +10,36 @@ console attached.
 
 ``enqueue`` appends a job and exits. ``download`` enqueues when ``--app`` or
 ``--manifest`` is set, then runs the single worker or attaches to the one
-already running. ``status --wait`` attaches until the queue is idle.
+already running. ``ensure`` is the headless installer entry point: it reads
+the app id from the manifest, enqueues that app's planned models, and runs
+or attaches to the single worker. It never opens a window and never prompts.
+``status --wait`` attaches until the queue is idle.
 
-``--json`` writes UTF-8 progress lines and one result line on stdout. Human
-text goes to stderr. ``--dry-run`` builds the plan and checks free disk space
-without downloading or enqueueing. For ``adopt``, ``--dry-run`` reports
-path and size matches and does not hash, link, or copy. ``cleanup`` reports
-unless ``--apply`` is set, and ``--dry-run`` together with ``--apply`` is a
-usage error. Both global flags are accepted before or after the subcommand.
-``--gui`` belongs on ``download``, ``adopt``, and ``verify``. ``verify
---repair`` neutralises unsafe manifest paths and downloads only the missing
-or corrupt models. ``verify --gui`` opens the check-and-repair window.
-``adopt --gui`` hashes in the progress window, one file at a time.
+``--app-manifest PATH`` is an alias of ``--manifest`` on every subcommand
+that takes a manifest. ``--json`` writes UTF-8 progress lines and one result
+line on stdout. Human text goes to stderr. For ``ensure`` and ``verify`` the
+result line also carries ``app``, a per-model ``models`` list (``id``,
+``share_key``, ``state``, ``bytes``), and ``safety_gaps`` from
+:func:`voxprint_common.mdl.readiness.shared_safety_gaps`; ``ready`` is false
+when any safety gap exists and both commands exit 2. ``--dry-run`` builds the
+plan and checks free disk space without downloading or enqueueing. For
+``adopt``, ``--dry-run`` reports path and size matches and does not hash,
+link, or copy. ``cleanup`` reports unless ``--apply`` is set, and ``--dry-run``
+together with ``--apply`` is a usage error. Both global flags are accepted
+before or after the subcommand. ``--gui`` belongs on ``download``, ``adopt``,
+and ``verify``. ``verify --repair`` neutralises unsafe manifest paths and
+downloads only the missing or corrupt models. ``verify --gui`` opens the
+check-and-repair window. ``adopt --gui`` hashes in the progress window, one
+file at a time.
 
 Exit codes, shared with :mod:`voxprint_common.cli_protocol`:
 
 * ``0``: success. The result ``ok`` field is true. ``ready`` on the result,
   and in the status file, tells an app it may open.
 * ``1``: usage error.
-* ``2``: the operation failed. Disk space, a digest mismatch, and a network
-  failure use this code. Nothing is downloaded when the disk check fails.
+* ``2``: the operation failed. Disk space, a digest mismatch, a network
+  failure, and a non-empty ``safety_gaps`` list use this code. Nothing is
+  downloaded when the disk check fails.
 * ``3``: cancelled.
 """
 
@@ -52,12 +62,17 @@ from voxprint_common.cli_protocol import (
     emit,
     result,
 )
+from voxprint_common.gpu_probe import query_gpus
 from voxprint_common.mdl.adopt import adopt
 from voxprint_common.mdl.catalog import (
+    AppManifest,
     CatalogError,
+    Model,
+    PlannedFile,
     discover,
     listed_ids,
     load_manifest,
+    model_share_key,
     plan_files,
 )
 from voxprint_common.mdl.cleanup import cleanup
@@ -69,12 +84,20 @@ from voxprint_common.mdl.index import (
     verify_index_file,
     write_index_signature,
 )
-from voxprint_common.mdl.job import Outcome, detect_tier, download, plan, verify, verify_repair
+from voxprint_common.mdl.job import (
+    Outcome,
+    _card,
+    detect_tier,
+    download,
+    plan,
+    verify,
+    verify_repair,
+)
 from voxprint_common.mdl.names import CLI_NAME, DISPLAY_NAME
 from voxprint_common.mdl.onnx_prebuilt import stale_rows
 from voxprint_common.mdl.progress_ui import run_verify_repair, run_window
-from voxprint_common.mdl.queue import enqueue, load_queue, run_or_attach
-from voxprint_common.mdl.readiness import publish_presence
+from voxprint_common.mdl.queue import _already_installed, enqueue, load_queue, run_or_attach
+from voxprint_common.mdl.readiness import publish_presence, shared_safety_gaps
 from voxprint_common.mdl.status import JobState, StatusError, load_status
 from voxprint_common.runtime_manifest import repair_manifest
 from voxprint_common.ui.mdl_window import (
@@ -170,6 +193,7 @@ def _parser() -> _Parser:
         ("plan", "show the models this machine needs and check free disk space"),
         ("enqueue", "add a download job and exit"),
         ("download", "enqueue, then run the worker or attach to it"),
+        ("ensure", "make one app's models ready through the shared store"),
         ("adopt", "link or copy local model files that match the descriptor"),
         ("cleanup", "reclaim legacy copies that match a blob"),
         ("status", "print the status file"),
@@ -179,7 +203,9 @@ def _parser() -> _Parser:
         command = commands.add_parser(name, help=help_text)
         command.add_argument(
             "--manifest",
+            "--app-manifest",
             action="append",
+            dest="manifest",
             default=[],
             help="path to an app manifest; default is to discover installed apps",
         )
@@ -270,6 +296,8 @@ def _run(args: argparse.Namespace, session: Session | None) -> tuple[int, str, d
         return _status(args)
     if args.command == "enqueue":
         return _enqueue(args)
+    if args.command == "ensure":
+        return _ensure(args, session)
     models = tuple(args.model) if args.model else None
     manifests = [Path(item) for item in args.manifest] if args.manifest else None
     on_progress = _progress(session) if session is not None else None
@@ -287,6 +315,7 @@ def _run(args: argparse.Namespace, session: Session | None) -> tuple[int, str, d
             outcome = verify_repair(models, repair=True, manifests=manifests)
         else:
             outcome = verify(manifests, only=models)
+            return _verify_result(args, manifests, models, outcome)
     elif args.command == "adopt":
         return _adopt(args, on_progress)
     elif args.command == "cleanup":
@@ -500,6 +529,200 @@ def _enqueue(args: argparse.Namespace) -> tuple[int, str, dict[str, object]]:
     return EXIT_OK, job_id, {"job": job_id, "ready": False, "state": "queued", "jobs": jobs}
 
 
+_BLOCKING_STATES = frozenset({"missing", "corrupt"})
+_STATE_RANK = {"ok": 0, "reused": 1, "downloaded": 2, "missing": 3, "corrupt": 4, "unavailable": 5}
+
+
+def _ensure(
+    args: argparse.Namespace, session: Session | None
+) -> tuple[int, str, dict[str, object]]:
+    """Make one app's models ready without opening a window or prompting.
+
+    The app id comes from the manifest; ``--app`` is optional and a mismatch
+    is a usage error. Files already in the shared store are reused: the job
+    only adds this app's ref. ``--dry-run`` plans and checks the disk without
+    fetching.
+    """
+    manifests = [Path(item) for item in args.manifest] if args.manifest else None
+    if manifests is None and args.app:
+        manifests = [app.path for app in discover() if app.id == args.app]
+        if not manifests:
+            return EXIT_USAGE, f"no installed manifest for {args.app}", {}
+    if manifests is None:
+        return EXIT_USAGE, "ensure needs --app-manifest, --manifest, or --app", {}
+    app = load_manifest(manifests[0]).app
+    if args.app and args.app != app:
+        return EXIT_USAGE, f"{manifests[0]} is not the manifest for {args.app}", {}
+    models = tuple(args.model) if args.model else None
+    parsed = [load_manifest(path) for path in manifests]
+    if args.dry_run:
+        outcome = plan(manifests, only=models)
+        files = _planned(parsed, models) if outcome.code == EXIT_OK else []
+        rows = _model_rows(parsed, files, mode="dry-run", before=set(), only=models)
+        code, payload = _readiness_payload(app, manifests, outcome.code, rows)
+        body = _payload(outcome.status)
+        body.update(payload)
+        return code, outcome.message, body
+    files = _planned(parsed, models)
+    before = {item.sha256 for item in files if _already_installed(item)}
+    job_id = enqueue(app, models, manifests=manifests)
+    outcome = run_or_attach(job_id, session=_watch(session))
+    rows = _model_rows(parsed, files, mode="ensure", before=before, only=models)
+    code, payload = _readiness_payload(app, manifests, outcome.code, rows)
+    body = _payload(outcome.status)
+    body.update(payload)
+    return code, outcome.message, body
+
+
+def _verify_result(
+    args: argparse.Namespace,
+    manifests: Sequence[Path] | None,
+    models: tuple[str, ...] | None,
+    outcome: Outcome,
+) -> tuple[int, str, dict[str, object]]:
+    """Add the installer fields to the plain ``verify`` result.
+
+    The models list re-plans what ``verify`` hashed, so the digest cache
+    makes the extra pass cheap. ``ready`` fails closed on a safety gap.
+    """
+    paths = list(manifests) if manifests is not None else None
+    parsed = _discover_parsed(paths)
+    app = args.app or (parsed[0].app if len(parsed) == 1 else "")
+    files = _planned(parsed, models) if parsed else []
+    rows = _model_rows(parsed, files, mode="verify", before=set(), only=models)
+    code, payload = _readiness_payload(app, paths, outcome.code, rows)
+    body = _payload(outcome.status)
+    body.update(payload)
+    return code, outcome.message, body
+
+
+def _discover_parsed(paths: Sequence[Path] | None) -> list[AppManifest]:
+    """Load the given manifests, or every discovered app manifest."""
+    if paths is not None:
+        return [load_manifest(path) for path in paths]
+    found: list[AppManifest] = []
+    for installed in discover():
+        try:
+            found.append(load_manifest(installed.path))
+        except CatalogError:
+            continue
+    return found
+
+
+def _planned(parsed: Sequence[AppManifest], only: tuple[str, ...] | None) -> list[PlannedFile]:
+    """Plan ``parsed`` for this machine the way the queue would."""
+    cards = list(query_gpus())
+    memory_gib, compute = _card(cards)
+    return plan_files(
+        list(parsed),
+        detect_tier(cards),
+        memory_gib=memory_gib,
+        compute=compute,
+        only=only,
+    )
+
+
+def _file_state(item: PlannedFile, mode: str, before: set[str]) -> str:
+    """Return the installer state for one planned file.
+
+    ``ensure`` distinguishes bytes that were already in the shared store
+    (``reused``) from bytes fetched by this run (``downloaded``); ``verify``
+    reports ``ok``; a dry run reports what is on disk without fetching.
+    """
+    if not _already_installed(item):
+        return "corrupt" if item.destination.is_file() else "missing"
+    if mode == "ensure":
+        return "reused" if item.sha256 in before else "downloaded"
+    if mode == "verify":
+        return "ok"
+    return "reused"
+
+
+def _model_rows(
+    parsed: Sequence[AppManifest],
+    files: Sequence[PlannedFile],
+    *,
+    mode: str,
+    before: set[str],
+    only: tuple[str, ...] | None,
+) -> list[dict[str, object]]:
+    """Build one ``models`` entry per planned model row.
+
+    Each entry carries the model ``id``, its ``share_key``, a ``state`` from
+    ``ok`` / ``reused`` / ``downloaded`` / ``missing`` / ``corrupt`` /
+    ``unavailable``, and the model's total ``bytes``. Multi-file models merge
+    into one row; the worst file state wins. Unavailable manifest rows are
+    listed with state ``unavailable``.
+    """
+    owners: dict[tuple[str, str], Model] = {}
+    for manifest in parsed:
+        for model in manifest.models:
+            for item in model.files:
+                owners.setdefault((model.id, item.sha256), model)
+    rows: dict[tuple[str, str], dict[str, object]] = {}
+    order: list[tuple[str, str]] = []
+    for item in files:
+        state = _file_state(item, mode, before)
+        ids = item.model_ids or ([item.model_id] if item.model_id else [])
+        for model_id in ids:
+            model = owners.get((model_id, item.sha256))
+            share_key = model_share_key(model) if model is not None else ""
+            key = (model_id, share_key)
+            row = rows.get(key)
+            if row is None:
+                row = {"id": model_id, "share_key": share_key, "state": state, "bytes": 0}
+                rows[key] = row
+                order.append(key)
+            if _STATE_RANK[state] > _STATE_RANK[str(row["state"])]:
+                row["state"] = state
+            row["bytes"] = int(row["bytes"]) + item.size
+    for manifest in parsed:
+        for model in manifest.models:
+            if not model.unavailable or (only is not None and model.id not in only):
+                continue
+            key = (model.id, model_share_key(model))
+            if key not in rows:
+                rows[key] = {
+                    "id": model.id,
+                    "share_key": key[1],
+                    "state": "unavailable",
+                    "bytes": 0,
+                }
+                order.append(key)
+    return [rows[key] for key in order]
+
+
+def _readiness_payload(
+    app: str,
+    manifest_paths: Sequence[Path] | None,
+    outcome_code: int,
+    rows: list[dict[str, object]],
+) -> tuple[int, dict[str, object]]:
+    """Combine the model rows with the fail-closed safety gate.
+
+    ``ready`` is false when the outcome failed, when any model row is
+    missing or corrupt, or when :func:`shared_safety_gaps` reports a gap. A
+    ready-false result uses exit code 2 so an installer never opens the app.
+    """
+    gaps = shared_safety_gaps(app, manifests=list(manifest_paths) if manifest_paths else None)
+    ready = (
+        outcome_code == EXIT_OK
+        and all(str(row["state"]) not in _BLOCKING_STATES for row in rows)
+        and not gaps
+    )
+    code = outcome_code if outcome_code != EXIT_OK else (EXIT_OK if ready else EXIT_FAILED)
+    payload: dict[str, object] = {
+        "app": app,
+        "ready": ready,
+        "models": rows,
+        "safety_gaps": [
+            {"share_key": gap.share_key, "model_id": gap.model_id, "state": gap.state}
+            for gap in gaps
+        ],
+    }
+    return code, payload
+
+
 def _queue_download(args: argparse.Namespace, session: TransferSession | None) -> Outcome:
     app, models, manifests = _request(args)
     if app is not None:
@@ -564,7 +787,17 @@ def _launched_as_gui() -> bool:
 
 
 def _bare_gui(argv: Sequence[str]) -> bool:
-    commands = {"plan", "enqueue", "download", "adopt", "cleanup", "status", "verify", "worker"}
+    commands = {
+        "plan",
+        "enqueue",
+        "download",
+        "ensure",
+        "adopt",
+        "cleanup",
+        "status",
+        "verify",
+        "worker",
+    }
     return "--gui" in argv and not any(token in commands for token in argv)
 
 

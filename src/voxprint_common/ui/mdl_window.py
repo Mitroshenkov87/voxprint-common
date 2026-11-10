@@ -17,6 +17,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Sequence
 from dataclasses import replace
 from enum import StrEnum
 from pathlib import Path
@@ -30,7 +31,7 @@ from voxprint_common.branding import (
 )
 from voxprint_common.i18n import tr
 from voxprint_common.mdl.catalog import SUITE_APPS, discover, install_dir
-from voxprint_common.mdl.control import app_outcome, shared_controller
+from voxprint_common.mdl.control import ManagedFile, app_outcome, shared_controller
 from voxprint_common.mdl.instance import become_primary, send
 from voxprint_common.mdl.names import DISPLAY_NAME
 from voxprint_common.mdl.present import (
@@ -1574,11 +1575,9 @@ def _builder(kind: str) -> object:
                 tr("mdl.confirm.remove.no"),
             ):
                 return
-            component = f"model-{model_id}" if not model_id.startswith("model-") else model_id
-            listing = controller.listing(window._focus, window._manifest, all_tiers=True)
-            for item in listing:
-                if item.model_id == model_id:
-                    component = item.component_id
+            component = _remove_component(
+                controller, window._focus, window._manifest, row, model_id
+            )
             controller.remove_model(window._focus, component, group=group)
             window._request_scan()
             return
@@ -1905,6 +1904,32 @@ def _find_manifest(app_id: str) -> Path | None:
         if app.id == app_id:
             return app.path
     return None
+
+
+def _remove_component(
+    controller: object,
+    focus: str,
+    manifest: Path | None,
+    row: ManageRow | None,
+    model_id: str,
+) -> str:
+    """Return the shared-store component a Remove must release.
+
+    The row carries its own component id, so duplicate model ids (Movie
+    Dubber lists three ``qwen3-tts`` rows) release the row's component
+    instead of the last model-id match. Rows built before the field existed
+    fall back to the model-id lookup.
+    """
+    if row is not None and row.component_id:
+        return row.component_id
+    component = f"model-{model_id}" if not model_id.startswith("model-") else model_id
+    if controller is None or manifest is None:
+        return component
+    listing: Sequence[ManagedFile] = controller.listing(focus, manifest, all_tiers=True)
+    for item in listing:
+        if item.model_id == model_id:
+            component = item.component_id
+    return component
 
 
 def _settled(controller: object, item_state: object) -> bool:

@@ -67,6 +67,29 @@ voxprint-mdl status --json --wait
 
 From Python, `enqueue(app)` returns a job id and `ensure_ready(app)` enqueues, runs or attaches, and returns `Ready` or `Failed`.
 
+## Installer integration
+
+MDL is universal across the suite: there is one shared `voxprint-mdl`, one shared model index, and one shared blob store. An online installer does not ship or fetch its own copy of either; it calls the installed `voxprint-mdl`, and each app checks only its own models through it. Two commands are the stable, non-interactive surface for this. Neither opens a window; neither prompts.
+
+```bash
+voxprint-mdl ensure --app-manifest "/opt/voxprint-ai-suite/enlarge/mdl.json" --json
+voxprint-mdl verify --app-manifest "/opt/voxprint-ai-suite/enlarge/mdl.json" --json
+```
+
+`--app-manifest PATH` is an alias of `--manifest` on every subcommand that takes a manifest, so an app can pass its own `mdl.json` (or `voxprint-app-models.json`) directly. `ensure` reads the app id from the manifest (`--app` is optional; a mismatch is a usage error, exit 1), enqueues that app's planned models, and runs or attaches to the single worker — the same queue and download path as `download`, never a second downloader. `--model <id>` adds on-demand models; `--dry-run` builds the plan and checks free disk space without fetching or enqueueing.
+
+Files already in the shared store are reused, never downloaded twice: a finished blob of the right size with its `.verified` marker is enough, and `ensure` only adds this app's ref to the shared component. A second app whose manifest names the same sha256 gets the bytes for free and shares the component.
+
+With `--json` the last stdout line is one result object. Besides the existing fields it carries `app`, `ready`, a `models` list with one row per planned model, and `safety_gaps`:
+
+```json
+{"type":"result","ok":true,"code":0,"message":"ready","ready":true,"state":"ready","jobs":[],"app":"enlarge","models":[{"id":"upscaler","share_key":"model-1a2b3c4d5e6f","state":"downloaded","bytes":144}],"safety_gaps":[]}
+```
+
+Each `models` row has `id`, `share_key` (repo+revision, or the `model-<sha12>` fallback), `state`, and `bytes`. `state` is `reused` when the bytes were already in the shared store, `downloaded` when this run fetched them, `ok` after a verify hash check, `missing` or `corrupt` when the shared copy is absent or bad, and `unavailable` for manifest rows marked `status: unavailable`.
+
+`ready` is false when any model row is `missing` or `corrupt`, or when `safety_gaps` is non-empty. The list comes from `voxprint_common.mdl.readiness.shared_safety_gaps(app)` — one `{share_key, model_id, state}` row per shared safety copy that is missing, corrupt, or hash-mismatched — and the gate fails closed: both commands exit 2 with `ready` false, so an installer must not open the app. The remaining exit codes are unchanged: 0 ready, 1 usage, 2 failed, 3 cancelled.
+
 ## Queue
 
 There is one queue, `<home>/state/mdl-queue.json`, schema 1, UTF-8, written atomically under `mdl-queue.lock`. Installers and apps only enqueue. One worker holds `mdl-worker.lock`. Everyone else leaves the job in the queue or attaches through status and the progress events. A crash leaves jobs in `running` and `.partial` files in place; the next worker resumes them with HTTP Range. Files already in the shared models directory are not downloaded again: a matching size plus a `.verified` marker is enough, and the digest is read only when that marker is missing. The app is still added as a ref.

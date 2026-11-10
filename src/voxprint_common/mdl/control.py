@@ -390,6 +390,7 @@ class Controller:
                 badge=badge,
                 removable=removable,
                 model_id=row.model_id,
+                component_id=row.component_id,
             )
             if shared:
                 shared_rows.append(built)

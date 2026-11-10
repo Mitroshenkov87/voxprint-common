@@ -273,7 +273,11 @@ class ManageRow:
     carries the share key, tier, and label so rows and actions do not
     collide. ``model_id`` is the raw model id used to enqueue or release the
     model; it defaults to ``key`` for rows built before the field existed.
-    ``group`` is the normalized task group id. ``badge`` is the VRAM tier
+    ``component_id`` is the shared-store component this row releases on
+    Remove, so duplicate ids release their own component; it defaults to
+    ``""`` for rows built before the field existed, in which case the window
+    falls back to the model-id lookup. ``group`` is the normalized task
+    group id. ``badge`` is the VRAM tier
     (``8gb``, ``16gb``, or ``24gb``); an empty string means tier ``any`` and
     paints no badge — the window maps it to the display string through
     :func:`badge_label`. ``removable`` is false for the protected ``safety``
@@ -294,6 +298,7 @@ class ManageRow:
     badge: str = ""
     removable: bool = True
     model_id: str = ""
+    component_id: str = ""
 
 
 @dataclass(frozen=True)

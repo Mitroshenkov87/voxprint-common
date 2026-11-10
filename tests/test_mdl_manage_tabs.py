@@ -339,3 +339,48 @@ def test_badge_display_maps_tier_but_grouping_keeps_raw_values() -> None:
     (group,) = group_manage_rows(rows, tier=VramTier.UNKNOWN, lang="en")
     assert [row.badge for row in group.sections[0].rows] == ["16gb"]
     assert group.sections[1].rows[0].badge == "24gb"
+
+
+def test_remove_resolves_the_rows_own_component_with_duplicate_ids(tmp_path: Path) -> None:
+    from voxprint_common.ui.mdl_window import _remove_component
+
+    full_digest = sha256_bytes(b"qwen3-tts-full")
+    compact_digest = sha256_bytes(b"qwen3-tts-compact")
+    dubber = _manifest(
+        tmp_path / "dubber",
+        "movie-dubber",
+        [
+            _entry(
+                "qwen3-tts",
+                tier="24gb",
+                label="Full size",
+                digest=full_digest,
+                mirrors=[_hf("Org/TTS-1.7B")],
+            ),
+            _entry(
+                "qwen3-tts",
+                tier="any",
+                label="Compact",
+                digest=compact_digest,
+                mirrors=[_hf("Org/TTS-0.6B")],
+            ),
+        ],
+    )
+    controller = Controller()
+    listing = controller.listing("movie-dubber", dubber, all_tiers=True)
+    by_label = {item.label: item for item in listing}
+    assert by_label["Full size"].component_id != by_label["Compact"].component_id
+    page = controller.manage_page("movie-dubber", dubber, devices=[], lang="en")
+    rows = _rows_by_key(page)
+    full_key = next(key for key in rows if key.endswith("|24gb|Full size"))
+    full = rows[full_key]
+    # The row carries its own component id: Remove on the full-size row
+    # releases the full-size component, not the last qwen3-tts match.
+    assert full.component_id == by_label["Full size"].component_id
+    resolved = _remove_component(controller, "movie-dubber", dubber, full, "qwen3-tts")
+    assert resolved == by_label["Full size"].component_id
+    # Rows built before the field existed keep the old last-id-match lookup.
+    legacy = ManageRow(full_key, "Full size", "1.0 MB", "ready", "Installed", "", "")
+    assert legacy.component_id == ""
+    resolved = _remove_component(controller, "movie-dubber", dubber, legacy, "qwen3-tts")
+    assert resolved == by_label["Compact"].component_id
