@@ -1,0 +1,88 @@
+site_name: voxprint-common
+site_description: Shared Python library for the Voxprint AI Media Suite.
+site_url: https://mitroshenkov87.github.io/voxprint-common/
+repo_url: https://github.com/Mitroshenkov87/voxprint-common
+repo_name: Mitroshenkov87/voxprint-common
+copyright: Copyright 2026 Aleksandr Mitroshenkov
+
+theme:
+  name: material
+  palette: slate
+  features:
+    - navigation.sections
+    - content.code.copy
+
+markdown_extensions:
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
+  - admonition
+  - pymdownx.superfences
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: google
+            show_root_heading: true
+            show_root_full_path: false
+            show_source: false
+            members_order: source
+            merge_init_into_class: true
+            filters: ["!^_"]
+            show_if_no_docstring: false
+
+nav:
+  - Overview: index.md
+  - Development: development.md
+  - Migration: migration.md
+  - CLI protocol: cli.md
+  - Model downloader: mdl.md
+  - MDL model fields: mdl-fields.md
+  - Memory: memory.md
+  - Worker host: worker-host.md
+  - MDL review 0.2.0: mdl-review-0.2.0.md
+  - Shared UI: ui.md
+  - Windows installer: installer.md
+  - Dependency pin: pin.md
+  - API:
+      - paths: api/paths.md
+      - branding: api/branding.md
+      - atomic: api/atomic.md
+      - hashing: api/hashing.md
+      - buildinfo: api/buildinfo.md
+      - suite_settings: api/suite_settings.md
+      - power: api/power.md
+      - gpu_lock: api/gpu_lock.md
+      - thermal: api/thermal.md
+      - gpu_probe: api/gpu_probe.md
+      - licence: api/licence.md
+      - runtime_manifest: api/runtime_manifest.md
+      - download: api/download.md
+      - mdl: api/mdl.md
+      - mdl window: api/mdl_window.md
+      - i18n: api/i18n.md
+      - cli_protocol: api/cli_protocol.md
+      - selftest: api/selftest.md
+      - ui.tokens: api/tokens.md
+      - ui.theme: api/theme.md
+      - ui.dock: api/dock.md
+      - ui.commands: api/commands.md
+      - ui.keymap: api/keymap.md
+      - ui.expert: api/expert.md
+      - ui.safety: api/safety.md
+      - ui.settings: api/settings.md
+      - ui.presets: api/presets.md
+      - ui.simple_image: api/simple-image.md
+      - ui.variants: api/variants.md
+      - ui.shell: api/shell.md
+      - ui.splash: api/splash.md
+      - provenance: api/provenance.md
+      - image: api/image.md
+      - models: api/models.md
+
+watch:
+  - src/voxprint_common

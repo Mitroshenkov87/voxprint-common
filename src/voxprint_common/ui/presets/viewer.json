@@ -1,0 +1,43 @@
+{
+  "schema": "voxprint-presets/1",
+  "groups": [
+    {
+      "id": "view",
+      "label_key": "simple.preset.view",
+      "default": "fit",
+      "options": [
+        {
+          "id": "fit",
+          "label_key": "simple.viewer.fit",
+          "values": {
+            "viewer.colour": "srgb",
+            "viewer.zoom_filter": "smooth",
+            "viewer.background": "dark"
+          }
+        },
+        {
+          "id": "full",
+          "label_key": "simple.viewer.full",
+          "values": {
+            "viewer.colour": "srgb",
+            "viewer.zoom_filter": "nearest",
+            "viewer.background": "dark"
+          }
+        },
+        {
+          "id": "enhance",
+          "label_key": "simple.viewer.enhance",
+          "available": false,
+          "reason_key": "simple.viewer.enhance.reason",
+          "action_label_key": "simple.output.install",
+          "action_id": "install.enlarge",
+          "values": {
+            "viewer.colour": "p3",
+            "viewer.zoom_filter": "smooth",
+            "viewer.background": "black"
+          }
+        }
+      ]
+    }
+  ]
+}

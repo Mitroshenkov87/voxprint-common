@@ -1,0 +1,38 @@
+{
+  "schema": "voxprint-presets/1",
+  "groups": [
+    {
+      "id": "strength",
+      "label_key": "simple.preset.strength",
+      "default": "gentle",
+      "options": [
+        {
+          "id": "gentle",
+          "label_key": "simple.preset.strength.gentle",
+          "values": {
+            "video.strength": "gentle",
+            "video.model": "standard",
+            "video.tile": 512,
+            "video.denoise": 0.2,
+            "video.encoder": "h264",
+            "video.crf": 18,
+            "video.stabilize": true
+          }
+        },
+        {
+          "id": "strong",
+          "label_key": "simple.preset.strength.strong",
+          "values": {
+            "video.strength": "strong",
+            "video.model": "fine",
+            "video.tile": 256,
+            "video.denoise": 0.5,
+            "video.encoder": "h265",
+            "video.crf": 14,
+            "video.stabilize": true
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,137 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "voxprint-common"
+version = "0.8.0"
+description = "Shared Python library for the Voxprint AI Media Suite."
+readme = "README.md"
+requires-python = ">=3.14"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{name = "Aleksandr Mitroshenkov"}]
+keywords = ["voxprint"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
+    "Typing :: Typed",
+]
+dependencies = ["cryptography>=44", "jeepney>=0.8"]
+
+[project.optional-dependencies]
+ui = ["PySide6>=6.8"]
+torch = ["torch"]
+image = ["pillow>=13.0"]
+dev = [
+    "build>=1.2",
+    "interrogate>=1.7",
+    "jsonschema>=4.23",
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.27",
+    "pillow>=13.0",
+    "pytest>=8.3",
+    "pytest-qt>=4.5",
+    "ruff>=0.8",
+]
+
+[project.scripts]
+voxprint-mdl = "voxprint_common.mdl.cli:main"
+
+[project.gui-scripts]
+voxprint-mdl-gui = "voxprint_common.mdl.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/Mitroshenkov87/voxprint-common"
+Documentation = "https://mitroshenkov87.github.io/voxprint-common/"
+Issues = "https://github.com/Mitroshenkov87/voxprint-common/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/voxprint_common"]
+
+[tool.hatch.build.targets.wheel.sources]
+"src" = ""
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/voxprint_common/py.typed" = "voxprint_common/py.typed"
+"src/voxprint_common/ui/tokens.json" = "voxprint_common/ui/tokens.json"
+"src/voxprint_common/ui/presets/canvas.json" = "voxprint_common/ui/presets/canvas.json"
+"src/voxprint_common/ui/presets/enlarge.json" = "voxprint_common/ui/presets/enlarge.json"
+"src/voxprint_common/ui/presets/audio.json" = "voxprint_common/ui/presets/audio.json"
+"src/voxprint_common/ui/presets/video.json" = "voxprint_common/ui/presets/video.json"
+"src/voxprint_common/ui/presets/text.json" = "voxprint_common/ui/presets/text.json"
+"src/voxprint_common/ui/presets/tool.json" = "voxprint_common/ui/presets/tool.json"
+"src/voxprint_common/mdl/schemas/voxprint-model.schema.json" = "voxprint_common/mdl/schemas/voxprint-model.schema.json"
+"src/voxprint_common/mdl/schemas/voxprint-app-models.schema.json" = "voxprint_common/mdl/schemas/voxprint-app-models.schema.json"
+"src/voxprint_common/mdl/data/model-index.json" = "voxprint_common/mdl/data/model-index.json"
+"src/voxprint_common/mdl/data/model-index.pin.json" = "voxprint_common/mdl/data/model-index.pin.json"
+"src/voxprint_common/mdl/data/model-index.json.sig" = "voxprint_common/mdl/data/model-index.json.sig"
+"src/voxprint_common/mdl/data/index-public.pem" = "voxprint_common/mdl/data/index-public.pem"
+"src/voxprint_common/mdl/data/icon/voxprint-mdl.svg" = "voxprint_common/mdl/data/icon/voxprint-mdl.svg"
+"src/voxprint_common/mdl/data/icon/voxprint-mdl-small.svg" = "voxprint_common/mdl/data/icon/voxprint-mdl-small.svg"
+"src/voxprint_common/mdl/data/icon/voxprint-mdl.png" = "voxprint_common/mdl/data/icon/voxprint-mdl.png"
+"src/voxprint_common/mdl/data/icon/voxprint-mdl.ico" = "voxprint_common/mdl/data/icon/voxprint-mdl.ico"
+"src/voxprint_common/mdl/data/icon/voxprint-mdl.desktop" = "voxprint_common/mdl/data/icon/voxprint-mdl.desktop"
+"src/voxprint_common/mdl/data/icon/frames/16.png" = "voxprint_common/mdl/data/icon/frames/16.png"
+"src/voxprint_common/mdl/data/icon/frames/24.png" = "voxprint_common/mdl/data/icon/frames/24.png"
+"src/voxprint_common/mdl/data/icon/frames/32.png" = "voxprint_common/mdl/data/icon/frames/32.png"
+"src/voxprint_common/mdl/data/icon/frames/48.png" = "voxprint_common/mdl/data/icon/frames/48.png"
+"src/voxprint_common/mdl/data/icon/frames/64.png" = "voxprint_common/mdl/data/icon/frames/64.png"
+"src/voxprint_common/mdl/data/icon/frames/128.png" = "voxprint_common/mdl/data/icon/frames/128.png"
+"src/voxprint_common/mdl/data/icon/frames/256.png" = "voxprint_common/mdl/data/icon/frames/256.png"
+"src/voxprint_common/mdl/data/icon/frames/1024.png" = "voxprint_common/mdl/data/icon/frames/1024.png"
+"src/voxprint_common/mdl/data/examples/pyannote-embedding.json" = "voxprint_common/mdl/data/examples/pyannote-embedding.json"
+"src/voxprint_common/mdl/data/examples/pyannote-speaker-diarization-community-1.json" = "voxprint_common/mdl/data/examples/pyannote-speaker-diarization-community-1.json"
+"src/voxprint_common/ui/locales/en.json" = "voxprint_common/ui/locales/en.json"
+"src/voxprint_common/ui/locales/de.json" = "voxprint_common/ui/locales/de.json"
+"src/voxprint_common/ui/locales/uk.json" = "voxprint_common/ui/locales/uk.json"
+"src/voxprint_common/ui/locales/lv.json" = "voxprint_common/ui/locales/lv.json"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+# pytest-qt imports Qt at startup. The suite checks that a normal import does
+# not load PySide6, so the plugin stays off unless a smoke run enables it.
+addopts = "-p no:pytest-qt"
+markers = [
+    "windows: Windows-only behaviour",
+    "posix: POSIX-only behaviour",
+]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/voxprint_common/ui/splash.py" = ["E402"]
+# Cyrillic catalog strings use letters that look like Latin.
+"src/voxprint_common/i18n/__init__.py" = ["RUF001", "RUF002", "RUF003"]
+"tests/test_mdl.py" = ["RUF001", "RUF002", "RUF003"]
+"tests/test_i18n.py" = ["RUF001", "RUF002", "RUF003"]
+"tests/test_expert.py" = ["RUF001", "RUF002", "RUF003"]
+"tests/test_i18n_check.py" = ["RUF001", "RUF002", "RUF003"]
+"tests/test_mdl_window.py" = ["RUF001", "RUF002", "RUF003"]
+"tests/test_verify_repair.py" = ["RUF001", "RUF002", "RUF003"]
+
+[tool.interrogate]
+ignore-init-method = false
+ignore-init-module = false
+ignore-magic = true
+ignore-module = false
+ignore-private = true
+ignore-semiprivate = true
+ignore-nested-functions = true
+ignore-property-decorators = true
+fail-under = 65
+exclude = ["tests", "docs", "build", "dist"]
+verbose = 1
+color = false

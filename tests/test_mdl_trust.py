@@ -1,0 +1,747 @@
+"""Signed model index and mirror policy. Fakes only; no network."""
+
+from __future__ import annotations
+
+import json
+import logging
+import urllib.parse
+from importlib.resources import files
+from pathlib import Path
+
+import jsonschema
+import pytest
+
+from voxprint_common.gpu_probe import GpuDevice, VramTier
+from voxprint_common.hashing import sha256_bytes
+from voxprint_common.mdl.catalog import load_manifest, plan_files
+from voxprint_common.mdl.cli import main
+from voxprint_common.mdl.descriptor import parse_descriptor, schema_bytes
+from voxprint_common.mdl.ed25519 import public_key, sign, verify
+from voxprint_common.mdl.fetch import FetchError, fetch_file
+from voxprint_common.mdl.index import (
+    SuiteIndexError,
+    _bundled_public_keys,
+    bundled_index_bytes,
+    load_index,
+    parse_index,
+    private_key_pem,
+    public_key_pem,
+    verify_index,
+)
+from voxprint_common.mdl.job import download
+from voxprint_common.mdl.safety import UrlGuard
+from voxprint_common.mdl.variants import chosen_variants
+from voxprint_common.mdl.views import file_set_key, inspect_view
+from voxprint_common.paths import models_dir
+
+PAYLOAD = b"voxprint-mdl-bytes-0123456789abcdef"
+DIGEST = sha256_bytes(PAYLOAD)
+HEAD = "15edeab0f7a874c27d2b38ef6ecb69106ff94df8"
+INDEX_SHA = "0d1e5ef747ca70b6960b444751fcd1ed5001aaa7bf4b7afd720f4b3df36d58be"
+_FIXTURES = Path(__file__).resolve().parent / "fixtures"
+_SEED = bytes(range(32))
+
+
+class _Reply:
+    def __init__(self, status: int, body: bytes) -> None:
+        self.status = status
+        self.headers: dict[str, str] = {}
+        self._body = body
+        self._off = 0
+
+    def read(self, size: int = -1) -> bytes:
+        if self._off >= len(self._body):
+            return b""
+        if size is None or size < 0:
+            size = len(self._body) - self._off
+        chunk = self._body[self._off : self._off + size]
+        self._off += len(chunk)
+        return chunk
+
+    def close(self) -> None:
+        return None
+
+
+class _Site:
+    """Path to a status and a body. ``slow`` advances the shared clock."""
+
+    def __init__(self) -> None:
+        self.routes: dict[str, list[tuple[int, bytes]]] = {}
+        self.calls: list[str] = []
+        self.slow: set[str] = set()
+        self.clock = [0.0]
+        self.slept: list[float] = []
+
+    def add(self, path: str, status: int, body: bytes) -> None:
+        self.routes.setdefault(path, []).append((status, body))
+
+    def __call__(self, request: object, timeout: float) -> _Reply:
+        del timeout
+        url = str(getattr(request, "full_url", ""))
+        path = urllib.parse.urlparse(url).path
+        self.calls.append(path)
+        planned = self.routes[path]
+        status, body = planned[0] if len(planned) == 1 else planned.pop(0)
+        header = getattr(request, "headers", None)
+        ranged = header.get("Range") if header is not None else None
+        if status == 200 and ranged:
+            start_text, _, end_text = str(ranged).removeprefix("bytes=").partition("-")
+            start = int(start_text) if start_text else 0
+            end = int(end_text) if end_text else len(body) - 1
+            body = body[start : end + 1]
+            status = 206
+        if path in self.slow:
+            self.clock[0] += 30.0
+        return _Reply(status, body)
+
+    def now(self) -> float:
+        return self.clock[0]
+
+    def sleep(self, seconds: float) -> None:
+        self.slept.append(seconds)
+        self.clock[0] += seconds
+
+
+def _rfc_vector() -> None:
+    seed = bytes.fromhex("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60")
+    pub = bytes.fromhex("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a")
+    signature = bytes.fromhex(
+        "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e06522490155"
+        "5fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b"
+    )
+    assert public_key(seed) == pub
+    assert sign(b"", seed) == signature
+    assert verify(b"", signature, pub)
+
+
+def _index_body(*, serial: int, generated_at: str = "2026-10-18T00:00:00Z") -> bytes:
+    document = {
+        "head": "f" * 40,
+        "serial": serial,
+        "generated_at": generated_at,
+        "models": [
+            {
+                "id": "painter",
+                "repo": "org/painter",
+                "revision": "abc",
+                "sha256": "ab" * 32,
+            }
+        ],
+    }
+    return json.dumps(document).encode()
+
+
+def _signed_site(body: bytes, signature: bytes | None) -> _Site:
+    site = _Site()
+    site.add("/index.json", 200, body)
+    if signature is None:
+        site.add("/index.json.sig", 404, b"")
+    else:
+        site.add("/index.json.sig", 200, signature)
+    return site
+
+
+def _load(site: _Site):
+    return load_index(
+        opener=site,
+        url="http://127.0.0.1/index.json",
+        guard=UrlGuard.loopback(),
+        public_keys=(public_key(_SEED),),
+    )
+
+
+def test_bundled_index_is_the_serial_14_snapshot() -> None:
+    raw = bundled_index_bytes()
+    assert sha256_bytes(raw) == INDEX_SHA
+    index = load_index(remote=False)
+    assert index.source == "bundled"
+    assert index.fallback == ""
+    assert index.head == HEAD
+    assert index.serial == 14
+    assert index.generated_at == "2026-11-15T12:22:48Z"
+    assert len(index.entries) == 30
+    assert index.get("gemma4-31b") is not None
+    assert index.get("huihui-qwen36-27b") is not None
+    assert index.get("qwen3-4b-writer") is not None
+    assert index.get("z-image-turbo-bf16") is not None
+    assert index.get("z-image-turbo-bf16-16gb") is not None
+    signature = files("voxprint_common.mdl.data").joinpath("model-index.json.sig").read_bytes()
+    assert verify_index(raw, signature, _bundled_public_keys())
+
+
+def test_bundled_index_has_z_image_turbo_default_and_optional_full_models() -> None:
+    index = load_index(remote=False)
+    assert index.get("moss-image-compressed") is None
+    turbo = index.get("z-image-turbo")
+    assert turbo is not None
+    assert turbo.repo == "Mitroshenkov87/voxprint-mirror-z-image-turbo"
+    assert turbo.revision == "a853c26eb946b9010b4bd142a2ad1439d83e7896"
+    assert turbo.sha256 == "fefa994cbef9d62201089f61d0bde2914ba0e826650f323816ec9b562965168e"
+    assert turbo.size == 11047
+    assert turbo.license == "Apache-2.0"
+    assert turbo.default is True
+    assert turbo.optional is False
+    assert turbo.note.startswith("Default generation model: Z-Image-Turbo")
+    assert index.get("mirror-z-image-turbo") is None
+    assert index.get("mirror-z-image-turbo-controlnet-union-2.1") is not None
+    z_image = index.get("z-image")
+    assert z_image is not None
+    assert z_image.repo == "datasets/Mitroshenkov87/voxprint-model-index"
+    assert z_image.revision == "5b7bdb4062d5bbc080b406c6bb3cb0a724438003"
+    assert z_image.sha256 == "06c2c55b02c511a9b63a006e0847ad2e152b92cc4564809f1880f604f5d6d6c8"
+    assert z_image.size == 4275
+    assert z_image.default is False
+    assert z_image.optional is True
+    assert "training base" in z_image.note
+    assert index.get("moss-image-base") is None
+    assert index.get("moss-image-sft") is None
+    assert index.get("moss") is None
+    assert sum(1 for entry in index.entries if entry.default) == 1
+
+
+def test_index_entries_allow_documented_optional_keys() -> None:
+    rows = [
+        {"id": "plain", "repo": "org/plain", "revision": "main", "sha256": "ab" * 32},
+        {
+            "id": "rich",
+            "repo": "org/rich",
+            "revision": "main",
+            "sha256": "cd" * 32,
+            "note": "n",
+            "size": 3,
+            "license": "Apache-2.0",
+            "default": True,
+            "optional": False,
+        },
+    ]
+    plain, rich = parse_index(rows)
+    assert (plain.id, plain.repo, plain.revision, plain.sha256) == (
+        "plain",
+        "org/plain",
+        "main",
+        "ab" * 32,
+    )
+    assert plain.note == ""
+    assert plain.size is None
+    assert plain.license == ""
+    assert plain.default is False
+    assert plain.optional is False
+    assert rich.sha256 == "cd" * 32
+    assert rich.note == "n"
+    assert rich.size == 3
+    assert rich.license == "Apache-2.0"
+    assert rich.default is True
+    assert rich.optional is False
+
+
+def test_index_entries_reject_unknown_keys_and_bad_optional_values() -> None:
+    base = {"id": "a", "repo": "org/a", "revision": "main", "sha256": "ab" * 32}
+    with pytest.raises(SuiteIndexError):
+        parse_index([{**base, "mystery": "x"}])
+    with pytest.raises(SuiteIndexError):
+        parse_index([{key: value for key, value in base.items() if key != "sha256"}])
+    for bad_size in (-1, "1", 1.5, True):
+        with pytest.raises(SuiteIndexError):
+            parse_index([{**base, "size": bad_size}])
+    for bad_bool in ("yes", 1, 0):
+        with pytest.raises(SuiteIndexError):
+            parse_index([{**base, "default": bad_bool}])
+        with pytest.raises(SuiteIndexError):
+            parse_index([{**base, "optional": bad_bool}])
+    with pytest.raises(SuiteIndexError):
+        parse_index([{**base, "note": 3}])
+    with pytest.raises(SuiteIndexError):
+        parse_index([{**base, "license": 3}])
+
+
+def test_live_signed_index_verifies_with_the_bundled_key() -> None:
+    raw = (_FIXTURES / "live-index.json").read_bytes()
+    signature = (_FIXTURES / "live-index.json.sig").read_bytes()
+    assert verify_index(raw, signature, _bundled_public_keys())
+    document = json.loads(raw)
+    assert isinstance(document, dict) and document["serial"] >= 9
+    assert len(parse_index(document)) == len(document["models"])
+
+
+def test_signed_index_is_accepted(caplog: pytest.LogCaptureFixture) -> None:
+    _rfc_vector()
+    body = _index_body(serial=14)
+    site = _signed_site(body, sign(body, _SEED))
+    with caplog.at_level(logging.WARNING):
+        index = _load(site)
+    assert index.source == "remote"
+    assert index.fallback == ""
+    assert [entry.id for entry in index.entries] == ["painter"]
+    assert index.serial == 14
+    assert caplog.text == ""
+
+
+def test_bad_or_missing_signature_falls_back(caplog: pytest.LogCaptureFixture) -> None:
+    body = _index_body(serial=10)
+    missing = _signed_site(body, None)
+    with caplog.at_level(logging.WARNING):
+        unsigned = _load(missing)
+    assert unsigned.source == "bundled"
+    assert unsigned.fallback == "remote index signature is missing"
+    assert "remote index signature is missing" in caplog.text
+    assert len(unsigned.entries) == 30
+
+    bad = bytearray(sign(body, _SEED))
+    bad[-1] ^= 0x01
+    site = _signed_site(body, bytes(bad))
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        forged = _load(site)
+    assert forged.source == "bundled"
+    assert forged.fallback == "remote index signature is invalid"
+    assert "remote index signature is invalid" in caplog.text
+
+
+def test_signed_serial_9_remote_does_not_hide_the_bundled_turbo_default(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A live signed serial-9 index must not replace the serial-14 bundle."""
+    body = _index_body(serial=9)
+    site = _signed_site(body, sign(body, _SEED))
+    with caplog.at_level(logging.WARNING):
+        index = _load(site)
+    assert index.source == "bundled"
+    assert "older than bundled pin" in index.fallback
+    assert index.fallback in caplog.text
+    turbo = index.get("z-image-turbo")
+    assert turbo is not None
+    assert turbo.default is True
+    assert index.get("mirror-z-image-turbo") is None
+
+
+def test_older_index_is_rejected(caplog: pytest.LogCaptureFixture) -> None:
+    body = _index_body(serial=0)
+    site = _signed_site(body, sign(body, _SEED))
+    with caplog.at_level(logging.WARNING):
+        index = _load(site)
+    assert index.source == "bundled"
+    assert "older than bundled pin" in index.fallback
+    assert index.fallback in caplog.text
+
+    stamped = _index_body(serial=15, generated_at="2020-01-01T00:00:00Z")
+    # serial is present and newer, so the old timestamp does not win
+    newer = _load(_signed_site(stamped, sign(stamped, _SEED)))
+    assert newer.source == "remote"
+
+    undated = {
+        "generated_at": "2020-01-01T00:00:00Z",
+        "models": [
+            {"id": "painter", "repo": "org/painter", "revision": "abc", "sha256": "ab" * 32}
+        ],
+    }
+    raw = json.dumps(undated).encode()
+    old = _load(_signed_site(raw, sign(raw, _SEED)))
+    assert old.source == "bundled"
+    assert "generated_at" in old.fallback
+
+
+def test_check_prints_the_fallback(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    index = load_index(remote=False)
+    fallen = type(index)(
+        entries=index.entries,
+        source="bundled",
+        sha256=index.sha256,
+        head=index.head,
+        serial=index.serial,
+        generated_at=index.generated_at,
+        fallback="remote index signature is missing",
+    )
+    monkeypatch.setattr("voxprint_common.mdl.cli.load_index", lambda: fallen)
+    assert main(["--check"]) == 0
+    err = capsys.readouterr().err
+    assert "source: bundled" in err
+    assert "fallback: remote index signature is missing" in err
+    assert HEAD in err
+
+
+def test_index_sign_and_verify(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    body = _index_body(serial=10)
+    target = tmp_path / "index.json"
+    target.write_bytes(body)
+    private = tmp_path / "index-private.pem"
+    private.write_text(private_key_pem(_SEED), encoding="utf-8")
+    monkeypatch.setenv("VOXPRINT_MDL_INDEX_KEY_FILE", str(private))
+    assert main(["index", "sign", str(target)]) == 0
+    signature = target.with_name("index.json.sig")
+    assert signature.is_file()
+    public = tmp_path / "index-public.pem"
+    public.write_text(public_key_pem(public_key(_SEED)), encoding="utf-8")
+    assert main(["index", "verify", str(target), "--public-key", str(public)]) == 0
+    target.write_bytes(body + b" ")
+    assert main(["index", "verify", str(target), "--public-key", str(public)]) == 2
+    assert verify_index(body, signature.read_bytes(), (public_key(_SEED),))
+
+
+def test_strict_priority_falls_back_only_on_404_hash_or_outage(tmp_path: Path) -> None:
+    guard = UrlGuard.loopback()
+
+    slow = _Site()
+    slow.add("/author", 200, PAYLOAD)
+    slow.add("/backup", 200, PAYLOAD)
+    slow.slow.add("/author")
+    fetch_file(
+        tmp_path / "slow.bin",
+        ["http://127.0.0.1/author", "http://127.0.0.1/backup"],
+        sha256=DIGEST,
+        size=len(PAYLOAD),
+        probe_bytes=4,
+        batch_bytes=8,
+        mirror_policy="strict-priority",
+        opener=slow,
+        clock=slow.now,
+        sleep=slow.sleep,
+        guard=guard,
+        speed_floor=1,
+    )
+    assert "/backup" not in slow.calls
+    assert (tmp_path / "slow.bin").read_bytes() == PAYLOAD
+
+    missing = _Site()
+    missing.add("/author", 404, b"")
+    missing.add("/backup", 200, PAYLOAD)
+    fetch_file(
+        tmp_path / "missing.bin",
+        ["http://127.0.0.1/author", "http://127.0.0.1/backup"],
+        sha256=DIGEST,
+        size=len(PAYLOAD),
+        probe_bytes=0,
+        batch_bytes=len(PAYLOAD),
+        mirror_policy="strict-priority",
+        opener=missing,
+        clock=missing.now,
+        sleep=missing.sleep,
+        guard=guard,
+        max_failures=5,
+    )
+    assert missing.calls.count("/author") == 1
+    assert missing.slept == []
+    assert (tmp_path / "missing.bin").read_bytes() == PAYLOAD
+
+    mismatch = _Site()
+    mismatch.add("/author", 200, b"x" * len(PAYLOAD))
+    mismatch.add("/backup", 200, PAYLOAD)
+    fetch_file(
+        tmp_path / "mismatch.bin",
+        ["http://127.0.0.1/author", "http://127.0.0.1/backup"],
+        sha256=DIGEST,
+        size=len(PAYLOAD),
+        probe_bytes=0,
+        batch_bytes=len(PAYLOAD),
+        mirror_policy="strict-priority",
+        opener=mismatch,
+        clock=mismatch.now,
+        sleep=mismatch.sleep,
+        guard=guard,
+    )
+    assert mismatch.calls.count("/author") == 1
+    assert (tmp_path / "mismatch.bin").read_bytes() == PAYLOAD
+
+    outage = _Site()
+    outage.add("/author", 500, b"")
+    outage.add("/author", 500, b"")
+    outage.add("/backup", 200, PAYLOAD)
+    fetch_file(
+        tmp_path / "outage.bin",
+        ["http://127.0.0.1/author", "http://127.0.0.1/backup"],
+        sha256=DIGEST,
+        size=len(PAYLOAD),
+        probe_bytes=0,
+        batch_bytes=len(PAYLOAD),
+        mirror_policy="strict-priority",
+        opener=outage,
+        clock=outage.now,
+        sleep=outage.sleep,
+        guard=guard,
+        max_failures=2,
+        backoff_base=0.01,
+        backoff_max=0.01,
+    )
+    assert outage.calls.count("/author") == 2
+    assert outage.slept
+    assert (tmp_path / "outage.bin").read_bytes() == PAYLOAD
+
+    denied = _Site()
+    denied.add("/author", 403, b"")
+    denied.add("/backup", 200, PAYLOAD)
+    with pytest.raises(FetchError):
+        fetch_file(
+            tmp_path / "denied.bin",
+            ["http://127.0.0.1/author", "http://127.0.0.1/backup"],
+            sha256=DIGEST,
+            size=len(PAYLOAD),
+            probe_bytes=0,
+            batch_bytes=len(PAYLOAD),
+            mirror_policy="strict-priority",
+            opener=denied,
+            clock=denied.now,
+            sleep=denied.sleep,
+            guard=guard,
+            max_failures=4,
+        )
+    assert "/backup" not in denied.calls
+
+
+def test_race_skips_a_404_immediately(tmp_path: Path) -> None:
+    site = _Site()
+    site.add("/author", 404, b"")
+    site.add("/backup", 200, PAYLOAD)
+    fetch_file(
+        tmp_path / "race.bin",
+        ["http://127.0.0.1/author", "http://127.0.0.1/backup"],
+        sha256=DIGEST,
+        size=len(PAYLOAD),
+        probe_bytes=0,
+        batch_bytes=len(PAYLOAD),
+        mirror_policy="race",
+        opener=site,
+        clock=site.now,
+        sleep=site.sleep,
+        guard=UrlGuard.loopback(),
+        max_failures=5,
+        backoff_base=2,
+    )
+    assert site.calls.count("/author") == 1
+    assert site.slept == []
+    assert (tmp_path / "race.bin").read_bytes() == PAYLOAD
+
+
+def test_per_file_sources_are_honoured(tmp_path: Path) -> None:
+    gemma = json.loads((_FIXTURES / "voxprint-gemma4-31b.json").read_text(encoding="utf-8"))
+    qwen = json.loads((_FIXTURES / "voxprint-huihui-qwen36-27b.json").read_text(encoding="utf-8"))
+    schema = json.loads(schema_bytes())
+    jsonschema.Draft202012Validator(schema).validate(gemma)
+    jsonschema.Draft202012Validator(schema).validate(qwen)
+    author_first = parse_descriptor(qwen)
+    assert author_first.mirrors[0].ref.startswith("huihui-ai/")
+    assert author_first.mirrors[1].ref.startswith("Mitroshenkov87/")
+    assert author_first.policy_for(author_first.files[0].path) == "race"
+
+    ours = gemma["mirrors"][1]
+    gemma["mirror_policy"] = "strict-priority"
+    for row in gemma["files"]:
+        if row["path"] == "IQ3_XXS.gguf":
+            row["sources"] = [ours]
+    gemma["file_groups"] = [{"paths": ["imatrix.gguf", "imatrix.gguf.sha256"], "sources": [ours]}]
+    parsed = parse_descriptor(gemma)
+    assert parsed.mirrors[0].ref.startswith("paperscarecrow/")
+    assert parsed.policy_for("gemma-4-31b-abliterated-Q4_K_M.gguf") == "strict-priority"
+    manifest_path = tmp_path / "voxprint-app-models.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema": "voxprint-app-models/1",
+                "app_id": "plotweaver",
+                "tiers": {"24gb": ["gemma4-31b"], "16gb": [], "8gb": []},
+                "runtimes": [],
+                "optional": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = load_manifest(manifest_path, descriptors={"gemma4-31b": parsed})
+    planned = plan_files(
+        [manifest],
+        VramTier.GB24,
+        only=["gemma4-31b"],
+        memory_gib=23.5,
+        models_root=tmp_path / "models",
+    )
+    by_name = {item.name: item for item in planned}
+    shared = by_name["gemma-4-31b-abliterated-Q4_K_M.gguf"]
+    assert "paperscarecrow" in shared.urls[0]
+    assert "Mitroshenkov87" in shared.urls[1]
+    assert shared.mirror_policy == "strict-priority"
+    own_quant = by_name["IQ3_XXS.gguf"]
+    assert len(own_quant.urls) == 1
+    assert "Mitroshenkov87" in own_quant.urls[0]
+    assert "paperscarecrow" not in own_quant.urls[0]
+    for name in ("imatrix.gguf", "imatrix.gguf.sha256"):
+        urls = by_name[name].urls
+        assert len(urls) == 1
+        assert "paperscarecrow" not in urls[0]
+
+
+def test_failed_default_switches_to_the_recorded_fallback(tmp_path: Path) -> None:
+    fp32 = b"author-fp32-transformer" * 4
+    hf = {"kind": "hf", "revision": "main"}
+    document = {
+        "schema": "voxprint-model/1",
+        "id": "turbo",
+        "display_name": "Turbo",
+        "app_ids": ["canvas"],
+        "task": "text-to-image",
+        "license": "apache-2.0",
+        "files": [{"path": "transformer/w.bin", "size": len(PAYLOAD), "sha256": DIGEST}],
+        "mirrors": [{**hf, "ref": "Mitroshenkov87/turbo-bf16", "ours": True}],
+        "mirror_policy": "strict-priority",
+        "prebuilt": [
+            {
+                "id": "author-fp32",
+                "role": "fallback",
+                "replaces": "transformer/",
+                "files": [
+                    {
+                        "path": "transformer/w32.bin",
+                        "size": len(fp32),
+                        "sha256": sha256_bytes(fp32),
+                        "sources": [{**hf, "ref": "Author/turbo"}],
+                    }
+                ],
+            }
+        ],
+        "tier": {"min_vram_gib": 0, "recommended_vram_gib": 0, "gpu_min_cc": 0},
+        "runtime": {"engine": "diffusers", "version_req": ">=0.37"},
+        "base_model": "",
+        "card_url": "",
+        "flags": [],
+        "on_demand": False,
+        "build": {"forge_version": "0.1.0", "tag": "", "date": "2026-10-18"},
+    }
+    jsonschema.Draft202012Validator(json.loads(schema_bytes())).validate(document)
+    manifest_path = tmp_path / "voxprint-app-models.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema": "voxprint-app-models/1",
+                "app_id": "canvas",
+                "tiers": {"8gb": ["turbo"]},
+                "runtimes": [],
+                "optional": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = load_manifest(manifest_path, descriptors={"turbo": parse_descriptor(document)})
+    planned = plan_files([manifest], VramTier.GB8)
+    assert [item.name for item in planned] == ["transformer/w.bin"]
+    assert planned[0].fallback_key == "turbo:author-fp32"
+    planned[0].urls = ("http://127.0.0.1/bf16",)
+    planned[0].fallback_files[0].urls = ("http://127.0.0.1/fp32",)
+    site = _Site()
+    site.add("/bf16", 404, b"")
+    site.add("/fp32", 200, fp32)
+    outcome = download(
+        planned=planned,
+        devices=[GpuDevice(0, "Test GPU", "610.00", (8, 9), 8192)],
+        opener=site,
+        guard=UrlGuard.loopback(),
+        disk_free=lambda _path: 1 << 40,
+        priority=False,
+        fetch_options={"clock": site.now, "sleep": site.sleep},
+    )
+    assert outcome.code == 0, outcome.message
+    assert site.calls[-1] == "/fp32"
+    assert chosen_variants() == {"turbo": "author-fp32"}
+    again = plan_files([manifest], VramTier.GB8)
+
+    assert [item.name for item in again] == ["transformer/w32.bin"]
+
+
+def test_mid_download_fallback_builds_one_combined_view(tmp_path: Path) -> None:
+    config = b"shared-config-json"
+    default_w = b"default-transformer-bin"
+    fallback_w = b"fallback-transformer-bin"
+    hf = {"kind": "hf", "revision": "main"}
+    document = {
+        "schema": "voxprint-model/1",
+        "id": "voice",
+        "display_name": "Voice",
+        "app_ids": ["canvas"],
+        "task": "text-to-speech",
+        "license": "apache-2.0",
+        "files": [
+            {"path": "config.json", "size": len(config), "sha256": sha256_bytes(config)},
+            {
+                "path": "transformer/w.bin",
+                "size": len(default_w),
+                "sha256": sha256_bytes(default_w),
+            },
+        ],
+        "mirrors": [{**hf, "ref": "org/voice", "ours": True}],
+        "mirror_policy": "strict-priority",
+        "prebuilt": [
+            {
+                "id": "author-fp32",
+                "role": "fallback",
+                "replaces": "transformer/",
+                "files": [
+                    {
+                        "path": "transformer/w32.bin",
+                        "size": len(fallback_w),
+                        "sha256": sha256_bytes(fallback_w),
+                        "sources": [{**hf, "ref": "Author/voice"}],
+                    }
+                ],
+            }
+        ],
+        "tier": {"min_vram_gib": 0, "recommended_vram_gib": 0, "gpu_min_cc": 0},
+        "runtime": {"engine": "diffusers", "version_req": ">=0.37"},
+        "base_model": "",
+        "card_url": "",
+        "flags": [],
+        "on_demand": False,
+        "build": {"forge_version": "0.1.0", "tag": "", "date": "2026-10-18"},
+    }
+    jsonschema.Draft202012Validator(json.loads(schema_bytes())).validate(document)
+    manifest_path = tmp_path / "voxprint-app-models.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema": "voxprint-app-models/1",
+                "app_id": "canvas",
+                "tiers": {"8gb": ["voice"]},
+                "runtimes": [],
+                "optional": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = load_manifest(manifest_path, descriptors={"voice": parse_descriptor(document)})
+    planned = plan_files([manifest], VramTier.GB8)
+    by_name = {item.name: item for item in planned}
+    assert set(by_name) == {"config.json", "transformer/w.bin"}
+    assert not by_name["config.json"].fallback_key
+    assert by_name["transformer/w.bin"].fallback_key == "voice:author-fp32"
+    by_name["config.json"].urls = ("http://127.0.0.1/config",)
+    by_name["transformer/w.bin"].urls = ("http://127.0.0.1/default-w",)
+    by_name["transformer/w.bin"].fallback_files[0].urls = ("http://127.0.0.1/fallback-w",)
+    site = _Site()
+    site.add("/config", 200, config)
+    site.add("/default-w", 404, b"")
+    site.add("/fallback-w", 200, fallback_w)
+    outcome = download(
+        planned=planned,
+        devices=[GpuDevice(0, "Test GPU", "610.00", (8, 9), 8192)],
+        opener=site,
+        guard=UrlGuard.loopback(),
+        disk_free=lambda _path: 1 << 40,
+        priority=False,
+        fetch_options={"clock": site.now, "sleep": site.sleep},
+    )
+    assert outcome.code == 0, outcome.message
+    combined = {
+        "config.json": sha256_bytes(config),
+        "transformer/w32.bin": sha256_bytes(fallback_w),
+    }
+    default = {
+        "config.json": sha256_bytes(config),
+        "transformer/w.bin": sha256_bytes(default_w),
+    }
+    spare = {"transformer/w32.bin": sha256_bytes(fallback_w)}
+    root = models_dir()
+    folders = sorted((root / "views" / "canvas").glob("voice-*"))
+    assert [folder.name for folder in folders] == [f"voice-{file_set_key(combined)}"]
+    assert inspect_view(root, "voice", combined, "canvas") == "ok"
+    assert inspect_view(root, "voice", default, "canvas") == "absent"
+    assert inspect_view(root, "voice", spare, "canvas") == "absent"
+    view = folders[0]
+    assert (view / "config.json").is_file()
+    assert (view / "transformer" / "w32.bin").is_file()
+    assert not (view / "transformer" / "w.bin").exists()

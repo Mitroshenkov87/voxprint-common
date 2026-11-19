@@ -1,0 +1,457 @@
+# Model downloader
+
+VOXPrint MDL is the suite's model downloader. The display name lives in `voxprint_common.mdl.DISPLAY_NAME`. The command is `voxprint-mdl`, and `python -m voxprint_common.mdl` runs the same entry point.
+
+Audiobook Builder, Plotweaver, Movie Dubber, Clarity, Enlarge, and Canvas do not download models. The installer copies the app, then runs this command. The app opens its own window only after the status file says ready.
+
+## What the installer runs
+
+MDL never starts an app window. The installer copies the app, enqueues the models, then waits until the status file is ready. It must not open the app before that.
+
+```bash
+voxprint-mdl enqueue --app enlarge --manifest "/opt/voxprint-ai-suite/enlarge/mdl.json"
+voxprint-mdl download --app enlarge --manifest "/opt/voxprint-ai-suite/enlarge/mdl.json" --gui
+```
+
+`download` enqueues and then runs the worker, or attaches if another process already holds it. `enqueue` only appends the job. `status --wait` attaches until the queue is idle. On Windows the manifest path is `C:\Program Files\VOXPrint AI Suite\Enlarge\mdl.json` (or `voxprint-app-models.json`). Untargeted planning uses the card's VRAM tier list; `--all-tiers` on `plan`, `download`, and `enqueue` includes models above the card's tier, warning about VRAM instead of skipping them. A model named with `--model <id>` is accepted even above the card's tier, the way the manage page adds it.
+
+When the bytes are already on disk, adopt them instead of downloading:
+
+```bash
+voxprint-mdl adopt --app canvas --from D:\models --from E:\incoming
+voxprint-mdl --json adopt --dry-run --app canvas --manifest ./mdl.json --from ./drop
+```
+
+`adopt` plans the same files as `download`, including `--model` when a model is on demand. For each file it looks in every `--from` directory. A file whose path relative to that directory equals the descriptor path wins. Otherwise the first file with the same filename and size is the candidate. Candidates are hashed one at a time. With `--gui` that hash runs on the progress window's worker, and the bar advances as each file is read.
+
+A digest that matches the descriptor is stored at `<models_dir>\blobs\<sha256>`. An existing blob of that name is reused when it is already the right bytes. A leftover file there is replaced. Otherwise adopt hardlinks the candidate on the same volume, or copies it when a hardlink cannot be created. The source file is never deleted or moved. The blob is marked `.verified` and the app is added as a ref. When every file of a Canvas model is in the blob store, adopt builds `<models_dir>\views\canvas\<model-id>-<12 hex>\`. The 12 hex digits are the first 12 of the SHA-256 of the sorted `path<TAB>sha256` lines, which is the folder Canvas rc.28 opens. Each entry is a hard link to its blob, and `.voxprint-view.json` is schema 1 with `key` and `files`. Post-install hooks run when every planned file was adopted or reused, the same point as a download. A download builds that Canvas view too.
+
+A file that is missing, the wrong size, or the wrong digest is listed in the result and left for `download`. The command still exits 0. `ready` is true only when nothing was skipped. `--dry-run` reports path and size matches (`would_adopt`) and does not hash, link, or copy. A second run reuses the verified blob. A source that is already that blob's inode is not read again. A separate copy is hashed and listed as `duplicate`, with `path`, `bytes`, and `blob`, plus `reclaimable_bytes` for the bytes a later hardlink could free. `--json` carries the same rows. The adopted, reused, skipped, and would-adopt counts are unchanged.
+
+When the blobs are already present and the legacy folders are still full copies, reclaim the disk with `cleanup`. The default is a dry run:
+
+```bat
+voxprint-mdl cleanup --app canvas --manifest "C:\Program Files\VOXPrint AI Suite\Canvas\mdl.json" --legacy "%LOCALAPPDATA%\VOXPrint AI Suite\models\Tongyi-MAI--Z-Image-Turbo" --legacy "%LOCALAPPDATA%\VOXPrint AI Suite\models\huihui-ai--Huihui-Qwen3-4B-Instruct-2507-abliterated"
+```
+
+`--apply --mode link` replaces each hash-matched file with a hardlink to `blobs\<sha256>`. The link is created under a temporary name in the same directory, then renamed over the original, so a cancelled run leaves the original file or the hardlink. A link that fails, including a file on another volume, is skipped. Nothing is copied. `--mode delete` removes a file only after a fresh SHA-256 of the file and of the blob match. The hash cache is not enough. Empty directories go away only when every file that was in them was verified. A file with no matching blob is `unique` and stays. `--gc` lists blobs that no view, app ref, or manifest names, and removes them only with `--apply`. Model paths in `shared\manifest.json` that still name a legacy file are pointed at the blob first, and the old path is kept as `retargeted_from`. Schema stays 1. A second run changes nothing.
+
+```bat
+voxprint-mdl cleanup --apply --mode link --app canvas --manifest "C:\Program Files\VOXPrint AI Suite\Canvas\mdl.json" --legacy "%LOCALAPPDATA%\VOXPrint AI Suite\models\Tongyi-MAI--Z-Image-Turbo" --legacy "%LOCALAPPDATA%\VOXPrint AI Suite\models\huihui-ai--Huihui-Qwen3-4B-Instruct-2507-abliterated"
+```
+
+`download` uses the same blob. A finished `blobs\<sha256>` of the right size is not fetched again: the `.verified` marker is enough, and the digest is read only when that marker is missing. A fetch writes that marker when the file lands, and again when a hash confirms a blob that was already there.
+
+`--gui` opens the download window. It needs `voxprint-common[ui]`. Labels come from `voxprint_common.i18n` (English, German, Ukrainian, Latvian). Without `--gui` the job is headless and suitable for a silent install. A hook failure uses exit code 2. The window's Retry re-queues that failed job's exact models and manifests; it never starts an empty job.
+
+Apps keep a Manage models button and drop their own download screens. The button runs:
+
+```bash
+voxprint-mdl-gui --app clarity
+```
+
+That focuses the single window on the manage page for that app. `voxprint-mdl-gui` is the windowed entry point and does not open a console. `voxprint-mdl --gui` is the console script and keeps one. `voxprint-mdl worker` keeps the queue and the window process running; `voxprint-mdl worker --gui [--app <id>]` opens the progress window, or asks the running worker to show it (GUI socket first, then the instance IPC, carrying the Wayland/X session variables) and exits 0. A second launch, from another installer or from Manage models, focuses the window that is already open. New files appear in the same queue, grouped by app. Closing the window does not cancel the transfer. On Windows the process stays in the notification area when a tray icon is available. Otherwise the window says that downloads continue in the background.
+
+Omit `--manifest` to discover every installed app. Discovery reads `<home>/state/installed-apps.json` when that file exists (`{"schema": 1, "apps": [{"id": "enlarge", "path": "..."}]}`) and still scans the default install folders, so the first app that registers itself cannot hide another installed app. An empty registry file falls through to that folder scan. The suite root is `VOXPRINT_SUITE_ROOT`, otherwise `%PROGRAMFILES%\VOXPrint AI Suite\<App Name>` on Windows and `/opt/voxprint-ai-suite/<app>` on Linux. Each discovered folder is then read as `mdl.json` or `voxprint-app-models.json`.
+
+`--json` prints progress lines and one result line on stdout. `--dry-run` plans and checks free disk space. It does not enqueue and does not fetch. Both flags may sit before or after the subcommand.
+
+```bash
+voxprint-mdl --json download --dry-run --manifest ./mdl.json
+voxprint-mdl enqueue --app enlarge --json
+voxprint-mdl plan
+voxprint-mdl adopt --app canvas --from D:\models
+voxprint-mdl verify
+voxprint-mdl status --json --wait
+```
+
+From Python, `enqueue(app)` returns a job id and `ensure_ready(app)` enqueues, runs or attaches, and returns `Ready` or `Failed`.
+
+## Installer integration
+
+MDL is universal across the suite: there is one shared `voxprint-mdl`, one shared model index, and one shared blob store. An online installer does not ship or fetch its own copy of either; it calls the installed `voxprint-mdl`, and each app checks only its own models through it. Two commands are the stable, non-interactive surface for this. Neither opens a window; neither prompts.
+
+```bash
+voxprint-mdl ensure --app-manifest "/opt/voxprint-ai-suite/enlarge/mdl.json" --json
+voxprint-mdl verify --app-manifest "/opt/voxprint-ai-suite/enlarge/mdl.json" --json
+```
+
+`--app-manifest PATH` is an alias of `--manifest` on every subcommand that takes a manifest, so an app can pass its own `mdl.json` (or `voxprint-app-models.json`) directly. `ensure` reads the app id from the manifest (`--app` is optional; a mismatch is a usage error, exit 1), enqueues that app's planned models, and runs or attaches to the single worker — the same queue and download path as `download`, never a second downloader. `--model <id>` adds on-demand models; `--dry-run` builds the plan and checks free disk space without fetching or enqueueing.
+
+Files already in the shared store are reused, never downloaded twice: a finished blob of the right size with its `.verified` marker is enough, and `ensure` only adds this app's ref to the shared component. A second app whose manifest names the same sha256 gets the bytes for free and shares the component.
+
+With `--json` the last stdout line is one result object. Besides the existing fields it carries `app`, `ready`, a `models` list with one row per planned model, and `safety_gaps`:
+
+```json
+{"type":"result","ok":true,"code":0,"message":"ready","ready":true,"state":"ready","jobs":[],"app":"enlarge","models":[{"id":"upscaler","share_key":"model-1a2b3c4d5e6f","state":"downloaded","bytes":144}],"safety_gaps":[]}
+```
+
+Each `models` row has `id`, `share_key` (repo+revision, or the `model-<sha12>` fallback), `state`, and `bytes`. `state` is `reused` when the bytes were already in the shared store, `downloaded` when this run fetched them, `ok` after a verify hash check, `stub` after a verify whose model view is a stub or absent while the blobs are present (rebuild it with `verify --repair` or `repair-store`), `missing` or `corrupt` when the shared copy is absent or bad, and `unavailable` for manifest rows marked `status: unavailable`. The result also carries a `views` list with one `{app, model, folder, before, after}` row per app view the plan calls for.
+
+`ready` is false when any model row is `missing`, `corrupt`, or `stub`, or when `safety_gaps` is non-empty. The list comes from `voxprint_common.mdl.readiness.shared_safety_gaps(app)` — one `{share_key, model_id, state}` row per shared safety copy that is missing, corrupt, or hash-mismatched — and the gate fails closed: both commands exit 2 with `ready` false, so an installer must not open the app. The remaining exit codes are unchanged: 0 ready, 1 usage, 2 failed, 3 cancelled.
+
+## Queue
+
+There is one queue, `<home>/state/mdl-queue.json`, schema 1, UTF-8, written atomically under `mdl-queue.lock`. Installers and apps only enqueue. One worker holds `mdl-worker.lock`. Everyone else leaves the job in the queue or attaches through status and the progress events. A crash leaves jobs in `running` and `.partial` files in place; the next worker resumes them with HTTP Range. Files already in the shared models directory are not downloaded again: a matching size plus a `.verified` marker is enough, and the digest is read only when that marker is missing. The app is still added as a ref.
+
+Two apps that need the same sha256 share one download. The default is two files at a time (`mdl_parallel_files` in the suite settings, 1 through 8). A request that arrives while the worker is running is appended.
+
+## Progress events
+
+`TransferSession` is the in-process API: `subscribe`, `publish`, `pause`, `resume`, and `cancel`. A `ProgressEvent` carries `ItemProgress` (id, display name, bytes done and total, speed, eta, source, state, apps, reason) and `JobProgress`, grouped by app with `jobs_by_app()`. Item states include `pending`, `downloading`, `paused`, `verified`, `failed`, `cancelled`, `error`, and `unavailable`. A cross-process window polls the status file. `reason` is the unavailable explanation; the existing table shows it in the source column.
+
+## Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Success. `ready` on the result, and in the status file, is what the app checks. |
+| 1 | Usage error. |
+| 2 | The operation failed. A short disk, a digest mismatch, and a network failure use this code. A short disk sends no request. |
+| 3 | Cancelled. |
+
+## How an app checks ready
+
+The status file is `<home>/state/mdl-status.json`. `<home>` is `VOXPRINT_HOME`, otherwise `%LOCALAPPDATA%\VOXPrint AI Suite` or `~/.local/share/voxprint-ai-suite`. The file is UTF-8 JSON, schema 1. `ready` is true only when `state` is `ready`. A missing file means idle, which is not ready. A damaged file is an error, not a success.
+
+```python
+from voxprint_common.mdl import ready
+
+if ready():
+    open_main_window()
+```
+
+`status --json` prints the same snapshot for an installer that would rather poll the process output. Do not treat a running download as ready: `state` stays `downloading` until every planned file has been verified.
+
+## Shared store
+
+All suite models live in one content-addressed store under `<models>` (the models directory: `VOXPRINT_MODELS_DIR`, else `suite.json`, else `<home>/models`):
+
+- `blobs/<sha256>` is the single copy of a file's bytes, plus a `blobs/<sha256>.verified` marker. A blob is always a regular file, never a symlink, and a finished blob of the right size with its marker is trusted without re-hashing. Reuse refuses a leftover symlinked blob outright, so `ensure` and the job worker treat it as missing and let an adopt or download replace it with a regular file.
+- `refs/index.json` maps `repo@revision` to `{path: sha256}` for every adopted file. It is informational; blobs stay keyed only by sha256.
+- `views/<app>/<id>-<digest12>/` is the folder an app opens: Canvas rc.28 opens `views/canvas/<id>-<12 hex>/`. The 12 hex digits are the first 12 of the SHA-256 of the sorted `path<TAB>sha256` lines. `.voxprint-view.json` records schema 1, the key, and the files (plus per-file `modes` when a fallback link mode was used).
+- Per-app folders such as `model-forge/` belong to that app alone. They are read-only sources for the store: repair never writes, renames, or deletes anything inside them.
+
+Resolution order for one catalogued file is: a verified blob wins; otherwise a complete copy in another app's folder, in a view, or in a `--from` directory is confirmed by SHA-256 and then adopted into `blobs/`; only what no local copy satisfies is left for a download. Adoption never publishes a blob as a symlink: the order is hard link first, reflink on Btrfs/XFS, then a full byte copy, each published atomically, so a blob stays a regular file even when the adopted source folder is later removed or unplugged. Hard links need no extra disk and no administrator rights on Windows NTFS.
+
+A view whose folder is empty, markerless, or not linked to its blobs is a stub. `verify` reports such a model with state `stub` (exit 2, `ready` false), and `ensure`, `verify --repair`, and `repair-store` rebuild the view from the blobs — a repair with a missing blob drops the folder instead, so a stub is never left behind for an app to trip over. A view is built or kept only from blobs the store accepts as ready — complete, verified, regular files — so a leftover, truncated, unverified, or symlinked blob counts as missing and the repair drops the view rather than materialize bad weights. A view entry may still be a symlink (or reflink, or copy) pointing at its blob, because the blob itself is a durable regular file.
+
+Migration to the shared store is one command, run once per machine after copying an app's models into place. It never downloads, is idempotent, and exits 0 when everything is ready, 2 when a file or view is still missing (so an installer can fall back to `ensure`):
+
+```bash
+voxprint-mdl repair-store [--app canvas] [--from D:\models] [--dry-run] [--json]
+```
+
+`repair-store` adopts complete copies from app folders such as `model-forge` and rebuilds stub views. With no arguments it repairs every installed app — the one-time laptop migration; `--app` restricts it to one installed app. `--from DIR` adds more search roots and `--dry-run` reports `found` / `would-repair` without touching disk. The JSON result carries the full `RepairReport`: per-file states (`store`, `adopted`, `found`, `missing`), per-view before/after states, the counters, and `ready`. `ensure` runs the same adoption before it enqueues, so bytes that are already on disk are adopted instead of downloaded and count as `reused`, and it relinks views after the job.
+
+The refcount rules are unchanged: shared roots — `<home>/shared/` and the blob store — are never refcounted or deleted by repair, and blobs are never deleted at all. Safety models are not special-cased in repair either; they resolve like any other file and the fail-closed gate `shared_safety_gaps()` stays the authority on whether an app may open.
+
+Undoing a migration is safe: delete the `views/<app>/` folders and `refs/index.json`. Blobs that were adopted as hard links cost no extra space, the source folders were never modified, and re-running `ensure` or `repair-store` rebuilds whatever was removed.
+
+### Adoption for apps
+
+Canvas opens `views/canvas/<id>-<digest12>/` as it does today. When a view reports missing — treat a stub as missing — the app calls `voxprint-mdl ensure --app canvas` or `repair_store(only=(model,))` from `voxprint_common.mdl.repair_store`, then loads. Forge and the other apps keep their own folders as they are, or opt in to views by creating `views/<app>/`; they call `ensure` before loading and never write into another app's folder.
+
+## Derived files
+
+Files an app generates from a downloaded model (Enlarge's `<id>.onnx`, Clarity's
+TensorRT engine caches, and similar post-install output) live in the MDL store
+under an app-owned folder:
+
+`paths.derived_dir(app, model_id, source_sha)` →
+`<store>/derived/<app>/<model-id>/<source-sha12>/`.
+
+The helper does not create the directory. These files are never stored as
+shared blobs and are never visible to another app. They can always be
+regenerated. Removing the app or the model should remove this folder. GPU-specific
+engine caches go in a `trt-<sm>-<trtver>` subfolder of that directory.
+
+A model shows **Installed** once its downloaded files are present and verified.
+If the derived output is missing, the manage page shows **Installed, needs
+preparing** as an info note (not Needs repair). The app builds the derived
+files on first use. **Needs repair** means only a missing or broken downloaded
+file, or a stub/partial view.
+
+## App registration
+
+Every installer records the app in `<home>/state/installed-apps.json` through
+`voxprint_common.mdl.catalog.register_app` (and `unregister_app` on uninstall).
+The write is idempotent. The first call also records other apps already found
+in the default install folders, and `discover()` still scans those folders, so
+one `ensure` cannot hide an unregistered install. `voxprint-mdl register --app … --path …` and
+`voxprint-mdl unregister --app …` wrap the same API. `ensure` registers the app
+before it enqueues work, so MDL cannot miss an install the way it missed Forge
+when a descriptor lived outside the default scan.
+
+## Download all models
+
+`models_for_download_all(manifest)` returns every model the app can install,
+including optional and on-demand rows. Unavailable rows and dropped ids such as
+MOSS are omitted. Installers call `enqueue_download_all(app, manifest)` or:
+
+```bash
+voxprint-mdl enqueue --app canvas --manifest /opt/voxprint-ai-suite/canvas/mdl.json --all
+voxprint-mdl download --app canvas --manifest /opt/voxprint-ai-suite/canvas/mdl.json --all --gui
+voxprint-mdl ensure --manifest /opt/voxprint-ai-suite/canvas/mdl.json --all
+```
+
+`--all` cannot be combined with `--model`. The list is built once in common, so
+every installer "Download all models" option queues the same set.
+
+## CLI-to-GUI socket
+
+A running MDL window listens on `<home>/state/<app>/gui.sock` (a named pipe
+`voxprint-mdl-<app>-gui` on Windows). Each request is one JSON object, one
+line, and the reply is one JSON object. A later `open-tab` or `--gui` command uses this channel instead of starting a second window. `enqueue` on the CLI writes the job first, then sends `focus` and `wakeup` so a running window does not queue the same models twice.
+
+Request fields:
+
+* `cmd` (required): `ping`, `show`, `enqueue`, `open-tab`, `manage`, `wakeup`, or `focus`.
+* `app`: suite app id.
+* `models`: list of model ids (for `enqueue` / `show`).
+* `manifest` / `manifests`: app descriptor paths.
+* `tab`: `this_app` or `shared`, used by `open-tab` and by `manage`.
+* `open_cmd`: optional Open-button command.
+
+Replies:
+
+* `{"ok": true}` — and `job` when a job id is known.
+* `{"ok": false, "error": "…"}` — unknown `cmd`, invalid JSON, or a handler error.
+
+```bash
+voxprint-mdl open-tab --app canvas --tab shared
+```
+
+If no window is listening, `open-tab` opens the manage window on that tab.
+
+
+## Live progress and retries
+
+The download window shows bytes done/total, percent, a labelled smoothed
+**Speed: 12.3 MB/s** figure next to time left, per file and overall. Before
+bytes move, a **Preparing…** stage reports planning, hash checks (`n/N` files),
+and resuming parts. A busy indicator stays visible so the window is not
+mistaken for frozen. Read timeouts, connection resets, and incomplete reads
+auto-retry from the partial, up to five times, with exponential backoff
+(2–60 s plus jitter). The window shows **Retrying (n/5)…** before a job is
+marked as needing attention. Disk errors such as no space or permission
+denied are not retried. A planning failure is written as a failed status, not
+left on Preparing…. Segmented downloads record the part count in a `layout`
+file under `.partial.parts` so a resume keeps the same Range split when
+trailing parts were never started. `clean-partials` keeps `.partial` files
+named by a queued, running, failed, or cancelled job, not only by the current
+status steps.
+
+## mdl.json
+
+Schema 1. One file per app, named `mdl.json`.
+
+```json
+{
+  "schema": 1,
+  "app": "enlarge",
+  "models": [
+    {
+      "id": "realesrgan",
+      "version": "1",
+      "vram_tier": "8gb",
+      "files": [
+        {
+          "path": "realesrgan.onnx",
+          "size": 1234,
+          "sha256": "<64 hex characters>",
+          "mirrors": [
+            {"source": "huggingface", "repo": "org/name", "filename": "realesrgan.onnx"},
+            {"source": "kaggle", "owner": "mitroshenkov87", "dataset": "suite-models", "filename": "realesrgan.onnx"},
+            {"source": "modelscope", "repo": "org/name", "filename": "realesrgan.onnx"},
+            {"source": "gdrive", "id": "0123456789abcdef"}
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+`vram_tier` is `any`, `8gb`, `16gb`, or `24gb`. Several objects may share an `id` and differ by tier. The plan keeps the highest tier that fits the card, so a 24 GB machine does not also pull the 8 GB and 16 GB copies of that id. The 24 GB check is about 23.5 GiB, because cards report a little under the label. An unknown GPU is planned as 8 GB. `any` is used when no larger variant fits.
+
+A model may set `label`, `purpose`, and `group`, optional display strings for the manage page: the row title (`label`, then `display_name`, then the id), a one-line description, and the task group. `group` is `generate`, `edit`, `upscale`, `restore`, `voice`, `transcribe`, `translate`, `writer`, `safety`, or `internal`; a missing or unknown value sorts into "Other" and never fails the load. The same fields exist on `voxprint-app-models/1` tier entries and `optional[]` entries. See [mdl-fields](mdl-fields.md) for the full spec.
+
+A mirror may also be an `http` or `https` URL string, or `{"source": "url", "url": "https://..."}`. `..` in a file path is rejected.
+
+A model may set `mirror_policy` to `race` or `strict-priority`. A file may set `mirror_policy` and `sources`. `sources` uses the same objects as `mirrors` and replaces them for that file. A model may also set `file_groups`: each group has `paths` and may set `mirror_policy` and `sources`. The file wins, then the group, then the model. A missing policy means `race`. The same fields exist on `voxprint-model/1`.
+
+Files that share a sha256 across apps are stored once, at `<models_dir>/blobs/<sha256>`. Each app is a ref on that runtime-manifest component. The component id is `model-` plus the first 12 hex characters of the file sha256. An older `model-` id that already records that digest is reused. The component version is the full sha256, so a second app reuses the bytes instead of writing over them.
+
+A side virtualenv uses `runtime-py<major><minor>-<stack>-cu<version>`, from `runtime_component_id`. Examples: `runtime-py311-nunchaku-cu130` and `runtime-py314-torch2.11-cu130`.
+
+A model may set `status` to `unavailable` with a `reason` such as `model_in_preparation`. It is shown in the progress list, left out of the byte total, and never downloaded. Asking for that id by name is an error. `voxprint-app-models/1` can list the same fact under `unavailable`.
+
+Hugging Face mirrors need a revision. `main` is accepted when the manifest says it. An empty or missing revision is refused. Downloads are HTTPS and stay on the host allowlist (`huggingface.co`, `hf.co`, `kaggle.com`, `modelscope.cn`, `drive.google.com`, `docs.google.com`, `googleusercontent.com`, `github.com`, `githubusercontent.com`), including redirects. Private, loopback, and link-local addresses are refused, with two exceptions for an allowlisted HTTPS host: an answer in `198.18.0.0/15` (DNS that hands out placeholder addresses for a local tunnel), and any answer when the request goes through a proxy from the environment or the Windows settings, because the proxy opens the connection. TLS verification stays on, so the certificate must match the host name. Plain HTTP to such an address is refused.
+
+Each mirror is reached over a `direct` route (no proxy) or a `system` route (the configured proxy). The probe tries both when a proxy applies, keeps the faster working one for that host, and the transfer moves to the other route after a connection error or stall before the mirror counts as failed. `VOXPRINT_MDL_ROUTE=direct` or `system` forces one route; the default is `auto`.
+
+Tests opt in with `UrlGuard.loopback()` or `VOXPRINT_MDL_TEST_GUARD=loopback`.
+
+An entry whose only URL is a gated upstream (`pyannote/speaker-diarization-community-1`, `pyannote/embedding`) is rejected. The public copies are `Mitroshenkov87/voxprint-pyannote-speaker-diarization-community-1` and `Mitroshenkov87/voxprint-pyannote-embedding`, with the same dataset names under the Kaggle owner `mitroshenkov87`. `public_mirror_urls` builds those URLs and does not read `HF_TOKEN`.
+
+## ONNX models, pre-built artifacts, and post_install
+
+`runtime.engine` may be `onnxruntime` (with `llama.cpp`, `diffusers`, and `nunchaku`). TensorRT is not an engine.
+
+A model, or one file entry, may carry an optional `onnx_prebuilt` artifact (not to be confused with the `prebuilt` list of fallback sets): `path`, `sha256`, `size`, exactly one of `url` or `sources` (the same `mirror_policy` and `sources` rules as model files), and `built_for: {"onnxruntime": "<version spec>", "opset": <int>}`. The app reports the installed onnxruntime with `voxprint_common.mdl.prebuilt.set_onnxruntime_probe(lambda: (onnxruntime.__version__, max_opset))`. When the version does not match the spec, the opset is above what that onnxruntime runs, there is no probe, or the artifact has no `size`, the artifact is stale: it is not downloaded, the warning is logged, `voxprint-mdl --check` prints `stale onnx_prebuilt: ...`, and the source files plus `post_install` are used. A fresh artifact is downloaded beside the source files and the model's own `post_install` is skipped.
+
+`post_install` is `{"cli", "args", "timeout_s"?, "outputs"?}`:
+
+* `cli` is an executable name in the owning app's install folder (`<install>/<cli>` or `<install>/bin/<cli>`, plus `.exe` on Windows). It is never looked up on `PATH`, a path is rejected, and a symlink that leaves the install folder is refused.
+* `args` may use only `{id}`, `{model_dir}`, `{source_path}`, `{prebuilt_path}` (the downloaded `onnx_prebuilt` file, empty when it is stale), and `{cache_dir}`. Any other placeholder is rejected when the manifest is read. The command runs without a shell, with `VOXPRINT_OFFLINE=1` and `HTTP_PROXY`, `HTTPS_PROXY`, and `ALL_PROXY` set to `http://127.0.0.1:9`.
+* `timeout_s` defaults to 600 and is capped at 3600. A timeout kills the whole process tree. Stdout and stderr go to `<home>/state/mdl-hook.log`, keeping the last 64 KB per run.
+* `outputs[].path` is relative to `{model_dir}` (`<models>/<app>/<id>`). An absolute path, `..`, or a path that resolves outside is rejected when the manifest is read and again at run time. An output with `sha256` must match. Outputs count as installed files: ready reports `needs preparing` until they exist, verify re-hashes them, and removing the model deletes them.
+* A failure, a timeout, or a checksum mismatch leaves the model not ready. `--check` prints `not ready: <app>/<id>: <reason>`, and the next install runs the command again.
+
+Enlarge ships the `.pth` weights and a pre-built `.onnx`, and prepares the ONNX itself when the pre-built one is stale:
+
+```json
+{
+  "id": "realesrgan-x4",
+  "files": [{"path": "RealESRGAN_x4plus.pth", "size": 67040989, "sha256": "<sha256>",
+             "mirrors": ["https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth"]}],
+  "onnx_prebuilt": {"path": "RealESRGAN_x4plus.onnx", "sha256": "<sha256>", "size": 67200000,
+               "url": "https://huggingface.co/voxprint/enlarge-models/resolve/main/RealESRGAN_x4plus.onnx",
+               "built_for": {"onnxruntime": ">=1.20,<2", "opset": 17}},
+  "post_install": {"cli": "voxprint-enlarge-cli", "args": ["--prepare-model", "{id}"],
+                   "outputs": [{"path": "RealESRGAN_x4plus.onnx"}]}
+}
+```
+
+Clarity writes an fp16 ONNX into the model folder at install time:
+
+```json
+{
+  "id": "clarity-restore",
+  "files": [{"path": "restore.pth", "size": 123456789, "sha256": "<sha256>",
+             "mirrors": ["https://huggingface.co/voxprint/clarity-models/resolve/main/restore.pth"]}],
+  "post_install": {"cli": "voxprint-clarity-cli",
+                   "args": ["--prepare-model", "{id}", "--out", "{model_dir}"],
+                   "timeout_s": 1200,
+                   "outputs": [{"path": "restore-fp16.onnx"}]}
+}
+```
+
+The older app-manifest form, `{"argv", "timeout_s", "produces"}`, still works and may also use `{models_root}`.
+
+## Model index
+
+The bundled index is the signed serial 14 snapshot (30 models, sha256 `0d1e5ef747ca70b6960b444751fcd1ed5001aaa7bf4b7afd720f4b3df36d58be`, Hugging Face commit `915999691f3ede30669e05f75d81b4d9863c9c98`). Head stays `15edeab0f7a874c27d2b38ef6ecb69106ff94df8`. `moss-image-base` and `moss-image-sft` are omitted. `model-index.pin.json` records the head, serial `14`, `generated_at` `2026-11-15T12:22:48Z`, and the sha256, which the bundled file must match. `model-index.json.sig` is the detached signature Forge published with that snapshot. A remote index may be the object `{head, serial, generated_at, models}` or a plain list.
+
+A model document may list `prebuilt` alternatives. An entry with `role: "fallback"` and `replaces: "transformer/"` (a folder prefix, or one path) swaps those default files for its own `files` when a default file fails after the normal mirror rules, or when `choose_variant(model_id, fallback_id)` picks it. The choice is saved in `<home>/state/mdl-variants.json`.
+
+A `voxprint-app-models/1` manifest names model ids. Download loads each id's `voxprint-model/1` descriptor from the signed index. The index row gives the repository, the revision, and the sha256 of `voxprint-model.json`. That file is fetched with the same guarded request as the index and stored under `<home>/state/mdl-descriptors`. Bytes that do not match the index digest are refused. An index row requires exactly `id`, `repo`, `revision`, and `sha256`; it may also carry `note` (string), `size` (non-negative integer bytes), `license` (SPDX-style string), `default` (bool), and `optional` (bool). Any other key is rejected.
+
+A tier entry is a model id, which keeps every file, or an object with `id` plus `files` and/or `file_groups`. `files` are globs matched against descriptor paths. `file_groups` are `name` values on the descriptor's file groups. The tier keeps the union of those matches. Readiness, verify, and refcounts use that subset. A model listed for the active tier is fetched even when the descriptor sets `on_demand`.
+
+A missing descriptor, a digest that does not match, or a selection that matches no files fails the download. The command does not report `nothing to download` while those models are missing.
+
+A remote `index.json` is used when the detached `index.json.sig` verifies under a public key in `index-public.pem` and the document is at least that pin. `serial`, when present, is the comparison. `generated_at` is used only when `serial` is absent, and it must be a timezone-aware ISO-8601 timestamp. The signed document is an object with `head`, `serial`, `generated_at`, and `models`. A bare list has no freshness and is refused.
+
+A missing signature, a bad signature, a fetch error, or an older index is logged (`using the bundled model index; …`) and the snapshot is used. The download still runs. `voxprint-mdl --check` prints `source`, `head`, `serial`, `generated_at`, `entries`, `sha256`, and `fallback:` with that reason. Exit code 0 means the snapshot is usable.
+
+```bash
+openssl genpkey -algorithm ED25519 -out index-private.pem
+openssl pkey -in index-private.pem -pubout -out index-public.pem
+export VOXPRINT_MDL_INDEX_KEY_FILE=/path/to/index-private.pem
+voxprint-mdl index sign index.json
+voxprint-mdl index verify index.json
+```
+
+`index sign` reads `VOXPRINT_MDL_INDEX_KEY_FILE`, or `VOXPRINT_MDL_INDEX_KEY` (PEM text, raw or base64 seed, or a path to a key file), or `--key-file`. It writes `index.json.sig` beside the file: base64 of the 64-byte signature over the exact file bytes. Publish that file next to `index.json` on the Hugging Face dataset. The private key stays out of this repository.
+
+`index-public.pem` may hold several keys, one PEM block after another. To rotate: add the new public key, ship a release, point CI at the new private key, then ship a later release that drops the old key. A signature that matches none of the bundled keys falls back to the snapshot. The key shipped here has no private half stored in this repo. Model Forge replaces `index-public.pem` with the public key that matches its CI secret before a client will accept a remote index. Until that replacement, every remote index falls back and `--check` says why.
+
+A model whose licence is outside the suite allow-list stays an optional plug-in (`on_demand`) with exactly one source, and that source is the author's. A suite mirror (a Hugging Face ref starting with `mitroshenkov87/`, or the Kaggle owner `mitroshenkov87`) is refused for that model.
+
+A model, or the app, may declare `post_install`:
+
+```json
+{"argv": ["voxprint-enlarge-cli", "--prepare-model", "{id}"], "timeout_s": 1800, "produces": ["model.onnx"]}
+```
+
+The worker runs it after the digest check and the atomic rename. `{id}`, `{model_dir}`, and `{models_root}` are filled in. The executable is resolved from the app install directory (and `bin/`), never from `PATH`. On Windows the process is created with `CREATE_NO_WINDOW`. The hook is skipped when every `produces` path exists and the marker under `<home>/state/mdl-hooks/` records the source sha256. `verify` runs it again when the marker or the digest differs. Failure sets the item to `error` with a short message and exit code 2. Stderr is appended to `mdl-hook.log` and is not shown in the window. The item is ready only after the hook succeeds. Enlarge uses this to turn a downloaded `.pth` into an fp16 ONNX file.
+
+## Disk, resume, and mirrors
+
+Before the first request, free space must cover the bytes still missing times 1.10, plus 2 GiB. Nothing is fetched when that check fails. The error names VOXPrint MDL and both byte counts. Bytes already in a finished file of the expected size are not counted again.
+
+Transfers use HTTP Range and keep the `.partial` file across a dropped connection. A file larger than 256 MiB is split into 4 to 8 ranges when the server answers 206, with a per-host cap and a shared connection budget. Each part resumes from `.partial.parts`. A server that ignores Range falls back to one stream. After the digest matches, the file is renamed into place. A mismatch deletes the partial and tries the next source.
+
+`mirror_policy` is `race` or `strict-priority`. It sits on the model and can be overridden on a file or a `file_groups` entry. `sources` on a file or a group replaces the model `mirrors` for those paths, in the listed order. Our own quantizations list only our mirrors there, so the author is left out of that file.
+
+`race` is the default. Mirrors are probed and a mirror is used when its throughput is at least 1.25 times the current one. Equal speed keeps the earlier mirror. A mirror at or under 84 KiB/s is dropped when another mirror is faster. A mirror that recovers and measures faster is selected again.
+
+`strict-priority` stays on the first source. A later source is used when the current one returns 404, the hash does not match, or the source is unavailable: a connection failure or an HTTP 5xx after that source's own retries. Speed leaves the current source in place. Another 4xx, such as 403, stops the download.
+
+In both policies a 404 skips that source immediately, with no retry and no backoff.
+
+Hugging Face URLs use `hf_xet` when that package is installed, `HF_HUB_DISABLE_XET` is unset, and the response offers an xet hash. Otherwise the transfer stays on HTTP Range. Install the package beside the library when you want it: `python -m pip install hf-xet`.
+
+The job lowers CPU and IO priority on Windows and Linux, and holds a sleep inhibit through `voxprint_common.power.keep_awake` for as long as it runs. `--gui` also asks to keep the display awake.
+
+## Download window
+
+There is one window for the whole queue. Each app is a group with that app's splash motif. Overall progress is the bytes of every queued file, eased so the bar does not jump backwards. An app can show "Open" while another app is still downloading. The Open button is the only thing that launches an app.
+
+Pause and Resume talk to the worker's `TransferSession`. Cancel asks for confirmation and says the download can resume later. Errors are a short "What happened" and "What to do", with Retry, which re-queues that job's models and manifests. The traceback stays behind Details and in the log file.
+
+Manage models lists installed files with size and status, and optional models this GPU tier can run, grouped by task (Generate, Edit & structure, and so on; see [mdl-fields](mdl-fields.md)). The page has two tabs, "This app" and "Shared", and the task groups and VRAM sections apply inside each tab independently; a tab with no rows is hidden, and each visible tab title shows a row count. "This app" holds the models only this app uses. "Shared" holds the models in the shared suite store that the runtime manifest refcounts to more than one app, or that another installed app (found through `catalog.discover()` / `installed-apps.json`) lists under the same share key. The share key is repo+revision of the resolved descriptor or of the Hugging Face / ModelScope mirror on a schema-1 entry — never the model id, which is not unique across apps and may repeat inside one manifest; when repo+revision cannot be read the key falls back to the file sha256 (`model-<sha12>`), so two apps that already share a blob still group together.
+
+A Shared row shows "Used by:" with every installed app that refs the component or lists the same share key, including this app. Remove on a shared row drops only this app's reference; the files are deleted only when the refcount reaches zero, and the row says so. A model that any installed app marks required (not `optional` and not `on_demand`, or `group=safety`) paints no Remove in the Shared tab and the remove path refuses it: the row reads "Required for safety" when any installed app marks it safety, otherwise "Required by <app display name>". The `safety` and `internal` groups keep their rules everywhere: no Remove, refused in logic, collapsed by default.
+
+A missing, corrupt, or hash-mismatched shared safety copy fails closed. The manage row shows Repair (not Download, not Remove) with the status "Required, missing" or "Required, needs repair", and `voxprint_common.mdl.readiness.shared_safety_gaps()` returns the safety models — keyed by share key — whose shared copy is missing, corrupt, or hash-mismatched, so an app can refuse to run the gated action those models guard. `gaps_for` / `disk_ready` are unchanged.
+
+Duplicate model ids inside one `mdl.json` load fine: the manage page lists each entry as its own row, keyed by repo+revision plus tier and label so rows and actions do not collide. A group with both compact and full-size variants folds the half that does not match the card under "Show models for other cards"; the page alone lists models above the card's tier, so they stay addable there. A model whose minimum VRAM is above the card is hidden from `listing()`. Add enqueues that model. Remove drops this app's ref and deletes the file only when no other app still uses it; the `safety` and `internal` groups have no Remove and are refused in logic. Verify re-hashes the plan.
+
+Tier badges paint "8 GB" / "16 GB" / "24 GB" through the catalogs; the internal `ManageRow.badge` values stay `8gb` / `16gb` / `24gb` (and `""` for `any`, which has no badge), so grouping and the tier split never see the display string.
+
+`voxprint-mdl verify --gui` opens the check-and-repair window. The first phase hashes each model. The rows then read OK, missing, or corrupt. `verify --repair` still clears a dangerous manifest path and does not delete files; it then downloads only the missing or corrupt models and leaves the healthy ones in place. `run_verify_repair(model_ids, repair=True)` is the call an app makes. The same window is `run_window(start, mode="verify")`.
+
+![Check phase](renders/mdl-verify-en.png)
+
+![Repair phase](renders/mdl-repair-en.png)
+
+The window reads the queue in `voxprint_common.mdl.queue`. It does not write a second queue file.
+
+![Download queue in English](img/mdl-window/en-queue.png)
+
+![Two apps, Clarity ready while Enlarge is still downloading](img/mdl-window/en-multi.png)
+
+![A disk error with Retry](img/mdl-window/en-error.png)
+
+![Paused](img/mdl-window/en-paused.png)
+
+![All set](img/mdl-window/en-all-set.png)
+
+![Manage models](img/mdl-window/en-manage.png)
+
+![A long German error on a 720-wide window](img/mdl-window/de-error.png)
+
+![A long Latvian queue on a 720-wide window](img/mdl-window/lv-queue.png)
+
+## Safety
+
+`ready(app)` plans the detected tier and checks each required file. A missing file is `needs download`. A short file is `needs repair`. Runtime components such as `runtime-py314-torch2.11-cu130` use the size list stored on the component. The status file is not enough: a half-wiped store is not ready, and `download --app` fetches the missing files.
+
+A component path that is the suite home, the models root, the shared runtime, voices, cache, projects, or state — or that contains one of those, or overlaps another component — is rejected. `release_component` deletes a directory only when it is a single model folder directly under the models root and neither the shared manifest nor `models/.users.json` still names a user. `verify --repair` clears a dangerous path in the manifest and does not delete the files. It then downloads models that are missing or corrupt. Writes to the manifest and to `.users.json` re-read under the lock and keep unknown keys.
+
+## Languages
+
+`voxprint_common.i18n` loads one JSON file per language from `ui/locales/`, beside `tokens.json`. English is the source and the fallback. The package ships `en`, `de`, `uk`, and `lv`. The active language is the `ui_language` key when that key is present in `suite.json`, then `VOXPRINT_LANG`, then the system UI locale, then English. `add_catalogs` lets an app point at its own `locales` directory. Later folders override the same key.
+
+The shipped Russian catalog was removed (English-only source UI), not the machinery: `normalize_code("ru-RU")` is still `ru`, Russian plural forms still work, and an app can ship its own `ru.json` through `add_catalogs`. Input-side Cyrillic detection in the safety checks is unchanged.
+
+Apps check their own UI in CI:
+
+```yaml
+- name: UI strings
+  run: python -m voxprint_common.i18n.check --src src/<pkg> --locales src/<pkg>/locales --langs en,de,uk,lv
+```
+
+The checker fails on a hard-coded user-facing string in a Qt call, a key missing from a shipped locale, or a `{placeholder}` sequence that differs between languages. An unused key is a warning. `# i18n: ignore` skips one call. Splash titles use `splash.app.<id>` and keep the same brand spelling in every language.

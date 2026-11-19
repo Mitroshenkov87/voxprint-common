@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1E1E26"/>
+      <stop offset="1" stop-color="#2A2A33"/>
+    </linearGradient>
+  </defs>
+  <rect x="41" y="41" width="942" height="942" rx="170" ry="170" fill="url(#tile)"/>
+  <g fill="none" stroke="#D89A3A" stroke-width="24" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M512,210 Q373,239 253,316"/>
+    <path d="M512,210 Q651,239 771,316"/>
+    <path d="M253,316 Q512,286 771,316"/>
+    <path d="M253,316 Q227,387 229,463"/>
+    <path d="M771,316 Q797,387 795,463"/>
+    <path d="M229,463 Q228,538 255,609"/>
+    <path d="M795,463 Q796,538 769,609"/>
+    <path d="M253,316 Q384,331 512,361"/>
+    <path d="M771,316 Q640,331 512,361"/>
+    <path d="M253,316 Q375,424 512,513"/>
+    <path d="M771,316 Q649,424 512,513"/>
+    <path d="M229,463 Q366,401 512,361"/>
+    <path d="M795,463 Q658,401 512,361"/>
+    <path d="M229,463 Q369,498 512,513"/>
+    <path d="M795,463 Q655,498 512,513"/>
+    <path d="M255,609 Q388,574 512,513"/>
+    <path d="M769,609 Q636,574 512,513"/>
+    <path d="M255,609 Q322,688 485,736"/>
+    <path d="M769,609 Q702,688 538,736"/>
+    <path d="M255,609 Q400,670 485,718"/>
+    <path d="M769,609 Q624,670 538,718"/>
+  </g>
+  <g fill="#D89A3A">
+    <circle cx="512" cy="210" r="50"/>
+    <circle cx="253" cy="316" r="50"/>
+    <circle cx="771" cy="316" r="50"/>
+    <circle cx="512" cy="361" r="50"/>
+    <circle cx="229" cy="463" r="50"/>
+    <circle cx="795" cy="463" r="50"/>
+    <circle cx="512" cy="513" r="50"/>
+    <circle cx="255" cy="609" r="50"/>
+    <circle cx="769" cy="609" r="50"/>
+    <path d="M485,618 H538 V764 H586 L512,854 L438,764 H485 Z"/>
+  </g>
+</svg>

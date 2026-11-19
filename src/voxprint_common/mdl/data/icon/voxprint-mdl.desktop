@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=VOXPrint MDL
+Comment=Download and manage VOXPrint AI models
+Exec=voxprint-mdl-gui
+Icon=voxprint-mdl
+Terminal=false
+Categories=Utility;Qt;
+StartupWMClass=voxprint-mdl

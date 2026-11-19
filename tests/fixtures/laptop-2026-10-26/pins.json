@@ -1,0 +1,240 @@
+{
+  "source": "laptop-model-tree-2026-10-26",
+  "models": [
+    {
+      "id": "z-image-turbo-bf16-16gb",
+      "version": "f332072aa78be7aecdf3ee76d5c247082da564a6",
+      "vram_tier": "16gb",
+      "optional": false,
+      "legacy": "Tongyi-MAI--Z-Image-Turbo",
+      "files": [
+        {
+          "path": "model_index.json",
+          "size": 467,
+          "sha256": "18a90e1bc117a29a8b7961bb200c86ff0b9704609e87c7171511dc724fcdc9d3",
+          "in_legacy": false,
+          "blob_in_snapshot": true
+        },
+        {
+          "path": "scheduler/scheduler_config.json",
+          "size": 173,
+          "sha256": "3b979ab0956e4f5e8d02ec409ac6a4ece1555191d15bd10788fdc85fea5d13fc",
+          "in_legacy": false,
+          "blob_in_snapshot": true
+        },
+        {
+          "path": "text_encoder/config.json",
+          "size": 726,
+          "sha256": "8ba006f74fecfaaeb392872a60f4a480e7ec9860153d2e1b769ec81f9a147f8a",
+          "in_legacy": true,
+          "blob_in_snapshot": true
+        },
+        {
+          "path": "text_encoder/generation_config.json",
+          "size": 239,
+          "sha256": "2325da0f15bb848e018c5ae071b7943332e9f871d6b60e2ed22ca97d4cb993d2",
+          "in_legacy": true,
+          "blob_in_snapshot": true
+        },
+        {
+          "path": "text_encoder/model-00001-of-00003.safetensors",
+          "size": 3957900840,
+          "sha256": "328a91d3122359d5547f9d79521205bc0a46e1f79a792dfe650e99fc2d651223",
+          "in_legacy": true,
+          "blob_in_snapshot": true
+        },
+        {
+          "path": "text_encoder/model-00002-of-00003.safetensors",
+          "size": 3987450520,
+          "sha256": "6cd087b316306a68c562436b5492edbcf6e16c6dba3a1308279caa5a58e21ca5",
+          "in_legacy": true,
+          "blob_in_snapshot": true
+        },
+        {
+          "path": "text_encoder/model-00003-of-00003.safetensors",
+          "size": 99630640,
+          "sha256": "7ca841ee75b9c61267c0c6148fd8d096d3d21b6d3e161256a9b878154f91fc52",
+          "in_legacy": true,
+          "blob_in_snapshot": true
+        },
+        {
+          "path": "text_encoder/model.safetensors.index.json",
+          "size": 32819,
+          "sha256": "6dc0981b8829fead746441f68f38f24c5ca4a3a66351f652c26c6df0efc43ab2",
+          "in_legacy": true,
+          "blob_in_snapshot": true
+        },
+        {
+          "path": "tokenizer/merges.txt",
+          "size": 1671853,
+          "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+          "in_legacy": true,
+          "blob_in_snapshot": true
+        },
+        {
+          "path": "tokenizer/tokenizer.json",
+          "size": 11422654,
+          "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+          "in_legacy": true,
+          "blob_in_snapshot": true
+        },
+        {
+          "path": "tokenizer/tokenizer_config.json",
+          "size": 9732,
+          "sha256": "d5d09f07b48c3086c508b30d1c9114bd1189145b74e982a265350c923acd8101",
+          "in_legacy": true,
+          "blob_in_snapshot": true
+        },
+        {
+          "path": "tokenizer/vocab.json",
+          "size": 2776833,
+          "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+          "in_legacy": true,
+          "blob_in_snapshot": true
+        },
+        {
+          "path": "transformer/config.json",
+          "size": 473,
+          "sha256": "06d49d1ae533f825c4704cc616fc8bc7826e9d449dde292cc7a95163c69af24a",
+          "in_legacy": false,
+          "blob_in_snapshot": true
+        },
+        {
+          "path": "transformer/diffusion_pytorch_model-00001-of-00003.safetensors",
+          "size": 4994754240,
+          "sha256": "d38279715f7d31232fd14602dec2810f91bf2b4ec2d2960ff9501d3d939f7357",
+          "in_legacy": false,
+          "blob_in_snapshot": true
+        },
+        {
+          "path": "transformer/diffusion_pytorch_model-00002-of-00003.safetensors",
+          "size": 4986883624,
+          "sha256": "880479ddfe46e2dda2b289d7f90d0d9e1f2a5db91efa0cec407fc5ef72cfa531",
+          "in_legacy": false,
+          "blob_in_snapshot": true
+        },
+        {
+          "path": "transformer/diffusion_pytorch_model-00003-of-00003.safetensors",
+          "size": 2328235888,
+          "sha256": "47da630f1e9cba51bf2726aed068916904b2627f4994776a332e7635369f10a1",
+          "in_legacy": false,
+          "blob_in_snapshot": true
+        },
+        {
+          "path": "transformer/diffusion_pytorch_model.safetensors.index.json",
+          "size": 45821,
+          "sha256": "1ae53cb8899b503c9443391868b9f0f55fda7d38d8f7a7f4caaba28305ff7fb7",
+          "in_legacy": false,
+          "blob_in_snapshot": true
+        },
+        {
+          "path": "vae/config.json",
+          "size": 805,
+          "sha256": "e80af1e64a71883a9d10c3159d2e493e5934508da57852f6a180ae6ae63b14bd",
+          "in_legacy": false,
+          "blob_in_snapshot": true
+        },
+        {
+          "path": "vae/diffusion_pytorch_model.safetensors",
+          "size": 167666902,
+          "sha256": "f5b59a26851551b67ae1fe58d32e76486e1e812def4696a4bea97f16604d40a3",
+          "in_legacy": false,
+          "blob_in_snapshot": true
+        }
+      ]
+    },
+    {
+      "id": "qwen3-4b-writer",
+      "version": "c9bd464550d4078c72af0dd22aa18d0437868ce3",
+      "vram_tier": "any",
+      "optional": true,
+      "legacy": "huihui-ai--Huihui-Qwen3-4B-Instruct-2507-abliterated",
+      "files": [
+        {
+          "path": "added_tokens.json",
+          "size": 735,
+          "sha256": "79f6ec6fcc423d3a82bfac8b9033b1daac7b7bce06a5f5f441637b480cc605de",
+          "in_legacy": true,
+          "blob_in_snapshot": false
+        },
+        {
+          "path": "chat_template.jinja",
+          "size": 4125,
+          "sha256": "65adea29f923a4eda2dad1f080cd6ac9458dea65bd581f9fc086e3e7d556d4db",
+          "in_legacy": true,
+          "blob_in_snapshot": false
+        },
+        {
+          "path": "config.json",
+          "size": 1616,
+          "sha256": "5443f8ef61f1602830e997f577dc333179cf28240135f13438e750f4fb2fc839",
+          "in_legacy": true,
+          "blob_in_snapshot": false
+        },
+        {
+          "path": "generation_config.json",
+          "size": 231,
+          "sha256": "f88ce669f055db035352d6f4d029e64a51392d7e816f837f106998ed28030c43",
+          "in_legacy": true,
+          "blob_in_snapshot": false
+        },
+        {
+          "path": "merges.txt",
+          "size": 1671853,
+          "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+          "in_legacy": true,
+          "blob_in_snapshot": true
+        },
+        {
+          "path": "model-00001-of-00002.safetensors",
+          "size": 4967215360,
+          "sha256": "c6bbaf4d73c46bd9c4ef1a32cd65e6524fe9e71aa28ca63865c1eb6a7ad51a98",
+          "in_legacy": true,
+          "blob_in_snapshot": false
+        },
+        {
+          "path": "model-00002-of-00002.safetensors",
+          "size": 3077766632,
+          "sha256": "b248ed21539e354dedbab9d73f06b0b2f633396664121fd0b3e1c17bc560840f",
+          "in_legacy": true,
+          "blob_in_snapshot": false
+        },
+        {
+          "path": "model.safetensors.index.json",
+          "size": 33261,
+          "sha256": "9b7c1c8de866a007d7aeed14befcc84114f26f8c317e77a66b3c58c41359f85d",
+          "in_legacy": true,
+          "blob_in_snapshot": false
+        },
+        {
+          "path": "special_tokens_map.json",
+          "size": 644,
+          "sha256": "57255613bbe23c9497211ca68561ff429a51e871dbaf5a59998fa4c8f7fe168a",
+          "in_legacy": true,
+          "blob_in_snapshot": false
+        },
+        {
+          "path": "tokenizer.json",
+          "size": 11422654,
+          "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+          "in_legacy": true,
+          "blob_in_snapshot": true
+        },
+        {
+          "path": "tokenizer_config.json",
+          "size": 5643,
+          "sha256": "3b17b67dd43b8b9eeb75798501c0be6a52d034ef241cd138c2ae06810bf314cd",
+          "in_legacy": true,
+          "blob_in_snapshot": false
+        },
+        {
+          "path": "vocab.json",
+          "size": 2776833,
+          "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+          "in_legacy": true,
+          "blob_in_snapshot": true
+        }
+      ]
+    }
+  ]
+}

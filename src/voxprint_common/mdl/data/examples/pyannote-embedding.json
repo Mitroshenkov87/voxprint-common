@@ -1,0 +1,52 @@
+{
+  "schema": "voxprint-model/1",
+  "app_ids": [
+    "audiobook-builder"
+  ],
+  "task": "speaker-embedding",
+  "flags": [],
+  "on_demand": false,
+  "base_model": "",
+  "runtime": {
+    "engine": "diffusers",
+    "version_req": ">=0.30"
+  },
+  "build": {
+    "forge_version": "0.1.0",
+    "tag": "",
+    "date": "2026-10-11"
+  },
+  "id": "pyannote-embedding",
+  "display_name": "Pyannote embedding",
+  "license": "mit",
+  "card_url": "https://huggingface.co/Mitroshenkov87/voxprint-pyannote-embedding",
+  "tier": {
+    "min_vram_gib": 8,
+    "recommended_vram_gib": 8,
+    "gpu_min_cc": 6.0
+  },
+  "files": [
+    {
+      "path": "config.yaml",
+      "size": 1996,
+      "sha256": "ca62ad63622a8e983ad5254a32a354b9dc69673485424d67f979c75bfffae38a"
+    },
+    {
+      "path": "pytorch_model.bin",
+      "size": 96383626,
+      "sha256": "4bcec986de13da7af7ac88736572692359950df63669989c4f78b294934c9089"
+    }
+  ],
+  "mirrors": [
+    {
+      "kind": "hf",
+      "ref": "Mitroshenkov87/voxprint-pyannote-embedding",
+      "revision": "4655ca65"
+    },
+    {
+      "kind": "kaggle",
+      "ref": "mitroshenkov87/voxprint-pyannote-embedding",
+      "revision": "4655ca65"
+    }
+  ]
+}
